@@ -48,13 +48,14 @@ namespace AzFramework
             
             // load object from stream but note here that we do not allow any errors to occur since this is a message that is supposed
             // to be sent between matching server/client versions.
-            return AZ::Utils::LoadObjectFromStreamInPlace<Message>(byteStream, message, nullptr, AZ::ObjectStream::FilterDescriptor(AZ::ObjectStream::AssetFilterNoAssetLoading, AZ::ObjectStream::FILTERFLAG_STRICT));
+            return AZ::Utils::LoadObjectFromStreamInPlace<Message>(byteStream, message, nullptr, AZ::ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading, AZ::ObjectStream::FILTERFLAG_STRICT));
         }
 
         class BaseAssetProcessorMessage
         {
         public:
             AZ_RTTI(BaseAssetProcessorMessage, "{366A7093-C57B-4514-A1BD-A6437AEF2098}");
+            explicit BaseAssetProcessorMessage(bool requireFencing = false);
             virtual ~BaseAssetProcessorMessage() {}
             //! The id of the message type, an unsigned int which can be used to identify which message it is.
             virtual unsigned int GetMessageType() const = 0;
@@ -62,7 +63,9 @@ namespace AzFramework
             //! Some asset messages might require that the requests be evaluated by the asset processor only after the OS has send it a file notification regarding that asset,
             //! Otherwise there could be a race condition and the asset request could be processed before the asset processor gets the file notification.To prevent this we create a fence file 
             //! and only evaluate the request after the asset processor picks up that fence file.We call this fencing.
-            virtual bool RequireFencing(); // override this and return true only if the request requires fencing.
+            bool RequireFencing() const;
+        private:
+            bool m_requireFencing = false;
         };
 
         //////////////////////////////////////////////////////////////////////////
@@ -78,7 +81,7 @@ namespace AzFramework
 
             NegotiationMessage() = default;
             unsigned int GetMessageType() const override;
-            int m_apiVersion = 3; // Changing the value will cause negotiation to fail between incompatible versions
+            int m_apiVersion = 7; // Changing the value will cause negotiation to fail between incompatible versions
             AZ::OSString m_identifier;
             typedef AZStd::unordered_map<unsigned int, AZ::OSString> NegotiationInfoMap;
             NegotiationInfoMap m_negotiationInfoMap;
@@ -122,12 +125,10 @@ namespace AzFramework
             AZ_RTTI(RequestAssetStatus, "{0CBE6A7C-9D19-4D41-B29C-A52476BB337A}", BaseAssetProcessorMessage);
             static void Reflect(AZ::ReflectContext* context);
             static unsigned int MessageType();
-
-            RequestAssetStatus() = default;
-            RequestAssetStatus(const char* sourceData, bool isStatusRequest);
+            explicit RequestAssetStatus(bool requireFencing = true);
+            RequestAssetStatus(const char* sourceData, bool isStatusRequest, bool requireFencing = true);
             unsigned int GetMessageType() const override;
             
-            bool RequireFencing() override;
             AZ::OSString m_searchTerm; // the name of an asset
             bool m_isStatusRequest = false; // if this is true, it will only query status.  if false it will actually compile it.
         };
@@ -295,6 +296,50 @@ namespace AzFramework
 
         //////////////////////////////////////////////////////////////////////////
 
+        class AssetInfoRequest
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(AssetInfoRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(AssetInfoRequest, "{AB1468DB-99B5-4666-A619-4D3F746805A5}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+            static unsigned int MessageType();
+
+            AssetInfoRequest() = default;
+
+            /**
+            * Gets information about an asset, given the assetId.
+            */
+            explicit AssetInfoRequest(const AZ::Data::AssetId& assetId);
+
+            //! You can also make a request with the relative or absolute path to the asset instead.
+            explicit AssetInfoRequest(const char* assetPath);
+
+            unsigned int GetMessageType() const override;
+
+            AZ::OSString m_assetPath; ///< At least one of AssetPath or AssetId must be non-empty.
+            AZ::Data::AssetId m_assetId;
+        };
+
+        class AssetInfoResponse
+            : public AzFramework::AssetSystem::BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(AssetInfoResponse, AZ::OSAllocator, 0);
+            AZ_RTTI(AssetInfoResponse, "{B217A11F-430A-40EA-AF4A-4644F5879695}", AzFramework::AssetSystem::BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+
+            AssetInfoResponse() = default;
+            AssetInfoResponse(const AZ::Data::AssetInfo& assetInfo);
+
+            unsigned int GetMessageType() const override;
+
+            bool m_found = false;
+            AZ::Data::AssetInfo m_assetInfo; ///< This contains defaults such as relative path from watched folder, size, Uuid.
+        };
+
+        //////////////////////////////////////////////////////////////////////////
+
         class RegisterSourceAssetRequest
             : public AzFramework::AssetSystem::BaseAssetProcessorMessage
         {
@@ -333,8 +378,7 @@ namespace AzFramework
         };
 
         //////////////////////////////////////////////////////////////////////////
-        //Show
-        // I don't know if this should really be here
+        //ShowAssetProcessorRequest
         class ShowAssetProcessorRequest
             : public BaseAssetProcessorMessage
         {
@@ -349,6 +393,23 @@ namespace AzFramework
         };
 
         //////////////////////////////////////////////////////////////////////////
+        //ShowAssetInAssetProcessorRequest
+        class ShowAssetInAssetProcessorRequest
+            : public BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(ShowAssetInAssetProcessorRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(ShowAssetInAssetProcessorRequest, "{04A068A0-58D7-4404-ABAD-AED72287FFE8}", BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+            static unsigned int MessageType();
+
+            ShowAssetInAssetProcessorRequest() = default;
+            unsigned int GetMessageType() const override;
+
+            AZ::OSString m_assetPath;
+        };
+
+        //////////////////////////////////////////////////////////////////////////
         // AssetNotificationMessage
         class AssetNotificationMessage
             : public BaseAssetProcessorMessage
@@ -356,12 +417,15 @@ namespace AzFramework
         public:
             enum NotificationType : unsigned int
             {
-                AssetChanged,
-                AssetRemoved,
-                JobStarted,
-                JobCompleted,
-                JobFailed,
-                JobCount,
+                AssetChanged, //< Indicates an asset (product) has been changed.
+                AssetRemoved, //< Indicates an asset (product) is no longer available.
+                JobFileClaimed, //< Indicates the Asset Processor is claiming full ownership of a file as it's about
+                                //< to update it, which can mean creating, overwriting or deleting it.
+                JobFileReleased, //< Indicates the Asset Processor releases the claim it previous requested with JobFileClaim
+                JobStarted, //< Indicates processing of a source file has started.
+                JobCompleted, //< Indicates processing of a source file has completed.
+                JobFailed, //< Indicates processing of a source file has failed.
+                JobCount, //< Returns the number of jobs that are pending. The count will be returned as a string.
             };
 
             AZ_CLASS_ALLOCATOR(AssetNotificationMessage, AZ::OSAllocator, 0);
@@ -833,7 +897,7 @@ namespace AzFramework
         {
         public:
             AZ_CLASS_ALLOCATOR(PathDestroyResponse, AZ::OSAllocator, 0);
-            AZ_RTTI(PathDestroyRequest, "{850AEAB7-E3AD-4BD4-A08E-78A4E3A62D73}", BaseAssetProcessorMessage);
+            AZ_RTTI(PathDestroyResponse, "{850AEAB7-E3AD-4BD4-A08E-78A4E3A62D73}", BaseAssetProcessorMessage);
             static void Reflect(AZ::ReflectContext* context);
 
             PathDestroyResponse() = default;
@@ -864,7 +928,7 @@ namespace AzFramework
         {
         public:
             AZ_CLASS_ALLOCATOR(FileRemoveResponse, AZ::OSAllocator, 0);
-            AZ_RTTI(FileRemoveRequest, "{1B81110E-7004-462A-98EB-12C3D73477BB}", BaseAssetProcessorMessage);
+            AZ_RTTI(FileRemoveResponse, "{1B81110E-7004-462A-98EB-12C3D73477BB}", BaseAssetProcessorMessage);
             static void Reflect(AZ::ReflectContext* context);
 
             FileRemoveResponse() = default;
@@ -942,8 +1006,8 @@ namespace AzFramework
             : public BaseAssetProcessorMessage
         {
         public:
-            AZ_CLASS_ALLOCATOR(FileRenameRequest, AZ::OSAllocator, 0);
-            AZ_RTTI(FileRenameRequest, "{66355EF6-B91F-4E2E-B50A-F59F6E46712D}", BaseAssetProcessorMessage);
+            AZ_CLASS_ALLOCATOR(FindFilesRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(FindFilesRequest, "{66355EF6-B91F-4E2E-B50A-F59F6E46712D}", BaseAssetProcessorMessage);
             static void Reflect(AZ::ReflectContext* context);
             static unsigned int MessageType();
 
@@ -961,8 +1025,8 @@ namespace AzFramework
         public:
             typedef AZStd::vector<AZ::OSString, AZ::OSStdAllocator> FileList;
 
-            AZ_CLASS_ALLOCATOR(FileRenameRequest, AZ::OSAllocator, 0);
-            AZ_RTTI(FileRenameRequest, "{422C7AD1-CEA7-4E1C-B098-687B2A68116F}", BaseAssetProcessorMessage);
+            AZ_CLASS_ALLOCATOR(FindFilesResponse, AZ::OSAllocator, 0);
+            AZ_RTTI(FindFilesResponse, "{422C7AD1-CEA7-4E1C-B098-687B2A68116F}", BaseAssetProcessorMessage);
             static void Reflect(AZ::ReflectContext* context);
 
             FindFilesResponse() = default;
@@ -972,5 +1036,42 @@ namespace AzFramework
             AZ::u32 m_resultCode;
             FileList m_files;
         };
+
+        class FileTreeRequest
+            : public BaseAssetProcessorMessage
+        {
+        public:
+            AZ_CLASS_ALLOCATOR(FileTreeRequest, AZ::OSAllocator, 0);
+            AZ_RTTI(FileTreeRequest, "{6838CC3C-2CF1-443C-BFBF-A530003B6A71}", BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+            static unsigned int MessageType();
+
+            FileTreeRequest() = default;
+            unsigned int GetMessageType() const override;
+        };
+
+        class FileTreeResponse
+            : public BaseAssetProcessorMessage
+        {
+        public:
+            typedef AZStd::vector<AZ::OSString, AZ::OSStdAllocator> FileList;
+            typedef AZStd::vector<AZ::OSString, AZ::OSStdAllocator> FolderList;
+
+            AZ_CLASS_ALLOCATOR(FileTreeResponse, AZ::OSAllocator, 0);
+            AZ_RTTI(FileTreeResponse, "{0F7854DA-63FA-4D59-B298-53D84150DFF9}", BaseAssetProcessorMessage);
+            static void Reflect(AZ::ReflectContext* context);
+
+            FileTreeResponse() = default;
+            FileTreeResponse(AZ::u32 resultCode
+                , const FileList& files = FileList()
+                , const FolderList& folders = FolderList());
+            unsigned int GetMessageType() const override;
+
+            AZ::u32 m_resultCode;
+            FileList m_fileList;
+            FolderList m_folderList;
+        };
+
+
     } // namespace AssetSystem
 } // namespace AzFramework

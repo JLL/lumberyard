@@ -12,10 +12,15 @@
 
 #pragma once
 
-#include "EMotionFXConfig.h"
-#include <AzCore/Math/Uuid.h>
-#include <AzCore/std/containers/vector.h>
+#include <AzCore/RTTI/TypeInfo.h>
+#include <AzCore/std/containers/unordered_set.h>
+#include <EMotionFX/Source/EMotionFXConfig.h>
+#include <MCore/Source/StaticAllocator.h>
 
+namespace AZ
+{
+    class ReflectContext;
+}
 
 namespace EMotionFX
 {
@@ -29,36 +34,23 @@ namespace EMotionFX
      */
     class EMFX_API AnimGraphObjectFactory
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphObjectFactory, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTS);
-
     public:
+        AZ_CLASS_ALLOCATOR_DECL
+
+        using UITypesSet = AZStd::unordered_set<AZ::TypeId, AZStd::hash<AZ::TypeId>, AZStd::equal_to<AZ::TypeId>, MCore::StaticAllocator>;
+
         AnimGraphObjectFactory();
         ~AnimGraphObjectFactory();
 
-        void Init();
+        static void ReflectTypes(AZ::ReflectContext* context);
 
-        AnimGraphObject* CreateObjectByTypeID(AnimGraph* animGraph, uint32 typeID);
-        AnimGraphObject* CreateObjectByTypeString(AnimGraph* animGraph, const char* typeNameString);
-        AnimGraphObject* CreateObject(AnimGraph* animGraph, AnimGraphObject* registeredNode);
+        static UITypesSet& GetUITypes();
 
-        bool RegisterObjectType(AnimGraphObject* object);
-        void UnregisterAllObjects();
-        bool UnregisterObjectByTypeID(uint32 typeID);
-        bool UnregisterObjectByTypeString(const char* typeNameString);
-        bool CheckIfHasRegisteredObjectByTypeID(uint32 typeID) const;
-        bool CheckIfHasRegisteredObjectByTypeString(const char* typeNameString) const;
-        bool CheckIfHasRegisteredObject(AnimGraphObject* node) const;
-        uint32 FindRegisteredObjectByTypeID(uint32 typeID) const;
-        uint32 FindRegisteredObjectByTypeString(const char* typeString) const;
-        uint32 FindRegisteredObject(AnimGraphObject* registeredObject) const;
-        AZ::Uuid FindObjectTypeByTypeString(const char* typeNameString);
+        const AZStd::vector<AnimGraphObject*>& GetUiObjectPrototypes() const { return m_animGraphObjectPrototypes; }
 
-        MCORE_INLINE size_t GetNumRegisteredObjects() const                        { return mRegisteredObjects.size(); }
-        MCORE_INLINE AnimGraphObject* GetRegisteredObject(size_t index)            { return mRegisteredObjects[index]; }
-
-        void Log();
+        static AnimGraphObject* Create(const AZ::TypeId& type, AnimGraph* animGraph = nullptr);
 
     private:
-        AZStd::vector<AnimGraphObject*> mRegisteredObjects;
+        AZStd::vector<AnimGraphObject*> m_animGraphObjectPrototypes;
     };
 }   // namespace EMotionFX

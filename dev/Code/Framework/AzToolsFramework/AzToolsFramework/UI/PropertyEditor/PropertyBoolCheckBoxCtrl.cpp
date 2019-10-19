@@ -13,7 +13,9 @@
 #include "PropertyBoolCheckBoxCtrl.hxx"
 #include "PropertyQTConstants.h"
 #include <QtWidgets/QCheckBox>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 
 //just a test to see how it would work to pop a dialog
 
@@ -79,13 +81,25 @@ namespace AzToolsFramework
         // There's only one QT widget on this property.
     }
 
+    void PropertyBoolCheckBoxCtrl::SetCheckBoxToolTip(const char* description)
+    {
+        m_pCheckBox->setToolTip(QString::fromUtf8(description));
+    }
+
     template<class ValueType>
     void PropertyCheckBoxHandlerCommon<ValueType>::ConsumeAttribute(PropertyBoolCheckBoxCtrl* GUI, AZ::u32 attrib, PropertyAttributeReader* attrValue, const char* debugName)
     {
-        Q_UNUSED(GUI);
-        Q_UNUSED(attrib);
-        Q_UNUSED(attrValue);
         Q_UNUSED(debugName);
+
+        if (attrib == AZ::Edit::Attributes::CheckboxTooltip)
+        {
+            AZStd::string tooltip;
+            attrValue->Read<AZStd::string>(tooltip);
+            if (!tooltip.empty())
+            {
+                GUI->SetCheckBoxToolTip(tooltip.c_str());
+            }
+        }
     }
 
     QWidget* BoolPropertyCheckBoxHandler::CreateGUI(QWidget* pParent)
@@ -94,6 +108,7 @@ namespace AzToolsFramework
         connect(newCtrl, &PropertyBoolCheckBoxCtrl::valueChanged, this, [newCtrl]()
             {
                 EBUS_EVENT(PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
+                AzToolsFramework::PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::Bus::Handler::OnEditingFinished, newCtrl);
             });
         return newCtrl;
     }

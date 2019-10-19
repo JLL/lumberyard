@@ -275,7 +275,7 @@ namespace LmbrCentral
                 editContext->Class<CryPlayerPhysicsConfiguration>(
                     "CryPhysics Player Configuration", "")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                        ->Attribute(AZ::Edit::Attributes::Category, "Physics")
+                        ->Attribute(AZ::Edit::Attributes::Category, "Physics (Legacy)")
                         ->Attribute(AZ::Edit::Attributes::Visibility, AZ_CRC("PropertyVisibility_ShowChildrenOnly", 0xef428f20))
                     ->DataElement(AZ::Edit::UIHandlers::Default, &CryPlayerPhysicsConfiguration::m_dimensions,
                     "Player Dimensions", "Player dimensions used by CryPhysics")
@@ -357,8 +357,8 @@ namespace LmbrCentral
                 editContext->Class<CharacterPhysicsComponent>(
                     "Character Physics", "The Character Physics component adds physical behavior to and configures simulation characteristics for character entities, such as players and enemies")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                        ->Attribute(AZ::Edit::Attributes::Category, "Physics")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/CharacterPhysics.png")
+                        ->Attribute(AZ::Edit::Attributes::Category, "Physics (Legacy)")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/CharacterPhysics.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/CharacterPhysics.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -446,9 +446,11 @@ namespace LmbrCentral
 
     }
 
+    extern AZStd::shared_ptr<IPhysicalEntity> CreateIPhysicalEntitySharedPtr(IPhysicalEntity* rawPhysicalEntityPtr);
+    
     void CharacterPhysicsComponent::EnablePhysics()
     {
-        if (m_physicalEntity)
+        if (IsPhysicsEnabled())
         {
             return;
         }
@@ -461,7 +463,7 @@ namespace LmbrCentral
         positionParameters.pMtx3x4 = &cryTransform;
 
         // Create physical entity
-        m_physicalEntity = gEnv->pPhysicalWorld->CreatePhysicalEntity(
+        IPhysicalEntity* rawPhysicalEntityPtr = gEnv->pPhysicalWorld->CreatePhysicalEntity(
             PE_LIVING, // type
             &positionParameters, // params
             static_cast<uint64>(GetEntityId()), // pForeignData
@@ -469,6 +471,14 @@ namespace LmbrCentral
             -1, // id
             nullptr // IGeneralMemoryHeap
         );
+
+        m_physicalEntity = CreateIPhysicalEntitySharedPtr(rawPhysicalEntityPtr);
+        if (!m_physicalEntity)
+        {
+            AZ_Printf("SkinnedCharacterPhysicsComponent", "SkinnedCharacterPhysicsComponent::EnablePhysics no physical entity on entity id %s", GetEntityId().ToString().c_str());
+
+            return;
+        }
 
         pe_simulation_params simParams;
         m_physicalEntity->GetParams(&simParams);
@@ -487,8 +497,7 @@ namespace LmbrCentral
         // If anything goes wrong, destroy m_physicalEntity
         if (!ConfigurePhysicalEntity())
         {
-            gEnv->pPhysicalWorld->DestroyPhysicalEntity(m_physicalEntity);
-            m_physicalEntity = nullptr;
+            m_physicalEntity.reset();
             return;
         }
 
@@ -508,7 +517,7 @@ namespace LmbrCentral
 
     void CharacterPhysicsComponent::DisablePhysics()
     {
-        if (!m_physicalEntity)
+        if (!IsPhysicsEnabled())
         {
             return;
         }
@@ -530,13 +539,12 @@ namespace LmbrCentral
         }
 
 
-        gEnv->pPhysicalWorld->DestroyPhysicalEntity(m_physicalEntity);
-        m_physicalEntity = nullptr;
+        m_physicalEntity.reset();
     }
 
     IPhysicalEntity* CharacterPhysicsComponent::GetPhysicalEntity()
     {
-        return m_physicalEntity;
+        return m_physicalEntity.get();
     }
 
     void CharacterPhysicsComponent::GetPhysicsParameters(pe_params& outParameters)

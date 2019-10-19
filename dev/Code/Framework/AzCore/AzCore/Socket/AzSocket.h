@@ -12,40 +12,11 @@
 
 #pragma once
 
+#include <AzCore/Socket/AzSocket_Platform.h>
+
 #include <AzCore/Socket/AzSocket_fwd.h>
 #include <AzCore/std/string/string.h>
 
-#if defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX)
-#   include <stdio.h>
-#   include <sys/types.h>
-#   include <sys/time.h>
-#   include <sys/socket.h>
-#   include <sys/select.h>
-#   include <netinet/tcp.h>
-#   include <netinet/in.h>
-#   include <arpa/inet.h>
-#   include <unistd.h>
-#   include <errno.h>
-#   include <netdb.h>
-#   include <string.h>
-#   include <fcntl.h>
-#   define SD_RECEIVE  SHUT_RD
-#   define SD_SEND     SHUT_WR
-#   define SD_BOTH     SHUT_RDWR
-
-#elif AZ_TRAIT_USE_WINSOCK_API
-
-#   include <stdio.h>
-#   include <WinSock2.h>
-#   include <ws2tcpip.h>
-
-#   define SD_RECEIVE  0x00
-#   define SD_SEND     0x01
-#   define SD_BOTH     0x02
-
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(AzSocket_h, AZ_RESTRICTED_PLATFORM)
-#endif
 typedef fd_set  AZFD_SET;
 typedef timeval AZTIMEVAL;
 
@@ -145,6 +116,8 @@ namespace AZ
             return error < static_cast<AZ::s32>(AzSockError::eASE_NO_ERROR);
         }
 
+        bool ResolveAddress(const AZStd::string& ip, AZ::u16 port, AZSOCKADDR_IN& sockAddr);
+
         class AzSocketAddress
         {
         public:
@@ -175,5 +148,5 @@ namespace AZ
         private:
             AZSOCKADDR_IN m_sockAddr;
         };
-    }; // namespace AzSock
-}; // namespace AZ
+    }
+}

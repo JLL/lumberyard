@@ -11,6 +11,7 @@
 */
 
 #include <AzCore/std/smart_ptr/make_shared.h>
+
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzToolsFramework/Thumbnails/ThumbnailerComponent.h>
 #include <AzToolsFramework/Thumbnails/ThumbnailContext.h>
@@ -49,6 +50,16 @@ namespace AzToolsFramework
             }
         }
 
+        void ThumbnailerComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
+        {
+            incompatible.push_back(AZ_CRC("ThumbnailerService", 0x65422b97));
+        }
+
+        void ThumbnailerComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+        {
+            provided.push_back(AZ_CRC("ThumbnailerService", 0x65422b97));
+        }
+
         void ThumbnailerComponent::RegisterContext(const char* contextName, int thumbnailSize)
         {
             AZ_Assert(m_thumbnails.find(contextName) == m_thumbnails.end(), "Context %s already registered", contextName);
@@ -68,6 +79,8 @@ namespace AzToolsFramework
             AZ_Assert(it != m_thumbnails.end(), "Context %s not registered", contextName);
             return it->second->GetThumbnail(key);
         }
+
     } // namespace Thumbnailer
 } // namespace AzToolsFramework
+
 #include <Thumbnails/ThumbnailerComponent.moc>

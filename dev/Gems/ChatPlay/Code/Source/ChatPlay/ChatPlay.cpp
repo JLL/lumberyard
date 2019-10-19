@@ -12,6 +12,7 @@
 // Implementation of Twitch ChatPlay feature
 #include "ChatPlay_precompiled.h"
 
+#include <AzCore/std/containers/set.h>
 #include <AzCore/std/sort.h>
 #include <AzCore/std/smart_ptr/enable_shared_from_this.h>
 #include <AzCore/std/smart_ptr/make_shared.h>
@@ -1238,7 +1239,7 @@ namespace ChatPlay
                 RegisterOptions();
             }
         }
-        return static_cast<bool>(channel);
+        return !m_channel.expired();    ///< Fix for bad logic when determining the return value of SetChannel.
     }
 
     void ChatPlayVoteImpl::Visit(const AZStd::function<void(VoteOption& option)>& visitor)

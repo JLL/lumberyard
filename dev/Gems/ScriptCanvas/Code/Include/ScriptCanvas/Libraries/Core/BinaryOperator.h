@@ -11,8 +11,6 @@
 */
 #pragma once
 
-#include "precompiled.h"
-
 #include <AzCore/std/typetraits/remove_reference.h>
 #include <AzCore/std/typetraits/remove_cv.h>
 #include <AzCore/std/typetraits/function_traits.h>
@@ -56,8 +54,6 @@ namespace ScriptCanvas
             void OnInputSignal(const SlotId& slot) override;
 
             SlotId GetOutputSlotId() const;
-
-            void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
         };
                 
         class ArithmeticExpression
@@ -74,7 +70,7 @@ namespace ScriptCanvas
 
             void OnInputSignal(const SlotId& slot) override;
 
-            void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
+            
         };
         
         class BooleanExpression
@@ -90,12 +86,12 @@ namespace ScriptCanvas
             void OnInit() override;
             virtual void InitializeBooleanExpression();
             void OnInputSignal(const SlotId& slot) override;
-            void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
+            
         };
 
         // accepts any type, checks for type equality, and then value equality or pointer equality
         class EqualityExpression
-            : public BooleanExpression
+            : public BooleanExpression            
         {
         public:
             AZ_COMPONENT(EqualityExpression, "{78D20EB6-BA07-4071-B646-7C2D68A0A4A6}", BooleanExpression);
@@ -105,7 +101,21 @@ namespace ScriptCanvas
         protected:
             // adds any required input types
             void InitializeBooleanExpression() override;
-            void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
+            
+
+            // Node
+            void OnEndpointConnected(const Endpoint& endpoint) override;
+            void OnEndpointDisconnected(const Endpoint& endpoint) override;
+            ////
+
+        private:
+
+            void SetDisplayType(ScriptCanvas::Data::Type dataType);
+
+            SlotId                   m_firstSlotId;
+            SlotId                   m_secondSlotId;
+
+            ScriptCanvas::Data::Type m_displayType;
         };
 
         // accepts numbers only
@@ -120,7 +130,7 @@ namespace ScriptCanvas
         protected:
             // adds number types
             void InitializeBooleanExpression() override;
-            void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
+            
         };
     } // namespace Nodes
 } // namespace ScriptCanvas

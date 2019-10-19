@@ -13,7 +13,6 @@
 
 #include <StdAfx.h>
 #include <AzCore/Debug/Profiler.h>
-#include <IJobManager_JobDelegator.h>
 
 #include "StreamAsyncFileRequest.h"
 
@@ -31,8 +30,6 @@ extern void ZlibInflateElementPartial_Impl(
 
 
 #include <CryProfileMarker.h>
-
-//#pragma("control %push O=0")             // to disable optimization
 
 #ifdef STREAMENGINE_ENABLE_LISTENER
 #include "IStreamEngine.h"
@@ -103,13 +100,11 @@ public:
 };
 #endif
 
-//#pragma optimize("",off)
-
 #if defined(STREAMENGINE_ENABLE_STATS)
 #define STREAMENGINE_ENABLE_TIMING
 #endif
 
-//#define STREAM_DECOMPRESS_TRACE(...) printf(__VA_ARGS__)
+//#define STREAM_DECOMPRESS_TRACE(...) OutputDebugString(AZStd::string::format(__VA_ARGS__).c_str());
 #define STREAM_DECOMPRESS_TRACE(...)
 
 void SStreamJobQueue::Flush(SStreamEngineTempMemStats& tms)
@@ -157,14 +152,14 @@ int SStreamJobQueue::Pop()
 void CAsyncIOFileRequest::AddRef()
 {
     int nRef = CryInterlockedIncrement(&m_nRefCount);
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] AddRef(%x) %p %i %s\n", CryGetCurrentThreadId(), this, nRef, m_strFileName.c_str());
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],AddRef,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nRef);
 }
 
 int CAsyncIOFileRequest::Release()
 {
     int nRef = CryInterlockedDecrement(&m_nRefCount);
 
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] Release(%x) %p %i %s\n", CryGetCurrentThreadId(), this, nRef, m_strFileName.c_str());
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],Release,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nRef);
 
 #ifndef _RELEASE
     if (nRef < 0)
@@ -187,7 +182,7 @@ void CAsyncIOFileRequest::DecompressBlockEntry(SStreamJobEngineState engineState
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::System);
 
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] DecompressBlockEntry(%x) %p %s %i\n", CryGetCurrentThreadId(), this, m_strFileName.c_str(), nJob);
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],DecompressBlockEntry,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nJob);
 
     CAsyncIOFileRequest_TransferPtr pSelf(this);
 
@@ -223,7 +218,9 @@ void CAsyncIOFileRequest::DecompressBlockEntry(SStreamJobEngineState engineState
 
         unsigned long nBytesDecomped = m_nBytesDecompressed;
 
-        STREAM_DECOMPRESS_TRACE ("[StreamDecompress] ZlibInflateElementPartial_Impl %p %i %p %i %i\n",
+        STREAM_DECOMPRESS_TRACE ("[StreamDecompress],ZlibInflateElementPartial_Impl,0x%x,%s,0x%p,%i,0x%p,%i,%i\n",
+            CryGetCurrentThreadId(),
+            m_strFileName.c_str(),
             (unsigned char*)m_pReadMemoryBuffer + nBytesDecomped,
             m_nFileSize - nBytesDecomped,
             (unsigned char*)pSrc + nOffs,
@@ -295,7 +292,7 @@ void CAsyncIOFileRequest::DecompressBlockEntry(SStreamJobEngineState engineState
     else if (nPopSlot >= 0)
     {
         // Chain start the next job, we're responsible for it.
-        STREAM_DECOMPRESS_TRACE("[StreamDecompress] Chaining %p %i\n", this, nPopSlot);
+        STREAM_DECOMPRESS_TRACE("[StreamDecompress],Chaining,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nPopSlot);
         JobStart_Decompress(pSelf, engineState, nPopSlot);
     }
 
@@ -310,7 +307,7 @@ void CAsyncIOFileRequest::DecryptBlockEntry(SStreamJobEngineState engineState, i
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::System);
 
-    STREAM_DECOMPRESS_TRACE("[StreamDecrypt] DecryptBlockEntry(%x) %p %s %i\n", CryGetCurrentThreadId(), this, m_strFileName.c_str(), nJob);
+    STREAM_DECOMPRESS_TRACE("[StreamDecrypt],DecryptBlockEntry,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nJob);
 
     SStreamJobQueue::Job& job = m_pDecryptQueue->m_jobs[nJob];
 
@@ -360,7 +357,9 @@ void CAsyncIOFileRequest::DecryptBlockEntry(SStreamJobEngineState engineState, i
 #ifdef SUPPORT_RSA_AND_STREAMCIPHER_PAK_ENCRYPTION
             else if (m_pDecryptionCTR)
             {
-                STREAM_DECOMPRESS_TRACE ("[StreamDecrypt] ZipEncrypt::DecryptBufferWithStreamCipher %p %i %p %i %i\n",
+                STREAM_DECOMPRESS_TRACE ("[StreamDecrypt],ZipEncrypt::DecryptBufferWithStreamCipher,0x%x,%s,0x%p,%i,0x%p,%i,%i\n",
+                    CryGetCurrentThreadId(),
+                    m_strFileName.c_str(), 
                     pData,
                     m_nFileSize - nBytesDecrypted,
                     (unsigned char*)pSrc + nOffs,
@@ -445,7 +444,7 @@ void CAsyncIOFileRequest::DecryptBlockEntry(SStreamJobEngineState engineState, i
     else if (nPopSlot >= 0)
     {
         // Chain start the next job, we're responsible for it.
-        STREAM_DECOMPRESS_TRACE("[StreamDecrypt] Chaining %p %i\n", this, nPopSlot);
+        STREAM_DECOMPRESS_TRACE("[StreamDecrypt],Chaining,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nPopSlot);
 
         JobStart_Decrypt(pSelf, engineState, nPopSlot);
     }
@@ -487,7 +486,7 @@ uint32 CAsyncIOFileRequest::PushDecompressBlock(const SStreamJobEngineState& eng
         int nPushJob = m_pDecompQueue->Push(pSrc, pSrcHdr, nOffs, nBytes, bLast);
         if (nPushJob >= 0)
         {
-            STREAM_DECOMPRESS_TRACE("[StreamDecrypt] Spawning decompress job %p %i\n", this, nPushJob);
+            STREAM_DECOMPRESS_TRACE("[StreamDecompress],PushDecompressBlock,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nPushJob);
 
             AddRef();
             CAsyncIOFileRequest_TransferPtr pSelf(this);
@@ -500,7 +499,7 @@ uint32 CAsyncIOFileRequest::PushDecompressBlock(const SStreamJobEngineState& eng
 
 void CAsyncIOFileRequest::JobStart_Decompress(CAsyncIOFileRequest_TransferPtr& pSelf, const SStreamJobEngineState& engineState, int nJob)
 {
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] QueueDecompressBlockAppend(%x) %p %s %i\n", CryGetCurrentThreadId(), this, m_strFileName.c_str(), nJob);
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],QueueDecompressBlockAppend,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), pSelf->m_strFileName.c_str(), &pSelf, nJob);
 
 #if defined(STREAMENGINE_ENABLE_STATS)
     CryInterlockedIncrement(&engineState.pStats->nCurrentDecompressCount);
@@ -547,7 +546,7 @@ uint32 CAsyncIOFileRequest::PushDecryptBlock(const SStreamJobEngineState& engine
         int nPushJob = m_pDecryptQueue->Push(pSrc, pSrcHdr, nOffs, nBytes, bLast);
         if (nPushJob >= 0)
         {
-            STREAM_DECOMPRESS_TRACE("[StreamDecrypt] Spawning decrypt job %p %i\n", this, nPushJob);
+            STREAM_DECOMPRESS_TRACE("[StreamDecrypt],PushDecryptBlock,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), m_strFileName.c_str(), this, nPushJob);
 
             AddRef();
             CAsyncIOFileRequest_TransferPtr pSelf(this);
@@ -560,7 +559,7 @@ uint32 CAsyncIOFileRequest::PushDecryptBlock(const SStreamJobEngineState& engine
 
 void CAsyncIOFileRequest::JobStart_Decrypt(CAsyncIOFileRequest_TransferPtr& pSelf, const SStreamJobEngineState& engineState, int nJob)
 {
-    STREAM_DECOMPRESS_TRACE("[StreamDecrypt] QueueDecryptBlockAppend(%x) %p %s %i\n", CryGetCurrentThreadId(), this, m_strFileName.c_str(), nJob);
+    STREAM_DECOMPRESS_TRACE("[StreamDecrypt],QueueDecryptBlockAppend,0x%x,%s,0x%p,%i\n", CryGetCurrentThreadId(), pSelf->m_strFileName.c_str(), &pSelf, nJob);
 
 #if defined(STREAMENGINE_ENABLE_STATS)
     CryInterlockedIncrement(&engineState.pStats->nCurrentDecryptCount);
@@ -589,7 +588,7 @@ void CAsyncIOFileRequest::JobFinalize_Read(CAsyncIOFileRequest_TransferPtr& pSel
 
 void CAsyncIOFileRequest::JobFinalize_Decompress(CAsyncIOFileRequest_TransferPtr& pSelf, const SStreamJobEngineState& engineState)
 {
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] FinalizeDecompress(%x) %p %s %p %p %p\n", CryGetCurrentThreadId(), this, pSelf->m_strFileName.c_str(), &engineState, engineState.pStats, engineState.pDecompressStats);
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],FinalizeDecompress,0x%x,%s,0x%p,0x%p,0x%p,0x%p\n", CryGetCurrentThreadId(), pSelf->m_strFileName.c_str(), &pSelf, &engineState, engineState.pStats, engineState.pDecompressStats);
 
     CAsyncIOFileRequest* pReq = &*pSelf;
 
@@ -625,7 +624,7 @@ void CAsyncIOFileRequest::JobFinalize_Decompress(CAsyncIOFileRequest_TransferPtr
 
 void CAsyncIOFileRequest::JobFinalize_Decrypt(CAsyncIOFileRequest_TransferPtr& pSelf, const SStreamJobEngineState& engineState)
 {
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] FinalizeDecompress(%x) %p %s %p %p %p\n", CryGetCurrentThreadId(), this, pSelf->m_strFileName.c_str(), &engineState, engineState.pStats, engineState.pDecompressStats);
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],FinalizeDecompress,0x%x,%s,0x%p,0x%p,0x%p,0x%p\n", CryGetCurrentThreadId(), pSelf->m_strFileName.c_str(), &pSelf, &engineState, engineState.pStats, engineState.pDecompressStats);
 
     CAsyncIOFileRequest* pReq = &*pSelf;
 
@@ -728,7 +727,7 @@ void CAsyncIOFileRequest::JobFinalize_Validate(const SStreamJobEngineState& engi
 
 void CAsyncIOFileRequest::JobFinalize_Transfer(CAsyncIOFileRequest_TransferPtr& pSelf, const SStreamJobEngineState& engineState)
 {
-    STREAM_DECOMPRESS_TRACE("[StreamDecompress] FinalizeTransform(%x) %p %s %p %p %p\n", CryGetCurrentThreadId(), this, pSelf->m_strFileName.c_str(), &engineState, engineState.pStats, engineState.pDecompressStats);
+    STREAM_DECOMPRESS_TRACE("[StreamDecompress],FinalizeTransform,0x%x,%s,0x%p,0x%p,0x%p,0x%p\n", CryGetCurrentThreadId(), pSelf->m_strFileName.c_str(), &pSelf, &engineState, engineState.pStats, engineState.pDecompressStats);
 
     if (CryInterlockedCompareExchange(&pSelf->m_nFinalised, 1, 0) == 0)
     {

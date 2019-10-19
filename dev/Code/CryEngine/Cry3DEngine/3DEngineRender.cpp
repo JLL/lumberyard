@@ -50,10 +50,9 @@
 #include <IAISystem.h>
 #include "IPlatformOS.h"
 #include <CryProfileMarker.h>
+#include <ThermalInfo.h>
 
-#if defined(FEATURE_SVO_GI)
-#include "SVO/SceneTreeManager.h"
-#endif
+
 
 #ifdef GetCharWidth
 #undef GetCharWidth
@@ -66,7 +65,9 @@
 
 #include "Components/IComponentRender.h"
 #include <AzFramework/IO/FileOperations.h>
+#include <AzFramework/StringFunc/StringFunc.h>
 #include <AzCore/IO/SystemFile.h> // for AZ_MAX_PATH_LEN
+#include "../RenderDll/Common/Memory/VRAMDrillerBus.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // RenderScene
@@ -77,7 +78,7 @@
 #define DISPLAY_INFO_SCALE_SMALL (1.1f)
 #define STEP_SMALL_DIFF          (2.f)
 
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(MAC)
 // for panorama screenshots
 class CStitchedImage
     : public Cry3DEngineBase
@@ -149,43 +150,56 @@ public:
 
         const char* szExtension = m_rEngine.GetCVars()->e_ScreenShotFileFormat->GetString();
 
-        if (_stricmp(szExtension, "dds") != 0  &&
-            _stricmp(szExtension, "tga") != 0    &&
-            _stricmp(szExtension, "jpg") != 0)
+        if (azstricmp(szExtension, "dds") != 0  &&
+            azstricmp(szExtension, "tga") != 0    &&
+            azstricmp(szExtension, "jpg") != 0)
         {
             gEnv->pLog->LogError("Format e_ScreenShotFileFormat='%s' not supported", szExtension);
             return false;
         }
 
+        const char* sRequestedName = m_rEngine.GetCVars()->e_ScreenShotFileName->GetString();
+
         char sFileName[AZ_MAX_PATH_LEN];
 
-        snprintf(sFileName, sizeof(sFileName), "@user@/ScreenShots/%s", szDirectory);
-        gEnv->pFileIO->CreatePath(sFileName);
-
-        // find free file id
-        for (;; )
+        if (azstricmp(sRequestedName, "") != 0)
         {
-            snprintf(sFileName, sizeof(sFileName), "@user@/ScreenShots/%s/%.5d.%s", szDirectory, m_nFileId, szExtension);
+            AZStd::string folderPath;
+            AZStd::string fileName;
+            AzFramework::StringFunc::Path::Split(sRequestedName, nullptr, &folderPath, &fileName);
+            gEnv->pFileIO->CreatePath((AZStd::string("@user@/ScreenShots/") + folderPath).c_str());
+            azsnprintf(sFileName, sizeof(sFileName), "@user@/ScreenShots/%s.%s", sRequestedName, szExtension);
+        }
+        else
+        {
+            azsnprintf(sFileName, sizeof(sFileName), "@user@/ScreenShots/%s", szDirectory);
+            gEnv->pFileIO->CreatePath(sFileName);
 
-            AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen(sFileName, "rb");
-
-            if (fileHandle == AZ::IO::InvalidHandle)
+            // find free file id
+            for (;; )
             {
-                break; // file doesn't exist
-            }
+                azsnprintf(sFileName, sizeof(sFileName), "@user@/ScreenShots/%s/%.5d.%s", szDirectory, m_nFileId, szExtension);
 
-            gEnv->pCryPak->FClose(fileHandle);
-            m_nFileId++;
+                AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen(sFileName, "rb");
+
+                if (fileHandle == AZ::IO::InvalidHandle)
+                {
+                    break; // file doesn't exist
+                }
+
+                gEnv->pCryPak->FClose(fileHandle);
+                m_nFileId++;
+            }
         }
 
         bool bOk;
 
-        if (_stricmp(szExtension, "dds") == 0)
+        if (azstricmp(szExtension, "dds") == 0)
         {
-            bOk = gEnv->pRenderer->WriteDDS((byte*)&m_RGB[0], m_dwWidth, m_dwHeight, 4, sFileName, eTF_BC3, 1);
+            bOk = gEnv->pRenderer->WriteDDS((byte*)&m_RGB[0], m_dwWidth, m_dwHeight, 3, sFileName, eTF_BC3, 1);
         }
         else
-        if (_stricmp(szExtension, "tga") == 0)
+        if (azstricmp(szExtension, "tga") == 0)
         {
             bOk = gEnv->pRenderer->WriteTGA((byte*)&m_RGB[0], m_dwWidth, m_dwHeight, sFileName, 24, 24);
         }
@@ -224,6 +238,11 @@ public:
                 }
             }
         }
+
+        // reset filename when done so user doesn't overwrite other screen shots (unless they want to)
+        // this is done here as there is no callback for standard screenshots to allow the user to clear
+        // this when done with the screen shot, so I decided to just always clear it when done
+        m_rEngine.GetCVars()->e_ScreenShotFileName->Set("");
 
         return bOk;
     }
@@ -573,7 +592,7 @@ enum EScreenShotType
 
 void C3DEngine::ScreenshotDispatcher(const int nRenderFlags, const SRenderingPassInfo& passInfo)
 {
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(MAC)
     CStitchedImage*   pStitchedImage = 0;
     const uint32  dwPanWidth          = max(1, GetCVars()->e_ScreenShotWidth);
     const uint32  dwPanHeight         = max(1, GetCVars()->e_ScreenShotHeight);
@@ -710,7 +729,7 @@ struct SDebugFrustrum
     float                     m_fQuadDist;      // < 0 if not used
 };
 
-static std::vector<SDebugFrustrum> g_DebugFrustrums;
+static StaticInstance<std::vector<SDebugFrustrum>> g_DebugFrustrums;
 
 void C3DEngine::DebugDraw_Draw()
 {
@@ -868,12 +887,10 @@ void C3DEngine::RenderWorld(const int nRenderFlags, const SRenderingPassInfo& pa
     CRYPROFILE_SCOPE_PROFILE_MARKER("RenderWorld");
     AZ_TRACE_METHOD();
 
-#if defined(FEATURE_SVO_GI)
     if (nRenderFlags & SHDF_ALLOW_AO)
     {
-        CSvoManager::OnFrameStart(passInfo);
+        SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::OnFrameStart, passInfo);
     }
-#endif
 
     if (m_szLevelFolder[0] != 0)
     {
@@ -1116,10 +1133,10 @@ void C3DEngine::WorldStreamUpdate()
                         AZ::IO::Print(resultsFile,
                             "<phase name=\"Streaming_Level_Start_Throughput\">\n"
                             "<metrics name=\"Streaming\">\n"
-                            "<metric name=\"Duration_Sec\"	value=\"%.1f\"/>\n"
+                            "<metric name=\"Duration_Sec\" value=\"%.1f\"/>\n"
                             "<metric name=\"BlockSize_KB\" value=\"%d\"/>\n"
                             "<metric name=\"Throughput_MB_Sec\" value=\"%.1f\"/>\n"
-                            "<metric name=\"Jobs_Num\"	value=\"%d\"/>\n"
+                            "<metric name=\"Jobs_Num\" value=\"%d\"/>\n"
                             "<metric name=\"Read_MB\" value=\"%.1f\"/>\n"
                             "</metrics>\n"
                             "</phase>\n",
@@ -1430,8 +1447,13 @@ void C3DEngine::UpdatePreRender(const SRenderingPassInfo& passInfo)
     // (bethelz) This has to happen before particle updates.
     m_PhysicsAreaUpdates.Update();
 
-    // Update particle system as late as possible, only renderer is dependent on it.
-    m_pPartManager->Update();
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    if (!passInfo.IsRenderSceneToTexturePass())
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    {
+        // Update particle system as late as possible, only renderer is dependent on it.
+        m_pPartManager->Update();
+    }
 
     if (passInfo.RenderClouds())
     {
@@ -1626,7 +1648,7 @@ void C3DEngine::SetSkyMaterial(_smart_ptr<IMaterial> pSkyMat)
 
 bool C3DEngine::IsHDRSkyMaterial(_smart_ptr<IMaterial> pMat) const
 {
-    return pMat && !_stricmp(pMat->GetShaderItem().m_pShader->GetName(), "SkyHDR");
+    return pMat && !azstricmp(pMat->GetSafeSubMtl(0)->GetShaderItem().m_pShader->GetName(), "SkyHDR");
 }
 
 void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& passInfo)
@@ -1639,8 +1661,6 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
     CRY_ASSERT(m_pPartManager);
     CRY_ASSERT(m_pTerrain);
     CRY_ASSERT(m_pDecalManager);
-    CRY_ASSERT(gEnv->pGame);
-    CRY_ASSERT(gEnv->pCharacterManager);
 
     GetObjManager()->GetCullThread().SetActive(true);
 
@@ -1689,7 +1709,7 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
 
     SubmitSun(passInfo);
 
-    if (GetCVars()->e_StatObjBufferRenderTasks && JobManager::InvokeAsJob("CheckOcclusion") && m_pObjManager != nullptr)
+    if (GetCVars()->e_StatObjBufferRenderTasks && m_pObjManager != nullptr)
     {
         m_pObjManager->BeginOcclusionCulling(passInfo);
     }
@@ -1743,13 +1763,15 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
     {
         RenderSkyBox(GetSkyMaterial(), passInfo);
     }
+    
+    // Outdoor is not visible, that means there is no SkyBox to render.
+    // So we want to clear the GBuffer RT/background in order to avoid artifacts.
+    GetRenderer()->SetClearBackground(!IsOutdoorVisible());
 
-#if defined(FEATURE_SVO_GI)
     if (nRenderFlags & SHDF_ALLOW_AO)
     {
-        CSvoManager::Render();
+        SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::UpdateRenderData);
     }
-#endif
 
     {
         FRAME_PROFILER_LEGACYONLY("COctreeNode::Render_Object_Nodes_NEAR", GetSystem(), PROFILE_3DENGINE);
@@ -1802,7 +1824,7 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
     }
 
     // tell the occlusion culler that no new work will be submitted
-    if (GetCVars()->e_StatObjBufferRenderTasks == 1 && JobManager::InvokeAsJob("CheckOcclusion") && GetObjManager() != nullptr)
+    if (GetCVars()->e_StatObjBufferRenderTasks == 1 && GetObjManager() != nullptr)
     {
         GetObjManager()->PushIntoCullQueue(SCheckOcclusionJobData::CreateQuitJobData());
     }
@@ -1812,12 +1834,16 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
 
     gEnv->pSystem->DoWorkDuringOcclusionChecks();
 
-    if (GetCVars()->e_StatObjBufferRenderTasks && JobManager::InvokeAsJob("CheckOcclusion") && m_pObjManager != nullptr)
+    if (GetCVars()->e_StatObjBufferRenderTasks && m_pObjManager != nullptr)
     {
         m_pObjManager->RenderBufferedRenderMeshes(passInfo);
     }
 
-    GetRenderer()->EF_InvokeShadowMapRenderJobs(IsShadersSyncLoad() ? (nRenderFlags | SHDF_NOASYNC | SHDF_STREAM_SYNC) : nRenderFlags);
+    // don't start shadow jobs if we aren't generating shadows
+    if ((nRenderFlags & SHDF_NO_SHADOWGEN) == 0)
+    {
+        GetRenderer()->EF_InvokeShadowMapRenderJobs(IsShadersSyncLoad() ? (nRenderFlags | SHDF_NOASYNC | SHDF_STREAM_SYNC) : nRenderFlags);
+    }
 
     if (m_pTerrain != nullptr)
     {
@@ -1837,7 +1863,10 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
 
     m_LightVolumesMgr.Update(passInfo);
 
-    gEnv->pGame->OnRenderScene(passInfo);
+    if (gEnv->pGame != nullptr)
+    {
+        gEnv->pGame->OnRenderScene(passInfo);
+    }
 
     SetupDistanceFog();
 
@@ -1847,7 +1876,10 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
     {
         m_pTerrain->UpdateSectorMeshes(passInfo);
     }
-    gEnv->pCharacterManager->UpdateStreaming(GetObjManager()->GetUpdateStreamingPrioriryRoundId(), GetObjManager()->GetUpdateStreamingPrioriryRoundIdFast());
+    if (gEnv->pCharacterManager)
+    {
+        gEnv->pCharacterManager->UpdateStreaming(GetObjManager()->GetUpdateStreamingPrioriryRoundId(), GetObjManager()->GetUpdateStreamingPrioriryRoundIdFast());
+    }
 
     {
         FRAME_PROFILER("Renderer::EF_EndEf3D", GetSystem(), PROFILE_RENDERER);
@@ -1869,7 +1901,7 @@ void C3DEngine::RenderScene(const int nRenderFlags, const SRenderingPassInfo& pa
     gEnv->pRenderer->EF_Query(EFQ_RenderMultithreaded, bIsMultiThreadedRenderer);
     if (bIsMultiThreadedRenderer)
     {
-        gEnv->pRenderer->EndSpawningGeneratingRendItemJobs(passInfo.ThreadID());
+        gEnv->pRenderer->EndSpawningGeneratingRendItemJobs();
     }
 
     m_bIsInRenderScene = false;
@@ -1893,8 +1925,6 @@ void C3DEngine::RenderSceneReflection(const int nRenderFlags, const SRenderingPa
     CRY_ASSERT(m_pPartManager);
     CRY_ASSERT(m_pTerrain);
     CRY_ASSERT(m_pDecalManager);
-    CRY_ASSERT(gEnv->pCharacterManager);
-    CRY_ASSERT(gEnv->pGame);
 
     if (!GetCVars()->e_Recursion)
     {
@@ -2033,13 +2063,20 @@ void C3DEngine::RenderSceneReflection(const int nRenderFlags, const SRenderingPa
     {
         m_pPartManager->FinishParticleRenderTasks(passInfo);
     }
-    gEnv->pGame->OnRenderScene(passInfo);
+
+    if (gEnv->pGame != nullptr)
+    {
+        gEnv->pGame->OnRenderScene(passInfo);
+    }
 
     if (m_pTerrain != nullptr)
     {
         m_pTerrain->UpdateSectorMeshes(passInfo);
     }
-    gEnv->pCharacterManager->UpdateStreaming(GetObjManager()->GetUpdateStreamingPrioriryRoundId(), GetObjManager()->GetUpdateStreamingPrioriryRoundIdFast());
+    if (gEnv->pCharacterManager)
+    {
+        gEnv->pCharacterManager->UpdateStreaming(GetObjManager()->GetUpdateStreamingPrioriryRoundId(), GetObjManager()->GetUpdateStreamingPrioriryRoundIdFast());
+    }
 
     {
         FRAME_PROFILER("Renderer::EF_EndEf3D", GetSystem(), PROFILE_RENDERER);
@@ -2191,7 +2228,7 @@ void C3DEngine::RenderSkyBox(_smart_ptr<IMaterial> pMat, const SRenderingPassInf
 
             // add sky dome to render list
             SRendItemSorter rendItemSorter = SRendItemSorter::CreateRendItemSorter(passInfo);
-            GetRenderer()->EF_AddEf(m_pREHDRSky, pMat->GetShaderItem(), pObj, passInfo, EFSLIST_GENERAL, 1, rendItemSorter);
+            GetRenderer()->EF_AddEf(m_pREHDRSky, pMat->GetSafeSubMtl(0)->GetShaderItem(), pObj, passInfo, EFSLIST_GENERAL, 1, rendItemSorter);
         }
     }
     // skybox
@@ -2219,7 +2256,7 @@ void C3DEngine::RenderSkyBox(_smart_ptr<IMaterial> pMat, const SRenderingPassInf
             m_pRESky->m_fSkyBoxStretching = m_fSkyBoxStretching;
 
             SRendItemSorter rendItemSorter = SRendItemSorter::CreateRendItemSorter(passInfo);
-            GetRenderer()->EF_AddEf(m_pRESky, pMat->GetShaderItem(), pObj, passInfo, EFSLIST_GENERAL, 1, rendItemSorter);
+            GetRenderer()->EF_AddEf(m_pRESky, pMat->GetSafeSubMtl(0)->GetShaderItem(), pObj, passInfo, EFSLIST_GENERAL, 1, rendItemSorter);
         }
     }
 }
@@ -2354,8 +2391,13 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
     // If stat averaging is on, compute blend amount for current stats.
     float fFPS = GetTimer()->GetFrameRate();
 
-
-    arrFPSforSaveLevelStats.push_back(SATURATEB((int)fFPS));
+    // Limit the FPS history for a single level to ~1 hour.
+    // This vector is cleared on each level load, but during a soak test this continues to grow every frame
+    const AZStd::size_t maxFPSEntries = 60 * 60 * 60; // 60ms * 60s * 60min
+    if (arrFPSforSaveLevelStats.size() < maxFPSEntries)
+    {
+        arrFPSforSaveLevelStats.push_back(SATURATEB((int)fFPS));
+    }
 
     float fBlendTime = GetTimer()->GetCurrTime();
     int iBlendMode = 0;
@@ -2439,10 +2481,12 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
     m_pRenderer->EF_Query(EFQ_GetFogCullDistance, fogCullDist);
     m_pRenderer->EF_Query(EFQ_GetViewportDownscaleFactor, vViewportScale);
 
-    DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, "CamPos=%.2f %.2f %.2f Angl=%3d %2d %3d ZN=%.2f ZF=%d FC=%.2f VS=%.2f,%.2f Zoom=%.2f Speed=%1.2f TimeOfDay=%02d:%02d",
+    DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, "CamPos=%.2f %.2f %.2f Angl=%3d %2d %3d ZN=%.2f ZF=%d",
         vPos.x, vPos.y, vPos.z, (int)aAng.x, (int)aAng.y, (int)aAng.z,
-        GetRenderingCamera().GetNearPlane(), (int)GetRenderingCamera().GetFarPlane(), fogCullDist,
-        vViewportScale.x, vViewportScale.y,
+        GetRenderingCamera().GetNearPlane(), (int)GetRenderingCamera().GetFarPlane());
+
+    DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, "Cam FC=%.2f VS=%.2f,%.2f Zoom=%.2f Speed=%1.2f TimeOfDay=%02d:%02d",
+        fogCullDist, vViewportScale.x, vViewportScale.y,
         GetZoomFactor(), GetAverageCameraSpeed(), hours, minutes);
 
     // get version
@@ -2894,25 +2938,6 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
     //////////////////////////////////////////////////////////////////////////
     {
         {
-#if TRACK_LEVEL_HEAP_USAGE
-            {
-                bool usingLevelHeap;
-                size_t lvlAllocs, lvlSize;
-                bool leaked = CryGetIMemoryManager()->GetLevelHeapViolationState(usingLevelHeap, lvlAllocs, lvlSize);
-                if (usingLevelHeap)
-                {
-                    if (leaked)
-                    {
-                        DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, 1.3f, Col_Red, "Level Heap Leaked (%i allocs, totalling %iKB)", (int) lvlAllocs, (int) (lvlSize / 1024));
-                    }
-                    else
-                    {
-                        DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, 1.3f, Col_Green, "Level Heap Healthy");
-                    }
-                }
-            }
-#endif
-
 #ifndef _RELEASE
             // Checkpoint loading information
             if (!gEnv->bMultiplayer)
@@ -3003,20 +3028,7 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
 
         m_nDeferredLightsNum = 0;
     }
-#if CAPTURE_REPLAY_LOG
-    {
-        CryReplayInfo replayInfo;
-        CryGetIMemReplay()->GetInfo(replayInfo);
-        if (replayInfo.filename)
-        {
-            DrawTextRightAligned(
-                fTextPosX, fTextPosY += fTextStepY,
-                "MemReplay log sz: %lluMB cost: %i MB",
-                (replayInfo.writtenLength + (512ULL * 1024ULL)) / (1024ULL * 1024ULL),
-                (replayInfo.trackingSize + (512 * 1024)) / (1024 * 1024));
-        }
-    }
-#endif
+
     assert(pDisplayInfo);
     if (bEnhanced)
     {
@@ -3213,14 +3225,42 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
         }
     }
 
-#if defined(FEATURE_SVO_GI)
-    CSvoManager::OnDisplayInfo(fTextPosX, fTextPosY, fTextStepY, DISPLAY_INFO_SCALE);
-#endif
-
 #undef MAX_PHYS_TIME
 #undef TICKS_TO_MS
 #undef CONVY
 #undef CONVX
+
+    //////////////////////////////////////////////////////////////////////////
+    // Display Thermal information of the device (if supported)
+    //////////////////////////////////////////////////////////////////////////
+
+    if (ThermalInfoRequestsBus::GetTotalNumOfEventHandlers())
+    {
+        const int thermalSensorCount = static_cast<int>(ThermalSensorType::Count);
+        const char* sensorStrings[thermalSensorCount] = { "CPU", "GPU", "Battery" };
+        for (int i = 0; i < thermalSensorCount; ++i)
+        {
+            float temperature = 0.f;
+            ThermalSensorType sensor = static_cast<ThermalSensorType>(i);
+            EBUS_EVENT_RESULT(temperature, ThermalInfoRequestsBus, GetSensorTemp, sensor);
+            AZStd::string tempText;
+            ColorF tempColor;
+            if (temperature > 0.f)
+            {
+                float overheatingTemp = 0.f;
+                EBUS_EVENT_RESULT(overheatingTemp, ThermalInfoRequestsBus, GetSensorOverheatingTemp, sensor);
+                tempText = AZStd::string::format(" %.1f C", temperature);
+                tempColor = temperature >= overheatingTemp ? Col_Red : Col_White;
+            }
+            else
+            {
+                tempText = "N/A";
+                tempColor = Col_White;
+            }
+            DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, DISPLAY_INFO_SCALE, tempColor, "%s Temp %s", sensorStrings[i], tempText.c_str());
+        }       
+    }
+
     //////////////////////////////////////////////////////////////////////////
     // Display Current fps
     //////////////////////////////////////////////////////////////////////////
@@ -3398,11 +3438,11 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
                 ShadowMapFrustum*& pLsource = pSMI->pGSM[nLod];
                 if (nLod)
                 {
-                    strcat(szText, ", ");
+                    azstrcat(szText, AZ_ARRAY_SIZE(szText), ", ");
                 }
 
                 char* pstr = szText + strlen(szText);
-                sprintf_s(pstr, sizeof(szText) - (pstr - szText), "%d", pLsource->pCastersList->Count());
+                sprintf_s(pstr, sizeof(szText) - (pstr - szText), "%d", pLsource->m_castersList.Count());
             }
 
             DrawTextRightAligned(fTextPosX, fTextPosY += fTextStepY, szText);
@@ -3666,9 +3706,66 @@ void C3DEngine::DisplayInfo(float& fTextPosX, float& fTextPosY, float& fTextStep
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+void C3DEngine::DisplayMemoryStatistics()
+{    
+    if (GetCVars()->e_MemoryProfiling > 0)
+    {
+        float memoryXPos = 512.0f;
+        float memoryYPos = 32.0f;
+        float memoryYPosStepSize = 32.0f;
+
+        ColorF headerColor = ColorF(0.4f, 0.9f, 0.3f, 1.0f);
+        ColorF statisticColor = ColorF(0.4f, 0.9f, 0.9f, 1.0f);
+        
+        // Store position for where we want to render the VRAM memory usage header (so we can simply print a total)
+        float gpuHeaderYPos = memoryYPos;
+        memoryYPos += memoryYPosStepSize;
+
+        float totalTrackedGPUAlloc = 0.0f;
+
+        // Print the memory usage of each major VRAM category and each subcategory
+        for (int category = 0; category < Render::Debug::VRAM_CATEGORY_NUMBER_CATEGORIES; ++category)
+        {
+            for (int subcategory = 0; subcategory < Render::Debug::VRAM_SUBCATEGORY_NUMBER_SUBCATEGORIES; ++subcategory)
+            {
+                AZStd::string categoryName, subcategoryName;
+                size_t numberBytesAllocated = 0;
+                size_t numberAllocations = 0;
+                EBUS_EVENT(Render::Debug::VRAMDrillerBus, GetCurrentVRAMStats, static_cast<Render::Debug::VRAMAllocationCategory>(category), 
+                    static_cast<Render::Debug::VRAMAllocationSubcategory>(subcategory), categoryName, subcategoryName, numberBytesAllocated, numberAllocations);
+                
+                if (numberAllocations != 0)
+                {
+                    float numMBallocated = numberBytesAllocated / (1024.0f * 1024.0f);
+                    DrawTextLeftAligned(memoryXPos, memoryYPos, 2.0f, statisticColor,
+                        "%s / %s - Size: %.1fMB - Allocations: %zu", categoryName.c_str(), subcategoryName.c_str(), numMBallocated, numberAllocations);
+
+                    memoryYPos += memoryYPosStepSize;
+                    totalTrackedGPUAlloc += numMBallocated;
+                }
+
+            }
+        }
+
+        // Print our VRAM
+        DrawTextLeftAligned(memoryXPos, gpuHeaderYPos, 2.0f, headerColor, "VRAM Usage: %.1fMB", totalTrackedGPUAlloc);
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 void C3DEngine::SetupDistanceFog()
 {
     FUNCTION_PROFILER_3DENGINE;
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // render to texture does not support volumetric fog 
+    if (GetRenderer()->IsRenderToTextureActive() && (GetCVars()->e_VolumetricFog != 0))
+    {
+        GetRenderer()->EnableFog(false);
+        return;
+    }
+#endif // AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 
     GetRenderer()->SetFogColor(ColorF(m_vFogColor.x, m_vFogColor.y, m_vFogColor.z, 1.0f));
     GetRenderer()->EnableFog(GetCVars()->e_Fog > 0);
@@ -3676,11 +3773,11 @@ void C3DEngine::SetupDistanceFog()
 
 void C3DEngine::ScreenShotHighRes(CStitchedImage* pStitchedImage, const int nRenderFlags, const SRenderingPassInfo& passInfo, uint32 SliceCount, f32 fTransitionSize)
 {
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(MAC)
 
     //If the requested format is TGA we want the framebuffer in BGR format; otherwise we want RGB
     const char* szExtension = GetCVars()->e_ScreenShotFileFormat->GetString();
-    bool BGRA = (_stricmp(szExtension, "tga") == 0) ? true : false;
+    bool BGRA = (azstricmp(szExtension, "tga") == 0) ? true : false;
 
     // finish frame started by system
     GetRenderer()->EndFrame();
@@ -3771,7 +3868,7 @@ bool C3DEngine::ScreenShotMap(CStitchedImage* pStitchedImage,
     const uint32                  SliceCount,
     const f32                         fTransitionSize)
 {
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(MAC)
 
     const uint32  nTSize = GetTerrain()->GetTerrainSize();
     const f32     fTLX   = GetCVars()->e_ScreenShotMapCenterX - GetCVars()->e_ScreenShotMapSizeX + fTransitionSize * GetRenderer()->GetWidth();
@@ -3844,11 +3941,11 @@ bool C3DEngine::ScreenShotMap(CStitchedImage* pStitchedImage,
 
 bool C3DEngine::ScreenShotPanorama(CStitchedImage* pStitchedImage, const int nRenderFlags, const SRenderingPassInfo& passInfo, uint32 SliceCount, f32 fTransitionSize)
 {
-#if defined(WIN32) || defined(WIN64)
+#if defined(WIN32) || defined(WIN64) || defined(MAC)
 
     //If the requested format is TGA we want the framebuffer in BGR format; otherwise we want RGB
     const char* szExtension = GetCVars()->e_ScreenShotFileFormat->GetString();
-    bool BGRA = (_stricmp(szExtension, "tga") == 0) ? true : false;
+    bool BGRA = (azstricmp(szExtension, "tga") == 0) ? true : false;
 
     // finish frame started by system
     GetRenderer()->EndFrame();

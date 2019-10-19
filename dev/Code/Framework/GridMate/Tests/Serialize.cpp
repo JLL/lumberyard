@@ -36,9 +36,7 @@ namespace UnitTest
         T EndianInBuffer(const T& data)
         {
             T res = data;
-#if !defined(AZ_BIG_ENDIAN)
             AZStd::endian_swap(res);
-#endif
             return res;
         }
 
@@ -1112,9 +1110,7 @@ namespace UnitTest
         T EndianInBuffer(const T& data)
         {
             T res = data;
-#if !defined(AZ_BIG_ENDIAN)
             AZStd::endian_swap(res);
-#endif
             return res;
         }
 
@@ -1131,6 +1127,31 @@ namespace UnitTest
             test_PartialByte();
             test_FullByte();
             test_SpanningBytes();
+            test_16AfterBits();
+        }
+
+        void test_16AfterBits()
+        {
+            WriteBufferStatic<> wb(EndianType::BigEndian);
+
+            int prefix = 0;
+            AZ::u16 value = 6;
+
+            wb.WriteRaw(&prefix, {0, 9});      // 1
+            wb.Write(value);     // 2
+
+            {
+                ReadBuffer rb(wb.GetEndianType(), wb.Get(), wb.GetExactSize());
+                AZ_TEST_ASSERT(rb.Size() == wb.GetExactSize());
+
+                int rprefix = 0;
+                rb.ReadRaw(&rprefix, {0, 9}); // 1
+                AZ_TEST_ASSERT(rprefix == prefix);
+
+                short rvalue = 0;
+                rb.Read(rvalue); // 2
+                AZ_TEST_ASSERT(rvalue == value);
+            }
         }
 
         void test_WriteBitsFromVoid()

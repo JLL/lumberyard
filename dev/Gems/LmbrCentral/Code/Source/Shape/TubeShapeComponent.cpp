@@ -18,6 +18,24 @@
 
 namespace LmbrCentral
 {
+    void TubeShapeComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+    {
+        provided.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        provided.push_back(AZ_CRC("TubeShapeService", 0x3fe791b4));
+    }
+
+    void TubeShapeComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
+    {
+        incompatible.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        incompatible.push_back(AZ_CRC("TubeShapeService", 0x3fe791b4));
+    }
+
+    void TubeShapeComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
+    {
+        required.push_back(AZ_CRC("TransformService", 0x8ee22c50));
+        required.push_back(AZ_CRC("SplineService", 0x2b674d3c));
+    }
+
     void TubeShapeComponent::Reflect(AZ::ReflectContext* context)
     {
         if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
@@ -76,10 +94,6 @@ namespace LmbrCentral
         }
     }
 
-    TubeShapeDebugDisplayComponent::TubeShapeDebugDisplayComponent(
-        const TubeShapeMeshConfig& tubeShapeMeshConfig)
-        : m_tubeShapeMeshConfig(tubeShapeMeshConfig) {}
-
     void TubeShapeDebugDisplayComponent::Activate()
     {
         EntityDebugDisplayComponent::Activate();
@@ -87,26 +101,37 @@ namespace LmbrCentral
         SplineComponentRequestBus::EventResult(m_spline, GetEntityId(), &SplineComponentRequests::GetSpline);
         TubeShapeComponentRequestsBus::EventResult(m_radius, GetEntityId(), &TubeShapeComponentRequests::GetRadius);
         TubeShapeComponentRequestsBus::EventResult(m_radiusAttribute, GetEntityId(), &TubeShapeComponentRequests::GetRadiusAttribute);
+        ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
 
         GenerateVertices();
     }
 
-    void TubeShapeDebugDisplayComponent::Draw(AzFramework::EntityDebugDisplayRequests* /*displayContext*/)
+    void TubeShapeDebugDisplayComponent::Deactivate()
     {
-        DrawShape(g_defaultShapeDrawParams, m_tubeShapeMesh);
+        ShapeComponentNotificationsBus::Handler::BusDisconnect();
+        EntityDebugDisplayComponent::Deactivate();
     }
 
-    void TubeShapeDebugDisplayComponent::OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world)
+    void TubeShapeDebugDisplayComponent::Draw(AzFramework::DebugDisplayRequests& debugDisplay)
     {
-        EntityDebugDisplayComponent::OnTransformChanged(local, world);
-        GenerateVertices();
+        DrawShape(debugDisplay, m_tubeShapeMeshConfig.m_shapeComponentConfig.GetDrawParams(), m_tubeShapeMesh);
+    }
+
+    void TubeShapeDebugDisplayComponent::OnShapeChanged(ShapeChangeReasons changeReason)
+    {
+        if (changeReason == ShapeChangeReasons::ShapeChanged)
+        {
+            TubeShapeComponentRequestsBus::EventResult(m_radius, GetEntityId(), &TubeShapeComponentRequests::GetRadius);
+            TubeShapeComponentRequestsBus::EventResult(m_radiusAttribute, GetEntityId(), &TubeShapeComponentRequests::GetRadiusAttribute);
+            GenerateVertices();
+        }
     }
 
     void TubeShapeDebugDisplayComponent::GenerateVertices()
     {
         GenerateTubeMesh(
-            m_spline, m_radiusAttribute, m_radius, GetCurrentTransform(),
-            m_tubeShapeMeshConfig.m_endSegments, m_tubeShapeMeshConfig.m_sides,
-            m_tubeShapeMesh.m_vertexBuffer, m_tubeShapeMesh.m_indexBuffer, m_tubeShapeMesh.m_lineBuffer);
+            m_spline, m_radiusAttribute, m_radius, m_tubeShapeMeshConfig.m_endSegments,
+            m_tubeShapeMeshConfig.m_sides, m_tubeShapeMesh.m_vertexBuffer,
+            m_tubeShapeMesh.m_indexBuffer, m_tubeShapeMesh.m_lineBuffer);
     }
 } // namespace LmbrCentral

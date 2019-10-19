@@ -23,7 +23,6 @@
 #include <IRenderAuxGeom.h>
 
 // Statics
-CCryNameR CREBreakableGlass::s_ImpactDecalParamName("");
 const SBreakableGlassCVars* CREBreakableGlass::s_pCVars = NULL;
 float CREBreakableGlass::s_loosenTimer = 0.0f;
 float CREBreakableGlass::s_impactTimer = 0.0f;
@@ -143,11 +142,6 @@ CREBreakableGlass::CREBreakableGlass()
         m_decalPSConsts[i].decal.z = m_decalPSConsts[i].decal.w = invalidUVScale;
     }
 
-    // Ensure shader param name is set
-    if (s_ImpactDecalParamName.length() == 0)
-    {
-        s_ImpactDecalParamName = "gImpactDecals";
-    }
 }//-------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
@@ -176,7 +170,7 @@ bool CREBreakableGlass::InitialiseRenderElement(const SBreakableGlassInitParams&
 #endif
 
     // Copy data
-    memcpy(&m_glassParams, &params, sizeof(SBreakableGlassInitParams));
+    m_glassParams = params;
 
     // Assert minimum size data
     const float minGlassSize = 0.05f;

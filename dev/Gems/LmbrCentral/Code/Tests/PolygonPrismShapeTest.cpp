@@ -18,7 +18,7 @@
 #include <AzCore/Math/VertexContainerInterface.h>
 #include <AzFramework/Components/TransformComponent.h>
 #include <Shape/PolygonPrismShapeComponent.h>
-#include <Tests/TestTypes.h>
+#include <AzCore/UnitTest/TestTypes.h>
 
 using namespace AZ;
 using namespace AzFramework;
@@ -47,6 +47,8 @@ namespace UnitTest
 
         void TearDown() override
         {
+            m_transformComponentDescriptor.reset();
+            m_polygonPrismShapeComponentDescriptor.reset();
             m_serializeContext.reset();
             AllocatorsFixture::TearDown();
         }
@@ -589,5 +591,22 @@ namespace UnitTest
 
         EXPECT_TRUE(aabb.GetMin().IsClose(AZ::Vector3(-1.0f, 9.0f, 40.0f)));
         EXPECT_TRUE(aabb.GetMax().IsClose(AZ::Vector3(11.0f, 21.0f, 44.5f)));
+    }
+
+    TEST_F(PolygonPrismShapeTest, CopyingPolygonPrismDoesNotAssertInEbusSystem)
+    {
+        AZ::EntityId testEntityId{ 42 };
+        PolygonPrismShape sourceShape;
+        sourceShape.Activate(testEntityId);
+        // The assignment shouldn't assert in the EBusEventHandler::BusConnect call 
+        PolygonPrismShape targetShape;
+        AZ_TEST_START_TRACE_SUPPRESSION;
+        targetShape = sourceShape;
+        AZ_TEST_STOP_TRACE_SUPPRESSION(0);
+        // The copy constructor also should assert
+        AZ_TEST_START_TRACE_SUPPRESSION;
+        PolygonPrismShape copyShape(sourceShape);
+        AZ_TEST_STOP_TRACE_SUPPRESSION(0);
+        sourceShape.Deactivate();
     }
 }

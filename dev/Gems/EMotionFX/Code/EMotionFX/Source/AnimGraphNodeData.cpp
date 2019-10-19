@@ -10,35 +10,33 @@
 *
 */
 
-// include required headers
-#include "EMotionFXConfig.h"
-#include "AnimGraphNodeData.h"
-#include "AnimGraphInstance.h"
-#include "AnimGraphNode.h"
+#include <EMotionFX/Source/EMotionFXConfig.h>
+#include <EMotionFX/Source/Allocators.h>
+#include <EMotionFX/Source/AnimGraphInstance.h>
+#include <EMotionFX/Source/AnimGraphNode.h>
+#include <EMotionFX/Source/AnimGraphNodeData.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphNodeData, AnimGraphObjectDataAllocator, 0)
+
     // constructor
     AnimGraphNodeData::AnimGraphNodeData(AnimGraphNode* node, AnimGraphInstance* animGraphInstance)
         : AnimGraphObjectData(reinterpret_cast<AnimGraphObject*>(node), animGraphInstance)
-    {
-        mSyncIndex      = MCORE_INVALIDINDEX32;
-        mInheritFlags   = 0;
-        mPoseRefCount   = 0;
-        mRefDataRefCount = 0;
-        mDuration       = 0.0f;
-        mCurrentTime    = 0.0f;
-        mPreSyncTime    = 0.0f;
-        mPlaySpeed      = 1.0f;
-        mGlobalWeight   = 1.0f;
-        mLocalWeight    = 1.0f;
-        mRefCountedData = nullptr;
-    }
-
-
-    // destructor
-    AnimGraphNodeData::~AnimGraphNodeData()
+        , mDuration(0.0f)
+        , mCurrentTime(0.0f)
+        , mPlaySpeed(1.0f)
+        , mPreSyncTime(0.0f)
+        , mGlobalWeight(1.0f)
+        , mLocalWeight(1.0f)
+        , mSyncIndex(MCORE_INVALIDINDEX32)
+        , mPoseRefCount(0)
+        , mRefDataRefCount(0)
+        , mInheritFlags(0)
+        , m_isMirrorMotion(false)
+        , mRefCountedData(nullptr)
+        , mSyncTrack(nullptr)
     {
     }
 
@@ -46,16 +44,9 @@ namespace EMotionFX
     // static create
     AnimGraphNodeData* AnimGraphNodeData::Create(AnimGraphNode* node, AnimGraphInstance* animGraphInstance)
     {
-        return new AnimGraphNodeData(node, animGraphInstance);
+        return aznew AnimGraphNodeData(node, animGraphInstance);
     }
-
-
-    // create an instance in a piece of memory
-    AnimGraphObjectData* AnimGraphNodeData::Clone(void* destMem, AnimGraphObject* object, AnimGraphInstance* animGraphInstance)
-    {
-        return new(destMem) AnimGraphNodeData(static_cast<AnimGraphNode*>(object), animGraphInstance);
-    }
-
+    
 
     // reset the sync related data
     void AnimGraphNodeData::Clear()
@@ -67,8 +58,8 @@ namespace EMotionFX
         mGlobalWeight   = 1.0f;
         mLocalWeight    = 1.0f;
         mInheritFlags   = 0;
+        m_isMirrorMotion = false;
         mSyncIndex      = MCORE_INVALIDINDEX32;
-        mSyncTrack.Clear();
     }
 
 
@@ -89,6 +80,7 @@ namespace EMotionFX
         mSyncIndex      = nodeData->mSyncIndex;
         mGlobalWeight   = nodeData->mGlobalWeight;
         mInheritFlags   = nodeData->mInheritFlags;
+        m_isMirrorMotion = nodeData->m_isMirrorMotion;
         mSyncTrack      = nodeData->mSyncTrack;
     }
 
@@ -97,5 +89,42 @@ namespace EMotionFX
     {
         delete this;
     }
-}   // namespace EMotionFX
 
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    void NodeDataAutoRefCountMixin::IncreaseDataRefCountForNode(AnimGraphNode* node, AnimGraphInstance* animGraphInstance)
+    {
+        if (AZStd::find(m_dataRefCountIncreasedNodes.begin(), m_dataRefCountIncreasedNodes.end(), node) == m_dataRefCountIncreasedNodes.end())
+        {
+            node->IncreaseRefDataRefCount(animGraphInstance);
+            m_dataRefCountIncreasedNodes.emplace_back(node);
+        }
+    }
+
+    void NodeDataAutoRefCountMixin::DecreaseDataRefCounts(AnimGraphInstance* animGraphInstance)
+    {
+        for (AnimGraphNode* node : m_dataRefCountIncreasedNodes)
+        {
+            node->DecreaseRefDataRef(animGraphInstance);
+        }
+        m_dataRefCountIncreasedNodes.clear();
+    }
+
+    void NodeDataAutoRefCountMixin::IncreasePoseRefCountForNode(AnimGraphNode* node, AnimGraphInstance* animGraphInstance)
+    {
+        if (AZStd::find(m_poseRefCountIncreasedNodes.begin(), m_poseRefCountIncreasedNodes.end(), node) == m_poseRefCountIncreasedNodes.end())
+        {
+            node->IncreasePoseRefCount(animGraphInstance);
+            m_poseRefCountIncreasedNodes.emplace_back(node);
+        }
+    }
+
+    void NodeDataAutoRefCountMixin::DecreasePoseRefCounts(AnimGraphInstance* animGraphInstance)
+    {
+        for (AnimGraphNode* node : m_poseRefCountIncreasedNodes)
+        {
+            node->DecreaseRef(animGraphInstance);
+        }
+        m_poseRefCountIncreasedNodes.clear();
+    }
+} // namespace EMotionFX

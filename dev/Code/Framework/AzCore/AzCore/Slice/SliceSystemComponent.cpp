@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include "SliceSystemComponent.h"
 #include "SliceAsset.h"
@@ -21,7 +20,7 @@ namespace AZ
     {
         if (SerializeContext* serializeContext = azrtti_cast<SerializeContext*>(context))
         {
-            serializeContext->Class<SliceSystemComponent, AZ::Component>();
+            serializeContext->Class<SliceSystemComponent, Component>();
 
             if (EditContext* editContext = serializeContext->GetEditContext())
             {
@@ -77,5 +76,3 @@ namespace AZ
     }
 
 } // namespace AZ
-
-#endif // AZ_UNITY_BUILD

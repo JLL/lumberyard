@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-*or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+*or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -38,7 +38,7 @@
 
 #if defined (AZ_PLATFORM_WINDOWS)
 #define LEGACY_RC_RELATIVE_PATH "/rc/rc.exe"    // Location of the legacy RC compiler relative to the BinXX folder the asset processor resides in
-#elif defined (AZ_PLATFORM_APPLE_OSX)
+#elif defined (AZ_PLATFORM_MAC)
 #define LEGACY_RC_RELATIVE_PATH "/rc/rc"    // Location of the legacy RC compiler relative to the BinXX folder the asset processor resides in
 #else
 #error Unsupported Platform for RC
@@ -63,10 +63,10 @@ namespace AssetProcessor
     //! Special ini configuration keyword to mark a asset pattern for copying
     const QString ASSET_PROCESSOR_CONFIG_KEYWORD_COPY = "copy";
 
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
     // remove the above IFDEF as soon as the AzToolsFramework ProcessCommunicator functions on OSX, along with the rest of the similar IFDEFs in this file.
 
-#endif // AZ_PLATFORM_WINDOWS || AZ_PLATFORM_APPLE
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
 
     namespace Internal
     {
@@ -103,6 +103,7 @@ namespace AssetProcessor
 
             // If this is a copy job or critical is set to true in the ini file, then its a critical job
             descriptor.m_critical = recognizer->m_isCritical || isCopyJob;
+            descriptor.m_checkServer = recognizer->m_checkServer;
 
             // If the priority of copy job is default then we update it to 1
             // This will ensure that copy jobs will be processed before other critical jobs having default priority
@@ -149,7 +150,7 @@ namespace AssetProcessor
             return false;
         }
 
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
 
         if (!AZ::IO::SystemFile::Exists(rcExecutableFullPath.toUtf8().data()))
         {
@@ -160,16 +161,16 @@ namespace AssetProcessor
         this->m_rcExecutableFullPath = rcExecutableFullPath;
         this->m_resourceCompilerInitialized = true;
         return true;
-#else // defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#else // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
         AZ_TracePrintf(AssetProcessor::DebugChannel, "There is no implementation for how to compile assets on this platform");
         return false;
-#endif // defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
     }
 
     bool NativeLegacyRCCompiler::Execute(const QString& inputFile, const QString& watchFolder, const QString& platformIdentifier, 
         const QString& params, const QString& dest, const AssetBuilderSDK::JobCancelListener* jobCancelListener, Result& result) const
     {
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
         if (!this->m_resourceCompilerInitialized)
         {
             result.m_exitCode = JobExitCode_RCCouldNotBeLaunched;
@@ -269,12 +270,12 @@ namespace AssetProcessor
 
         return finishedOK;
 
-#else // AZ_PLATFORM_WINDOWS || AZ_PLATFORM_APPLE
+#else // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
         result.m_exitCode = JobExitCode_RCCouldNotBeLaunched;
         result.m_crashed = false;
         AZ_Error("RC Builder", false, "There is no implementation for how to compile assets via RC on this platform");
         return false;
-#endif // AZ_PLATFORM_WINDOWS || AZ_PLATFORM_APPLE
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
     }
 
     QString NativeLegacyRCCompiler::BuildCommand(const QString& inputFile, const QString& watchFolder, const QString& platformIdentifier, const QString& params, const QString& dest)
@@ -292,12 +293,12 @@ namespace AssetProcessor
             QString gameRoot = assetRoot.absoluteFilePath(AssetUtilities::ComputeGameName());
             AZStd::string appBranchToken;
             AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::CalculateBranchTokenForAppRoot, appBranchToken);
-            cmdLine = QString("\"%1\" /p=%2 %3 /unattended=true /threads=1 /gameroot=\"%4\" /watchfolder=\"%6\" /targetroot=\"%5\" /logprefix=\"%5/\" /port=%7 /gamesubdirectory=\"%8\" /branchtoken=\"%9\"");
+            cmdLine = QString("\"%1\" /p=%2 %3 /unattended=true /gameroot=\"%4\" /watchfolder=\"%6\" /targetroot=\"%5\" /logprefix=\"%5/\" /port=%7 /gamesubdirectory=\"%8\" /branchtoken=\"%9\"");
             cmdLine = cmdLine.arg(inputFile, platformIdentifier, params, gameRoot, dest, watchFolder).arg(portNumber).arg(gameName).arg(appBranchToken.c_str());
         }
         else
         {
-            cmdLine = QString("\"%1\" /p=%2 %3 /threads=1").arg(inputFile, platformIdentifier, params);
+            cmdLine = QString("\"%1\" /p=%2 %3").arg(inputFile, platformIdentifier, params);
         }
         return cmdLine;
     }
@@ -369,7 +370,7 @@ namespace AssetProcessor
     };
 
     InternalAssetRecognizer::InternalAssetRecognizer(const AssetRecognizer& src, const QString& builderId, const QHash<QString, AssetPlatformSpec>& assetPlatformSpecByPlatform)
-        : AssetRecognizer(src.m_name, src.m_testLockSource, src.m_priority, src.m_isCritical, src.m_supportsCreateJobs, src.m_patternMatcher, src.m_version, src.m_productAssetType)
+        : AssetRecognizer(src.m_name, src.m_testLockSource, src.m_priority, src.m_isCritical, src.m_supportsCreateJobs, src.m_patternMatcher, src.m_version, src.m_productAssetType, src.m_checkServer)
         , m_builderId(builderId)
     {
         // assetPlatformSpecByPlatform is a hash table like
@@ -455,8 +456,8 @@ namespace AssetProcessor
         QString appRoot;
         QString filename;
         QString binFolder;
-        QString appDirStr;
 
+        QString appDirStr;
         AssetUtilities::ComputeApplicationInformation(appDirStr, filename);
         rcAbsolutePathOut = QString("%1/%2").arg(appDirStr).arg(QString(LEGACY_RC_RELATIVE_PATH));
         if (!AZ::IO::SystemFile::Exists(rcAbsolutePathOut.toUtf8().data()))
@@ -466,7 +467,7 @@ namespace AssetProcessor
 
             return AZ::IO::SystemFile::Exists(rcAbsolutePathOut.toUtf8().data());
         }
-
+        
         return true;
     }
 
@@ -545,6 +546,10 @@ namespace AssetProcessor
             QString builderName = builderInfo.GetName();
             AZStd::vector<AssetBuilderSDK::AssetBuilderPattern> builderPatterns;
 
+            bool supportsCreateJobs = false;
+            // intentionaly using a set here, as we want it to be the same order each time for hashing.
+            AZStd::set<AZStd::string> fingerprintRelevantParameters;
+
             for (auto internalAssetRecognizer : *internalRecognizerList)
             {
                 // so referring to the structure explanation above, internalAssetRecognizer is 
@@ -552,7 +557,7 @@ namespace AssetProcessor
                 if (internalAssetRecognizer->m_platformSpecsByPlatform.size() == 0)
                 {
                     delete internalAssetRecognizer;
-                    AZ_Warning(AssetProcessor::DebugChannel, "Skipping recognizer %s, no platforms supported\n", builderName.toUtf8().data());
+                    AZ_Warning(AssetProcessor::DebugChannel, false, "Skipping recognizer %s, no platforms supported\n", builderName.toUtf8().data());
                     continue;
                 }
 
@@ -565,16 +570,48 @@ namespace AssetProcessor
                     continue;
                 }
 
+                for (auto iteratorValue = internalAssetRecognizer->m_platformSpecsByPlatform.begin(); iteratorValue != internalAssetRecognizer->m_platformSpecsByPlatform.end(); ++iteratorValue)
+                {
+                    fingerprintRelevantParameters.insert(AZStd::string::format("%s-%s", iteratorValue.key().toUtf8().constData(), iteratorValue.value().m_extraRCParams.toUtf8().constData()));
+                }
+
+                // note that the version number must be included here, despite the builder dirty-check function taking version into account
+                // because the RC Builder is just a single builder (with version#0) that defers to these "internal" builders when called upon.
+                if (!internalAssetRecognizer->m_version.isEmpty())
+                {
+                    fingerprintRelevantParameters.insert(internalAssetRecognizer->m_version.toUtf8().constData());
+                }
+                fingerprintRelevantParameters.insert(internalAssetRecognizer->m_productAssetType.ToString<AZStd::string>());
+
                 // Register the recognizer
                 builderPatterns.push_back(internalAssetRecognizer->m_patternMatcher.GetBuilderPattern());
                 m_assetRecognizerDictionary[internalAssetRecognizer->m_paramID] = internalAssetRecognizer;
                 AZ_TracePrintf(AssetProcessor::DebugChannel, "Registering %s as a %s\n", internalAssetRecognizer->m_name.toUtf8().data(),
                     builderName.toUtf8().data());
+
+                supportsCreateJobs = supportsCreateJobs || (internalAssetRecognizer->m_supportsCreateJobs);
             }
             // Register the builder desc if its registrable
             if (builderInfo.GetType() == BuilderIdAndName::Type::REGISTERED_BUILDER)
             {
                 AssetBuilderSDK::AssetBuilderDesc builderDesc = CreateBuilderDesc(builderId, builderPatterns);
+                
+                // RC Builder also needs to include its platforms and its RC command lines so that if you change this, the jobs
+                // are re-evaluated.
+                size_t currentHash = 0;
+                for (const AZStd::string& element : fingerprintRelevantParameters)
+                {
+                    AZStd::hash_combine<AZStd::string>(currentHash, element);
+                }
+
+                builderDesc.m_analysisFingerprint = AZStd::string::format("0x%llX", currentHash);
+
+                // the "rc" builder can only emit dependencies if it has createjobs in a recognizer.
+                if (!supportsCreateJobs)
+                {
+                    // optimization: copy builder emits no dependencies since its just a copy builder.
+                    builderDesc.m_flags |= AssetBuilderSDK::AssetBuilderDesc::BF_EmitsNoDependencies;
+                }
                 AssetBuilderSDK::AssetBuilderBus::Broadcast(&AssetBuilderSDK::AssetBuilderBusTraits::RegisterBuilderInformation, builderDesc);
             }
         }

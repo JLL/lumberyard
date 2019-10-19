@@ -12,31 +12,19 @@
 
 #pragma once
 
-// include the required headers
 #include "EMotionFXConfig.h"
 #include "AnimGraphNode.h"
 
 
 namespace EMotionFX
 {
-    /**
-     *
-     *
-     *
-     */
     class EMFX_API AnimGraphEntryNode
         : public AnimGraphNode
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphEntryNode, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_BLENDTREENODES);
     public:
-        AZ_RTTI(AnimGraphEntryNode, "{3F02348C-07CC-4303-B1C9-D4585CE04529}", AnimGraphNode);
+        AZ_RTTI(AnimGraphEntryNode, "{3F02348C-07CC-4303-B1C9-D4585CE04529}", AnimGraphNode)
+        AZ_CLASS_ALLOCATOR_DECL
 
-        enum
-        {
-            TYPE_ID = 0x38020071
-        };
-
-        //
         enum
         {
             OUTPUTPORT_RESULT   = 0
@@ -47,36 +35,31 @@ namespace EMotionFX
             PORTID_OUTPUT_POSE = 0
         };
 
-        static AnimGraphEntryNode* Create(AnimGraph* animGraph);
+        AnimGraphEntryNode();
+        ~AnimGraphEntryNode();
 
-        void RegisterPorts() override;
-        void RegisterAttributes() override;
+        bool InitAfterLoading(AnimGraph* animGraph) override;
 
-        uint32 GetVisualColor() const override                      { return MCore::RGBA(50, 200, 50); }
+        AZ::Color GetVisualColor() const override                   { return AZ::Color(0.2f, 0.78f, 0.2f, 1.0f); }
         bool GetCanActAsState() const override                      { return true; }
         bool GetSupportsVisualization() const override              { return true; }
         AnimGraphPose* GetMainOutputPose(AnimGraphInstance* animGraphInstance) const override     { return GetOutputPose(animGraphInstance, OUTPUTPORT_RESULT)->GetValue(); }
         bool GetHasOutputPose() const override                      { return true; }
-        bool GetCanBeInsideSubStateMachineOnly() const override     { return true; }
         bool GetHasVisualOutputPorts() const override               { return false; }
+        bool GetCanBeInsideChildStateMachineOnly() const override   { return true; }
         bool GetCanHaveOnlyOneInsideParent() const override         { return true; }
-        AnimGraphObjectData* CreateObjectData() override;
 
         const char* GetPaletteName() const override;
         AnimGraphObject::ECategory GetPaletteCategory() const override;
 
-        const char* GetTypeString() const override;
-        AnimGraphObject* Clone(AnimGraph* animGraph) override;
-
-        AnimGraphNode* FindSourceNode(AnimGraphInstance* animGraphInstance);
+        static void Reflect(AZ::ReflectContext* context);
 
     private:
-        AnimGraphEntryNode(AnimGraph* animGraph);
-        ~AnimGraphEntryNode();
+        AnimGraphNode* FindSourceNode(AnimGraphInstance* animGraphInstance) const;
 
         void Output(AnimGraphInstance* animGraphInstance) override;
         void Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
         void TopDownUpdate(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
         void PostUpdate(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
     };
-}   // namespace EMotionFX
+} // namespace EMotionFX

@@ -9,12 +9,14 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "StdAfx.h"
+#include "stdafx.h"
 #include "PropertyEnumComboBoxCtrl.hxx"
 #include "PropertyQTConstants.h"
 #include "DHQComboBox.hxx"
 #include <QtWidgets/QComboBox>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -58,7 +60,8 @@ namespace AzToolsFramework
                 break;
             }
         }
-        AZ_Warning("AzToolsFramework", indexWasFound == true, "No index in property enum for value %d", value);
+
+        AZ_Warning("AzToolsFramework", indexWasFound == true || (value == 0 && m_enumValues.size() > 0), "No index in property enum for value %d", value);
 
         m_pComboBox->blockSignals(false);
     }

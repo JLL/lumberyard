@@ -34,13 +34,16 @@ namespace ScriptCanvas
                     {
                         serializeContext->Class<Divide, ArithmeticExpression>()
                             ->Version(0)
+                            ->Attribute(AZ::Script::Attributes::Deprecated, true)
                             ;
 
                         if (AZ::EditContext* editContext = serializeContext->GetEditContext())
                         {
                             editContext->Class<Divide>("Divide", "Divide")
-                                ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                                    ->Attribute(AZ::Edit::Attributes::Category, "Math/Number")
+                                ->ClassElement(AZ::Edit::ClassElements::EditorData, "This node is deprecated use the Divide (/) node instead, it provides contextual type and slot configurations.")
+                                    ->Attribute(ScriptCanvas::Attributes::Node::TitlePaletteOverride, "DeprecatedNodeTitlePalette")
+                                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
+                                    ->Attribute(AZ::Edit::Attributes::Category, "Math/Number/Deprecated")
                                     ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/ScriptCanvas/Placeholder.png")
                                     ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
                                 ;
@@ -48,17 +51,19 @@ namespace ScriptCanvas
                     }
                 }
 
-                void Visit(NodeVisitor& visitor) const override
-                {
-                    visitor.Visit(*this);
-                }
-
             protected:
                 Datum Evaluate(const Datum& lhs, const Datum& rhs) override
                 {
                     const Data::NumberType lhsValue = *lhs.GetAs<Data::NumberType>();
                     const Data::NumberType rhsValue = *rhs.GetAs<Data::NumberType>();
-                    return Datum(!AZ::IsClose(rhsValue, 0.0, 0.0001) ? lhsValue / rhsValue : lhsValue);
+
+                    if (AZ::IsClose(rhsValue, 0.0, 0.0001))
+                    {
+                        SCRIPTCANVAS_REPORT_ERROR((*this), "Divide by zero");
+                        return Datum();
+                    }
+
+                    return Datum(lhsValue / rhsValue);
                 }
             };
 
@@ -75,7 +80,7 @@ namespace ScriptCanvas
                 static const char* GetOperatorDesc() { return "Perform division between two numbers"; }
                 static const char* GetIconPath() { return "Editor/Icons/ScriptCanvas/Divide.png"; }
 
-                void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
+                
 
             };
 #endif // #if defined(EXPRESSION_TEMPLATES_ENABLED)

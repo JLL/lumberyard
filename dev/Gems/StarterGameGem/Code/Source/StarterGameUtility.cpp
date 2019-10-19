@@ -16,11 +16,11 @@
 #include <AzCore/RTTI/BehaviorContext.h>
 
 #include <AzCore/Component/ComponentApplicationBus.h>
-#include <AZCore/Component/TransformBus.h>
+#include <AzCore/Component/TransformBus.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/std/time.h>
-#include <CryAction.h>
+#include <ILevelSystem.h>
 #include <ICryAnimation.h>
 #include <AzFramework/Physics/PhysicsSystemComponentBus.h>
 #include <LmbrCentral/Rendering/MeshComponentBus.h>
@@ -28,6 +28,7 @@
 #include <EMotionFX/Source/EMotionFX.h>
 #include <Include/Integration/ActorComponentBus.h>
 #include <Source/Integration/Components/ActorComponent.h>
+#include "PersistentDataSystemComponent.h"
 
 namespace StarterGameGem
 {
@@ -65,35 +66,35 @@ namespace StarterGameGem
 
     bool StarterGameUtility::IsGameStarted()
     {
-        //CCryAction* pCryAction = CCryAction::GetCryAction();
-        CCryAction* pCryAction = static_cast<CCryAction*>(gEnv->pGame->GetIGameFramework());
-        return pCryAction->IsGameStarted();
+        return gEnv->pSystem->GetSystemGlobalState() == ESystemGlobalState::ESYSTEM_GLOBAL_STATE_RUNNING; // RUNNING is set after LEVEL_LOADED
     }
 
     void StarterGameUtility::RestartLevel(const bool& fade)
     {
-        //CCryAction* pCryAction = CCryAction::GetCryAction();
-        CCryAction* pCryAction = static_cast<CCryAction*>(gEnv->pGame->GetIGameFramework());
-        pCryAction->ScheduleEndLevelNow(pCryAction->GetLevelName(), fade);
+        // Restart level and clear all persistent data
+        const char* levelName = gEnv->pSystem->GetILevelSystem()->GetCurrentLevel()->GetLevelInfo()->GetName();
+        gEnv->pSystem->GetILevelSystem()->UnLoadLevel();
+        PersistentDataSystemRequestBus::Broadcast(&PersistentDataSystemRequestBus::Events::ClearAllData);
+        gEnv->pSystem->GetILevelSystem()->LoadLevel(levelName);
     }
-	bool StarterGameUtility::IsLegacyCharacter(const AZ::EntityId& entityId)
-	{
+    bool StarterGameUtility::IsLegacyCharacter(const AZ::EntityId& entityId)
+    {
         ICharacterInstance* character = nullptr;
         EBUS_EVENT_ID_RESULT(character, entityId, LmbrCentral::SkinnedMeshComponentRequestBus, GetCharacterInstance);
-		return character != nullptr;
-	}
+        return character != nullptr;
+    }
     AZ::Transform StarterGameUtility::GetJointWorldTM(const AZ::EntityId& entityId, const AZStd::string& bone)
     {
         AZ::Transform tm = AZ::Transform::CreateIdentity();
         EBUS_EVENT_ID_RESULT(tm, entityId, AZ::TransformBus, GetWorldTM);
-		AZ::s32 jointIndex;
-		EBUS_EVENT_ID_RESULT(jointIndex, entityId, LmbrCentral::SkeletalHierarchyRequestBus, GetJointIndexByName, bone.c_str());
-		if (jointIndex >= 0)
-		{
-			AZ::Transform characterRelativeTransform;
-			EBUS_EVENT_ID_RESULT(characterRelativeTransform, entityId, LmbrCentral::SkeletalHierarchyRequestBus, GetJointTransformCharacterRelative, jointIndex);
-			tm *= characterRelativeTransform;
-		}
+        AZ::s32 jointIndex;
+        EBUS_EVENT_ID_RESULT(jointIndex, entityId, LmbrCentral::SkeletalHierarchyRequestBus, GetJointIndexByName, bone.c_str());
+        if (jointIndex >= 0)
+        {
+            AZ::Transform characterRelativeTransform;
+            EBUS_EVENT_ID_RESULT(characterRelativeTransform, entityId, LmbrCentral::SkeletalHierarchyRequestBus, GetJointTransformCharacterRelative, jointIndex);
+            tm *= characterRelativeTransform;
+        }
         return tm;
     }
 
@@ -111,10 +112,10 @@ namespace StarterGameGem
     // Gets the surface type of the first thing that's hit.
     int StarterGameUtility::GetSurfaceFromRayCast(const AZ::Vector3& pos, const AZ::Vector3& direction)
     {
-        AZ::u32 query = 15;			// hit everything
-        AZ::u32 pierceability = 14;	// stop at the first thing
+        AZ::u32 query = 15;         // hit everything
+        AZ::u32 pierceability = 14; // stop at the first thing
         float maxDistance = 1.1f;
-        AZ::u32 maxHits = 1;		// only care about the first thing
+        AZ::u32 maxHits = 1;        // only care about the first thing
 
         AZStd::vector<ray_hit> cryHits(maxHits);
         Vec3 start = AZVec3ToLYVec3(pos);
@@ -185,8 +186,8 @@ namespace StarterGameGem
         {
             behaviorContext->Class<StarterGameUtility>("StarterGameUtility")
                 ->Method("IsGameStarted", &IsGameStarted)
-				->Method("IsLegacyCharacter", &IsLegacyCharacter)
-				->Method("RestartLevel", &RestartLevel)
+                ->Method("IsLegacyCharacter", &IsLegacyCharacter)
+                ->Method("RestartLevel", &RestartLevel)
 
                 ->Method("GetJointWorldTM", &GetJointWorldTM)
 
@@ -226,7 +227,5 @@ namespace StarterGameGem
                 ->Property("lookAt", BehaviorValueProperty(&CompanionPOIParams::m_lookAt))
             ;
         }
-
     }
-
 }

@@ -15,9 +15,10 @@
 
 #include "Cry_Geo.h"
 #include "Cry_Camera.h"
-#include <CryEngineAPI.h>
+#include "ITexture.h"
 #include <IFlares.h> // <> required for Interfuscator
 #include <AzCore/Casting/numeric_cast.h>
+#include <AzCore/std/containers/intrusive_slist.h>
 
 #include "IResourceCompilerHelper.h" //  for IResourceCompilerHelper::ERcCallResult
 
@@ -25,7 +26,7 @@
 struct SRenderingPassInfo;
 struct IFoliage;
 struct SRTStack;
-
+struct SFogVolumeData;
 // Callback used for DXTCompress
 typedef void (* MIPDXTcallback)(const void* buffer, size_t count, void* userData);
 
@@ -49,7 +50,6 @@ struct ICaptureFrameListener
         eCFF_CaptureThisFrame = (1 << 1),
     };
 };
-
 
 // Forward declarations.
 //////////////////////////////////////////////////////////////////////
@@ -106,6 +106,7 @@ class IImageFile;
 class CRenderView;
 struct SDynTexture2;
 class CTexture;
+enum ETexPool : int;
 
 //////////////////////////////////////////////////////////////////////
 typedef unsigned char bvec4[4];
@@ -848,7 +849,11 @@ struct SDrawTextInfo
 #define MAX_RESOLUTION_SCALE (4.0f)
 
 #if defined(AZ_RESTRICTED_PLATFORM)
-    #include AZ_RESTRICTED_FILE(IRenderer_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/IRenderer_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/IRenderer_h_provo.inl"
+    #endif
 #else
 //SLI/CROSSFIRE GPU maximum count
     #define MAX_GPU_NUM 4
@@ -1069,7 +1074,6 @@ struct TransformationMatrices
 struct ISvoRenderer
 {
     virtual bool IsShaderItemUsedForVoxelization(SShaderItem& rShaderItem, IRenderNode* pRN){ return false; }
-    virtual void SetEditingHelper(const Sphere& sp){}
     virtual void Release(){}
 };
 
@@ -1117,6 +1121,10 @@ struct IRenderer
     virtual bool IsPost3DRendererEnabled() const { return false; }
 
     virtual int GetFeatures() = 0;
+    virtual const void SetApiVersion(const AZStd::string& apiVersion) = 0;
+    virtual const void SetAdapterDescription(const AZStd::string& adapterDescription) = 0;
+    virtual const AZStd::string& GetApiVersion() const = 0;
+    virtual const AZStd::string& GetAdapterDescription() const = 0;
     virtual void GetVideoMemoryUsageStats(size_t& vidMemUsedThisFrame, size_t& vidMemUsedRecently, bool bGetPoolsSizes = false) = 0;
     virtual int GetNumGeomInstances() = 0;
     virtual int GetNumGeomInstanceDrawCalls() = 0;
@@ -1219,6 +1227,20 @@ struct IRenderer
     //  Draws user primitives.
     virtual void DrawDynVB(SVF_P3F_C4B_T2F* pBuf, uint16* pInds, int nVerts, int nInds, const PublicRenderPrimitiveType nPrimType) = 0;
 
+    struct DynUiPrimitive : public AZStd::intrusive_slist_node<DynUiPrimitive>
+    {
+        SVF_P2F_C4B_T2F_F4B* m_vertices = nullptr;
+        uint16* m_indices = nullptr;
+        int m_numVertices = 0;
+        int m_numIndices = 0;
+    };
+
+    using DynUiPrimitiveList = AZStd::intrusive_slist<DynUiPrimitive, AZStd::slist_base_hook<DynUiPrimitive>>;
+
+    // Summary:
+    //  Draws a list of UI primitives as one draw call (if using separate render thread)
+    virtual void DrawDynUiPrimitiveList(DynUiPrimitiveList& primitives, int totalNumVertices, int totalNumIndices) = 0;
+
     // Summary:
     //  Sets the renderer camera.
     virtual void  SetCamera(const CCamera& cam) = 0;
@@ -1228,6 +1250,9 @@ struct IRenderer
     virtual const CCamera& GetCamera() = 0;
 
     virtual CRenderView* GetRenderViewForThread(int nThreadID) = 0;
+    // Summary:
+    //  Gets the renderer previous camera.
+    //virtual const CCamera& GetCameraPrev() = 0;
 
     // Summary:
     //  Sets delta gamma.
@@ -1256,6 +1281,10 @@ struct IRenderer
     // Summary:
     //  Sets the current binded texture.
     virtual void  SetTexture(int tnum) = 0;
+
+    // Summary:
+    //  Sets the current bound texture for the given texture unit
+    virtual void  SetTexture(int tnum, int nUnit) = 0;
 
     // Summary:
     //  Sets the white texture.
@@ -1308,11 +1337,11 @@ struct IRenderer
 
     // Summary:
     //  Gets height of the main rendering resolution.
-    virtual int   GetHeight() = 0;
+    virtual int   GetHeight() const = 0;
 
     // Summary:
     //  Gets width of the main rendering resolution.
-    virtual int   GetWidth() = 0;
+    virtual int   GetWidth() const = 0;
 
     // Summary:
     //  Gets Pixel Aspect Ratio.
@@ -1320,11 +1349,11 @@ struct IRenderer
 
     // Summary:
     //  Gets the height of the overlay viewport where UI and debug output are rendered.
-    virtual int   GetOverlayHeight() = 0;
+    virtual int   GetOverlayHeight() const = 0;
 
     // Summary:
     //  Gets the width of the overlay viewport where UI and debug output are rendered.
-    virtual int   GetOverlayWidth() = 0;
+    virtual int   GetOverlayWidth() const = 0;
 
     // Summary:
     //  Gets the maximum dimension for a square custom render resolution.
@@ -1418,7 +1447,8 @@ struct IRenderer
     /////////////////////////////////////////////////////////////////////////////////
     //Replacement functions for Font
 
-    virtual int  FontCreateTexture(int Width, int Height, byte* pData, ETEX_Format eTF = eTF_R8G8B8A8, bool genMips = false) = 0;
+    static const bool FontCreateTextureGenMipsDefaultValue = false;
+    virtual int  FontCreateTexture(int Width, int Height, byte* pData, ETEX_Format eTF = eTF_R8G8B8A8, bool genMips = FontCreateTextureGenMipsDefaultValue, const char* textureName = nullptr) = 0;
     virtual bool FontUpdateTexture(int nTexId, int X, int Y, int USize, int VSize, byte* pData) = 0;
     virtual void FontSetTexture(int nTexId, int nFilterMode) = 0;
     virtual void FontSetRenderingState(bool overrideViewProjMatrices, TransformationMatrices& backupMatrices) = 0;
@@ -1478,7 +1508,7 @@ struct IRenderer
     virtual uint64      EF_GetRemapedShaderMaskGen(const char* name, uint64 nMaskGen = 0, bool bFixup = 0) = 0;
 
     virtual uint64      EF_GetShaderGlobalMaskGenFromString(const char* szShaderName, const char* szShaderGen, uint64 nMaskGen = 0) = 0;
-    virtual const char* EF_GetStringFromShaderGlobalMaskGen(const char* szShaderName, uint64 nMaskGen = 0) = 0;
+    virtual AZStd::string EF_GetStringFromShaderGlobalMaskGen(const char* szShaderName, uint64 nMaskGen = 0) = 0;
 
     virtual const SShaderProfile& GetShaderProfile(EShaderType eST) const = 0;
     virtual void          EF_SetShaderQuality(EShaderType eST, EShaderQuality eSQ) = 0;
@@ -1522,7 +1552,7 @@ struct IRenderer
 
     // Summary:
     //  Creates new RE (RenderElement) of type (edt).
-    virtual CRendElementBase* EF_CreateRE (EDataType edt) = 0;
+    virtual IRenderElement* EF_CreateRE (EDataType edt) = 0;
 
     // Summary:
     //  Starts using of the shaders (return first index for allow recursions).
@@ -1540,7 +1570,7 @@ struct IRenderer
 
     // Summary:
     //  Adds shader to the list.
-    virtual void EF_AddEf (CRendElementBase* pRE, SShaderItem& pSH, CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter) = 0;
+    virtual void EF_AddEf (IRenderElement* pRE, SShaderItem& pSH, CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter) = 0;
 
     //! Draw all shaded REs in the list
     virtual void EF_EndEf3D (const int nFlags, const int nPrecacheUpdateId, const int nNearPrecacheUpdateId, const SRenderingPassInfo& passInfo) = 0;
@@ -1634,6 +1664,8 @@ struct IRenderer
     // Note:
     //  3d engine set this color to fog color.
     virtual void SetClearColor(const Vec3& vColor) = 0;
+  
+    virtual void SetClearBackground(bool bClearBackground) = 0;
 
     // Summary:
     //  Creates/deletes RenderMesh object.
@@ -1657,6 +1689,15 @@ struct IRenderer
 
     //Pass false to get a frameID that increments by one each frame. For this case the increment happens in the game thread at the beginning of the frame.
     virtual int GetFrameID(bool bIncludeRecursiveCalls = true) = 0;
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // Returns a frame ID that is sequential for the active camera.  This is 
+    // useful for camera-specific temporal data like motion vectors.
+    virtual int GetCameraFrameID() const = 0;
+
+    // Returns true when rendering the scene to a texture
+    virtual bool IsRenderToTextureActive() const { return false; };
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 
     virtual void MakeMatrix(const Vec3& pos, const Vec3& angles, const Vec3& scale, Matrix34* mat) = 0;
 
@@ -1709,6 +1750,7 @@ struct IRenderer
     virtual IColorGradingController* GetIColorGradingController() = 0;
     virtual IStereoRenderer* GetIStereoRenderer() = 0;
 
+    virtual ITexture* Create2DTexture(const char* name, int width, int height, int numMips, int flags, unsigned char* data, ETEX_Format format) = 0;
     virtual void TextToScreen(float x, float y, const char* format, ...) PRINTF_PARAMS(4, 5) = 0;
     virtual void TextToScreenColor(int x, int y, float r, float g, float b, float a, const char* format, ...) PRINTF_PARAMS(8, 9) = 0;
     virtual void ResetToDefault() = 0;
@@ -1836,8 +1878,8 @@ struct IRenderer
     virtual void RemoveSyncWithMainListener(const ISyncMainWithRenderListener* pListener) = 0;
 
     virtual void Set2DMode(uint32 orthoX, uint32 orthoY, TransformationMatrices& backupMatrices, float znear = -1e10f, float zfar = 1e10f) = 0;
-
     virtual void Unset2DMode(const TransformationMatrices& restoringMatrices) = 0;
+    virtual void Set2DModeNonZeroTopLeft(float orthoLeft, float orthoTop, float orthoWidth, float orthoHeight, TransformationMatrices& backupMatrices, float znear = -1e10f, float zfar = 1e10f) = 0;
 
     virtual int ScreenToTexture(int nTexID) = 0;
     virtual void EnableSwapBuffers(bool bEnable) = 0;
@@ -1852,8 +1894,9 @@ struct IRenderer
 
     virtual int CreateRenderTarget(const char* name, int nWidth, int nHeight, const ColorF& clearColor, ETEX_Format eTF) = 0;
     virtual bool DestroyRenderTarget (int nHandle) = 0;
+    virtual bool ResizeRenderTarget(int nHandle, int nWidth, int nHeight) = 0;
     virtual bool SetRenderTarget(int nHandle, SDepthTexture* pDepthSurf = nullptr) = 0;
-    virtual SDepthTexture* CreateDepthSurface(int nWidth, int nHeight, bool bAA) = 0;
+    virtual SDepthTexture* CreateDepthSurface(int nWidth, int nHeight, bool shaderResourceView = false) = 0;
     virtual void DestroyDepthSurface(SDepthTexture* pDepthSurf) = 0;
 
     virtual IOpticsElementBase* CreateOptics(EFlareType type) const = 0;
@@ -1938,7 +1981,7 @@ struct IRenderer
     virtual int GetPolygonCountByType(uint32 EFSList, EVertexCostTypes vct, uint32 z, bool bCalledFromMainThread = true) = 0;
 
     virtual void SetCloudShadowsParams(int nTexID, const Vec3& speed, float tiling, bool invert, float brightness) = 0;
-    virtual uint16 PushFogVolumeContribution(const ColorF& fogVolumeContrib, const SRenderingPassInfo& passInfo) = 0;
+    virtual uint16 PushFogVolumeContribution(const SFogVolumeData& fogVolData, const SRenderingPassInfo& passInfo) = 0;
     virtual void PushFogVolume(class CREFogVolume* pFogVolume, const SRenderingPassInfo& passInfo) = 0;
 
     virtual int GetMaxTextureSize() = 0;
@@ -2008,11 +2051,11 @@ struct IRenderer
     };
 
     //Debug draw call info (per node)
-    typedef std::map< IRenderNode*, IRenderer::SDrawCallCountInfo > RNDrawcallsMapNode;
+    typedef AZStd::unordered_map< IRenderNode*, IRenderer::SDrawCallCountInfo, AZStd::hash<IRenderNode*>, AZStd::equal_to<IRenderNode*>, AZ::StdLegacyAllocator > RNDrawcallsMapNode;
     typedef RNDrawcallsMapNode::iterator RNDrawcallsMapNodeItor;
 
     //Debug draw call info (per mesh)
-    typedef std::map< IRenderMesh*, IRenderer::SDrawCallCountInfo > RNDrawcallsMapMesh;
+    typedef AZStd::unordered_map< IRenderMesh*, IRenderer::SDrawCallCountInfo, AZStd::hash<IRenderMesh*>, AZStd::equal_to<IRenderMesh*>, AZ::StdLegacyAllocator > RNDrawcallsMapMesh;
     typedef RNDrawcallsMapMesh::iterator RNDrawcallsMapMeshItor;
 
 #if !defined(_RELEASE)
@@ -2166,13 +2209,16 @@ struct IRenderer
     // tell the renderer that we will begin/stop spawning jobs which generate SRendItems
     virtual void BeginSpawningGeneratingRendItemJobs(int nThreadID) = 0;
     virtual void BeginSpawningShadowGeneratingRendItemJobs(int nThreadID) = 0;
-    virtual void EndSpawningGeneratingRendItemJobs(int nThreadID) = 0;
+    virtual void EndSpawningGeneratingRendItemJobs() = 0;
+
+    virtual void StartLoadtimePlayback(ILoadtimeCallback* pCallback) = 0;
+    virtual void StopLoadtimePlayback() = 0;
 
     // Summary:
     // get the shared job state for SRendItem Generating jobs
-    virtual AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutor(int nThreadID) = 0;
-    virtual AZ::LegacyJobExecutor* GetGenerateShadowRendItemJobExecutor(int nThreadID) = 0;
-    virtual AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutorPreProcess(int nThreadID) = 0;
+    virtual AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutor() = 0;
+    virtual AZ::LegacyJobExecutor* GetGenerateShadowRendItemJobExecutor() = 0;
+    virtual AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutorPreProcess() = 0;
     virtual AZ::LegacyJobExecutor* GetFinalizeRendItemJobExecutor(int nThreadID) = 0;
     virtual AZ::LegacyJobExecutor* GetFinalizeShadowRendItemJobExecutor(int nThreadID) = 0;
 
@@ -2248,13 +2294,10 @@ struct IRenderer
     virtual void FX_ResetPipe() = 0;
 
     // Gets an (existing) depth surface of the dimensions given
-    virtual SDepthTexture* FX_GetDepthSurface(int nWidth, int nHeight, bool bAA) = 0;
-
-    // Creates a new depth surface
-    virtual SDepthTexture* FX_CreateDepthSurface(int nWidth, int nHeight, bool bAA) = 0;
+    virtual SDepthTexture* FX_GetDepthSurface(int nWidth, int nHeight, bool bAA, bool shaderResourceView = false) = 0;
 
     // Check to see if buffers are full and if so flush
-    virtual void FX_CheckOverflow(int nVerts, int nInds, CRendElementBase* re, int* nNewVerts = nullptr, int* nNewInds = nullptr) = 0;
+    virtual void FX_CheckOverflow(int nVerts, int nInds, IRenderElement* re, int* nNewVerts = nullptr, int* nNewInds = nullptr) = 0;
 
     // Perform pre render work
     virtual void FX_PreRender(int Stage) = 0;
@@ -2287,7 +2330,7 @@ struct IRenderer
     virtual void FX_DrawPrimitive(const eRenderPrimitiveType eType, const int nStartVertex, const int nVerticesCount, const int nInstanceVertices = 0) = 0;
 
     // Clear texture
-    virtual void FX_ClearTarget(CTexture* pTex) = 0;
+    virtual void FX_ClearTarget(ITexture* pTex) = 0;
 
     // Clear depth
     virtual void FX_ClearTarget(SDepthTexture* pTex) = 0;
@@ -2311,7 +2354,7 @@ struct IRenderer
     virtual bool FX_PopRenderTarget(int nTarget) = 0;
 
     // Start an effect / shader / etc..
-    virtual void FX_Start(CShader* ef, int nTech, CShaderResources* Res, CRendElementBase* re) = 0;
+    virtual void FX_Start(CShader* ef, int nTech, CShaderResources* Res, IRenderElement* re) = 0;
 
     // Pop render target on render thread
     virtual void RT_PopRenderTarget(int nTarget) = 0;
@@ -2335,6 +2378,19 @@ struct IRenderer
     virtual float GetFloatConfigurationValue(const char* varName, float defaultValue) = 0;
     virtual bool GetBooleanConfigurationValue(const char* varName, bool defaultValue) = 0;
 
+    // Methods exposed to external libraries
+    virtual void ApplyDepthTextureState(int unit, int nFilter, bool clamp) = 0;
+    virtual ITexture* GetZTargetTexture() = 0;
+    virtual int GetTextureState(const STexState& TS) = 0;
+    virtual uint32 TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, uint32 nMips, uint32 nSlices, const ETEX_Format eTF, ETEX_TileMode eTM = eTM_None) = 0;
+    virtual void ApplyForID(int nID, int nTUnit, int nTState, int nTexMaterialSlot, int nSUnit, bool useWhiteDefault) = 0;
+    virtual ITexture* Create3DTexture(const char* szName, int nWidth, int nHeight, int nDepth, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst) = 0;
+    virtual bool IsTextureExist(const ITexture* pTex) = 0;
+    virtual const char* NameForTextureFormat(ETEX_Format eTF) = 0;
+    virtual const char* NameForTextureType(ETEX_Type eTT) = 0;
+    virtual bool IsVideoThreadModeEnabled() = 0;
+    virtual IDynTexture* CreateDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool) = 0;
+    virtual uint32 GetCurrentTextureAtlasSize() = 0;
 private:
     // use private for EF_Query to prevent client code to submit arbitrary combinations of output data/size
     virtual void EF_QueryImpl(ERenderQueryTypes eQuery, void* pInOut0, uint32 nInOutSize0, void* pInOut1, uint32 nInOutSize1) = 0;
@@ -2503,6 +2559,7 @@ struct SRendParams
         nRenderList = EFSLIST_GENERAL;
         nAfterWater = 1;
         mRenderFirstContainer = false;
+        NoDecalReceiver = false;
     }
 
     // Summary:
@@ -2513,8 +2570,6 @@ struct SRendParams
     //  object previous transformations - motion blur specific.
     Matrix34* pPrevMatrix;
     // Summary:
-    //  List of shadow map casters.
-    uint64 m_ShadowMapCasters;
     //  VisArea that contains this object, used for RAM-ambient cube query
     IVisArea*       m_pVisArea;
     // Summary:
@@ -2624,4 +2679,6 @@ struct SRendParams
     //Summary:
     // Force drawing static instead of deformable meshes
     bool bForceDrawStatic;
+
+    bool NoDecalReceiver;
 };

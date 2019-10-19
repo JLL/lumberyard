@@ -14,4 +14,18 @@
 
 #include <AzTest/AzTest.h>
 
+//! See the ScriptCanvasTesting gem for the Script Canvas testing framework, C++ based tests and Script Canvas tests.
+class ScriptCanvasTestFixture
+    : public ::testing::Test
+{
+protected:
+    void SetUp() override {}
+    void TearDown() override {}
+};
+
+TEST_F(ScriptCanvasTestFixture, EmptyTest)
+{
+    ASSERT_TRUE(true);
+}
+
 AZ_UNIT_TEST_HOOK();

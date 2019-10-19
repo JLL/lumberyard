@@ -21,7 +21,6 @@
 #include <EMotionFX/Source/AnimGraphObject.h>
 #include <EMotionFX/Source/TransformData.h>
 #include <EMotionFX/Source/Mesh.h>
-#include <MCore/Source/AttributeSet.h>
 #include <MCore/Source/FileSystem.h>
 #include "ActorCommands.h"
 #include "CommandManager.h"
@@ -89,6 +88,23 @@ namespace CommandSystem
                 {
                     animGraph->GetObject(n)->OnActorMotionExtractionNodeChanged();
                 }
+            }
+        }
+
+        // Set retarget root node.
+        if (parameters.CheckIfHasParameter("retargetRootNodeName"))
+        {
+            mOldRetargetRootNodeIndex = actor->GetRetargetRootNodeIndex();
+
+            AZStd::string retargetRootNodeName = parameters.GetValue("retargetRootNodeName", this);
+            if (retargetRootNodeName.empty() || retargetRootNodeName == "$NULL$")
+            {
+                actor->SetRetargetRootNode(nullptr);
+            }
+            else
+            {
+                EMotionFX::Node* node = skeleton->FindNodeByName(retargetRootNodeName.c_str());
+                actor->SetRetargetRootNode(node);
             }
         }
 
@@ -329,6 +345,11 @@ namespace CommandSystem
             actor->SetMotionExtractionNodeIndex(mOldMotionExtractionNodeIndex);
         }
 
+        if (parameters.CheckIfHasParameter("retargetRootNodeName"))
+        {
+            actor->SetRetargetRootNodeIndex(mOldRetargetRootNodeIndex);
+        }
+
         if (parameters.CheckIfHasParameter("name"))
         {
             actor->SetName(mOldName.c_str());
@@ -375,6 +396,7 @@ namespace CommandSystem
         GetSyntax().ReserveParameters(7);
         GetSyntax().AddRequiredParameter("actorID",            "The actor identification number of the actor to work on.", MCore::CommandSyntax::PARAMTYPE_INT);
         GetSyntax().AddParameter("motionExtractionNodeName",   "The node from which to transfer a filtered part of the motion onto the actor instance.", MCore::CommandSyntax::PARAMTYPE_STRING, "");
+        GetSyntax().AddParameter("retargetRootNodeName",       "The node that controls vertical movement of the character, most likely the hip or pelvis.", MCore::CommandSyntax::PARAMTYPE_STRING, "");
         GetSyntax().AddParameter("attachmentNodes",            "A list of nodes that should be set to attachment nodes.", MCore::CommandSyntax::PARAMTYPE_STRING, "");
         GetSyntax().AddParameter("nodesExcludedFromBounds",    "A list of nodes that are excluded from all bounding volume calculations.", MCore::CommandSyntax::PARAMTYPE_STRING, "");
         GetSyntax().AddParameter("name",                       "The name of the actor.", MCore::CommandSyntax::PARAMTYPE_STRING, "");
@@ -526,7 +548,7 @@ namespace CommandSystem
         // Undo command.
         const AZStd::string command = AZStd::string::format("ActorSetCollisionMeshes -actorID %i -lod %i -nodeList %s", actorID, lod, mOldNodeList.c_str());
         GetCommandManager()->ExecuteCommandInsideCommand(command, outResult);
-        
+
         // Set the dirty flag back to the old value
         actor->SetDirtyFlag(mOldDirtyFlag);
         return true;
@@ -568,9 +590,9 @@ namespace CommandSystem
             EMotionFX::ActorInstance* actorInstance = GetCommandManager()->GetCurrentSelection().GetActorInstance(i);
 
             actorInstance->GetTransformData()->ResetToBindPoseTransformations();
-            actorInstance->SetLocalPosition(AZ::Vector3::CreateZero());
-            actorInstance->SetLocalRotation(MCore::Quaternion(0.0f, 0.0f, 0.0f, 1.0f));
-            actorInstance->SetLocalScale(AZ::Vector3(1.0f, 1.0f, 1.0f));
+            actorInstance->SetLocalSpacePosition(AZ::Vector3::CreateZero());
+            actorInstance->SetLocalSpaceRotation(MCore::Quaternion(0.0f, 0.0f, 0.0f, 1.0f));
+            actorInstance->SetLocalSpaceScale(AZ::Vector3(1.0f, 1.0f, 1.0f));
         }
 
         return true;

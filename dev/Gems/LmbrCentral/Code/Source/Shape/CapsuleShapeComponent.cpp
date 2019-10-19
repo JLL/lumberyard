@@ -18,9 +18,27 @@
 #include <AzFramework/Entity/EntityDebugDisplayBus.h>
 #include <Shape/ShapeComponentConverters.h>
 #include <Shape/ShapeDisplay.h>
+#include <LmbrCentral/Geometry/GeometrySystemComponentBus.h>
 
 namespace LmbrCentral
 {
+    void CapsuleShapeComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+    {
+        provided.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        provided.push_back(AZ_CRC("CapsuleShapeService", 0x9bc1122c));
+    }
+
+    void CapsuleShapeComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
+    {
+        incompatible.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        incompatible.push_back(AZ_CRC("CapsuleShapeService", 0x9bc1122c));
+    }
+
+    void CapsuleShapeComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
+    {
+        required.push_back(AZ_CRC("TransformService", 0x8ee22c50));
+    }
+
     void CapsuleShapeDebugDisplayComponent::Reflect(AZ::ReflectContext* context)
     {
         if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
@@ -35,12 +53,19 @@ namespace LmbrCentral
     void CapsuleShapeDebugDisplayComponent::Activate()
     {
         EntityDebugDisplayComponent::Activate();
+        ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
         GenerateVertices();
     }
-    
-    void CapsuleShapeDebugDisplayComponent::Draw(AzFramework::EntityDebugDisplayRequests* /*displayContext*/)
+
+    void CapsuleShapeDebugDisplayComponent::Deactivate()
     {
-        DrawShape(g_defaultShapeDrawParams, m_capsuleShapeMesh);
+        ShapeComponentNotificationsBus::Handler::BusDisconnect();
+        EntityDebugDisplayComponent::Deactivate();
+    }
+
+    void CapsuleShapeDebugDisplayComponent::Draw(AzFramework::DebugDisplayRequests& debugDisplay)
+    {
+        DrawShape(debugDisplay, m_capsuleShapeConfig.GetDrawParams(), m_capsuleShapeMesh);
     }
 
     bool CapsuleShapeDebugDisplayComponent::ReadInConfig(const AZ::ComponentConfig* baseConfig)
@@ -63,20 +88,28 @@ namespace LmbrCentral
         return false;
     }
 
-    void CapsuleShapeDebugDisplayComponent::OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world)
-    {
-        EntityDebugDisplayComponent::OnTransformChanged(local, world);
-        GenerateVertices();
-    }
-
     void CapsuleShapeDebugDisplayComponent::GenerateVertices()
     {
-        GenerateCapsuleMesh(
-            GetCurrentTransform(), m_capsuleShapeConfig.m_radius, m_capsuleShapeConfig.m_height,
-            g_capsuleDebugShapeSides, g_capsuleDebugShapeCapSegments, m_capsuleShapeMesh.m_vertexBuffer, m_capsuleShapeMesh.m_indexBuffer,
-            m_capsuleShapeMesh.m_lineBuffer);
+        CapsuleGeometrySystemRequestBus::Broadcast(
+            &CapsuleGeometrySystemRequestBus::Events::GenerateCapsuleMesh,
+            m_capsuleShapeConfig.m_radius,
+            m_capsuleShapeConfig.m_height,
+            g_capsuleDebugShapeSides,
+            g_capsuleDebugShapeCapSegments,
+            m_capsuleShapeMesh.m_vertexBuffer,
+            m_capsuleShapeMesh.m_indexBuffer,
+            m_capsuleShapeMesh.m_lineBuffer
+        );
     }
 
+    void CapsuleShapeDebugDisplayComponent::OnShapeChanged(ShapeChangeReasons changeReason)
+    {
+        if (changeReason == ShapeChangeReasons::ShapeChanged)
+        {
+            CapsuleShapeComponentRequestsBus::EventResult(m_capsuleShapeConfig, GetEntityId(), &CapsuleShapeComponentRequests::GetCapsuleConfiguration);
+            GenerateVertices();
+        }
+    }
 
     namespace ClassConverters
     {
@@ -95,8 +128,8 @@ namespace LmbrCentral
                 &ClassConverters::DeprecateCapsuleColliderConfiguration)
                 ;
 
-            serializeContext->Class<CapsuleShapeConfig>()
-                ->Version(1)
+            serializeContext->Class<CapsuleShapeConfig, ShapeComponentConfig>()
+                ->Version(2)
                 ->Field("Height", &CapsuleShapeConfig::m_height)
                 ->Field("Radius", &CapsuleShapeConfig::m_radius)
                 ;

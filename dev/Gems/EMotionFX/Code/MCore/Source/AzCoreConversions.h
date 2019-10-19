@@ -12,23 +12,32 @@
 
 #pragma once
 
-#include <AzCore/Memory/SystemAllocator.h>
-
+#include <AzCore/Math/Color.h>
 #include <AzCore/Math/Vector2.h>
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/Math/Transform.h>
 #include <AzCore/Math/Quaternion.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 
+#include <MCore/Source/Color.h>
 #include <MCore/Source/Vector.h>
 #include <MCore/Source/Matrix4.h>
 #include <MCore/Source/Quaternion.h>
-#include <MCore/Source/MemoryObject.h>
 
 #include <EMotionFX/Source/Transform.h>
 
 namespace MCore
 {
+    AZ_FORCE_INLINE AZ::Color EmfxColorToAzColor(const MCore::RGBAColor& emfxColor)
+    {
+        return AZ::Color(emfxColor.r, emfxColor.g, emfxColor.b, emfxColor.a);
+    }
+
+    AZ_FORCE_INLINE MCore::RGBAColor AzColorToEmfxColor(const AZ::Color& azColor)
+    {
+        return MCore::RGBAColor(static_cast<float>(azColor.GetR()), static_cast<float>(azColor.GetG()), static_cast<float>(azColor.GetB()), static_cast<float>(azColor.GetA()));
+    }
+
     AZ_FORCE_INLINE AZ::Quaternion EmfxQuatToAzQuat(const MCore::Quaternion& emfxQuat)
     {
         return AZ::Quaternion(emfxQuat.x, emfxQuat.y, emfxQuat.z, emfxQuat.w);
@@ -63,5 +72,23 @@ namespace MCore
         // In the LY coordinate system, that's X, Z, Y respectively.
         quat.SetEuler(eulerAngles.GetX(), eulerAngles.GetZ(), eulerAngles.GetY());
         return quat;
+    }
+
+    // TODO: replace in favor of AzFramework::ConvertQuaternionToAxisAngle
+    AZ_FORCE_INLINE void ToAxisAngle(const AZ::Quaternion& q, AZ::Vector3& axis, float& angle)
+    {
+        angle = 2.0f * Math::ACos(q.GetW());
+
+        const float sinHalfAngle = Math::Sin(angle * 0.5f);
+        if (sinHalfAngle > 0.0f)
+        {
+            const float invS = 1.0f / sinHalfAngle;
+            axis.Set(q.GetX() * invS, q.GetY() * invS, q.GetZ() * invS);
+        }
+        else
+        {
+            axis.Set(0.0f, 1.0f, 0.0f);
+            angle = 0.0f;
+        }
     }
 } // namespace MCore

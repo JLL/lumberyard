@@ -157,7 +157,7 @@ void COctreeNode::Render_Object_Nodes(bool bNodeCompletelyInFrustum, int nRender
     if (HasAnyRenderableCandidates(passInfo))
     {
         // when using the occlusion culler, push the work to the jobs doing the occlusion checks, else just compute in main thread
-        if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass() && JobManager::InvokeAsJob("CheckOcclusion"))
+        if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass())
         {
             GetObjManager()->PushIntoCullQueue(SCheckOcclusionJobData::CreateOctreeJobData(this, nRenderMask, rendItemSorter, &passInfo.GetCamera()));
         }
@@ -223,7 +223,6 @@ void COctreeNode::CompileObjects()
 
     m_bStaticInstancingIsDirty = true;
     CheckUpdateStaticInstancing();
-    m_lstVegetationsForRendering.Clear();
 
     float fObjMaxViewDistance = 0;
 
@@ -427,8 +426,6 @@ void COctreeNode::UpdateStaticInstancing()
 {
     FUNCTION_PROFILER_3DENGINE;
 
-    m_lstVegetationsForRendering.Clear();
-
     // clear
     if (m_pStaticInstancingInfo)
     {
@@ -570,8 +567,6 @@ void COctreeNode::UpdateStaticInstancing()
 void COctreeNode::ResetStaticInstancing()
 {
     FUNCTION_PROFILER_3DENGINE;
-
-    m_lstVegetationsForRendering.Clear();
 
     for (IRenderNode* pObj = m_arrObjects[eRNListType_Vegetation].m_pFirstNode, * pNext; pObj; pObj = pNext)
     {
@@ -772,11 +767,11 @@ void COctreeNode::FillShadowMapCastersList(const ShadowMapFrustumParams& params,
         if (pCaster->bCanExecuteAsRenderJob)
         {
             Get3DEngine()->CheckCreateRNTmpData(&pCaster->pNode->m_pRNTmpData, pCaster->pNode, *params.passInfo);
-            params.pFr->pJobExecutedCastersList->Add(pCaster->pNode);
+            params.pFr->m_jobExecutedCastersList.Add(pCaster->pNode);
         }
         else
         {
-            params.pFr->pCastersList->Add(pCaster->pNode);
+            params.pFr->m_castersList.Add(pCaster->pNode);
         }
     }
 
@@ -1444,11 +1439,11 @@ bool COctreeNode::GetShadowCastersTimeSliced(IRenderNode* pIgnoreNode, ShadowMap
                             if (pNode->CanExecuteRenderAsJob())
                             {
                                 Get3DEngine()->CheckCreateRNTmpData(&pNode->m_pRNTmpData, pNode, passInfo);
-                                pFrustum->pJobExecutedCastersList->Add(pNode);
+                                pFrustum->m_jobExecutedCastersList.Add(pNode);
                             }
                             else
                             {
-                                pFrustum->pCastersList->Add(pNode);
+                                pFrustum->m_castersList.Add(pNode);
                             }
                         }
                     }
@@ -1457,7 +1452,7 @@ bool COctreeNode::GetShadowCastersTimeSliced(IRenderNode* pIgnoreNode, ShadowMap
         }
 
         pFrustum->pShadowCacheData->mOctreePathNodeProcessed[nCurLevel] = true;
-        if (!pFrustum->pCastersList->empty() || !pFrustum->pJobExecutedCastersList->empty())
+        if (!pFrustum->m_castersList.IsEmpty() || !pFrustum->m_jobExecutedCastersList.IsEmpty())
         {
             --totalRemainingNodes;
         }

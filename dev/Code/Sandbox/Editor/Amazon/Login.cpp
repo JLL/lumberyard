@@ -10,7 +10,7 @@
 *
 */
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include <Amazon/Login.h>
 
 #include <iostream>
@@ -24,7 +24,7 @@
 
 #include <Amazon/Login.moc>
 #include <qaction.h>
-#include <qdesktopservices.h>
+#include <QDesktopServices>
 #include <qnetworkrequest.h>
 #include <qwebframe.h>
 #include <qnetworkreply.h>
@@ -36,12 +36,12 @@ namespace Amazon {
     const int WEBVIEW_HEIGHT = 561;
     const char* SETTINGS_PATH = "Identity";
     const char* SETTINGS_ACCESS_TOKEN = "AccessToken2";
-    const char* TOKEN_QUERY_STRING_KEY = "aToken";
+    const char* VALID_IDENTITY_STRING_KEY = "www.amazon.com";
     const char* DIRECTED_ID_QUERY_STRING_KEY = "openid.identity";
     const char* AUTHPORTAL_URL = "https://www.amazon.com/ap/signin?openid.ns=http://specs.openid.net/auth/2.0&openid.claimed_id=http://specs.openid.net/auth/2.0/identifier_select&openid.identity=http://specs.openid.net/auth/2.0/identifier_select&openid.mode=checkid_setup&openid.oa2.scope=device_auth_access&openid.ns.oa2=http://www.amazon.com/ap/ext/oauth/2&openid.oa2.response_type=token&language=en-US&marketPlaceId=ATVPDKIKX0DER&openid.return_to=https://www.amazon.com/ap/maplanding&openid.pape.max_auth_age=0&forceMobileLayout=true&openid.assoc_handle=amzn_lumberyard_desktop_us&pageId=amzn_lumberyard_desktop";
     const char* FORGOT_PASSWORD_URL = "https://www.amazon.com/ap/forgotpassword";
     const char* WELCOME_TITLE_TEXT = "Welcome to Lumberyard.";
-    const char* WELCOME_TEXT = "You must log into the editor with your Amazon or AWS credentials.  <br/> If you prefer, you may create a new account for use with Lumberyard.";
+    const char* WELCOME_TEXT = "You must log into the editor with your Amazon.com account.  <br/> If you prefer, you may create a new account for use with Lumberyard.";
     const char* FORGOT_PASSWORD_TEXT = " <br/> <br/><span style=\"color:red;\" > Please check your email for instructions on how to update your password<br /> and then return here to login.</span>";
 
     static const char* EDITOR_LOGIN_EVENT_NAME = "EditorLogin";
@@ -225,18 +225,23 @@ namespace Amazon {
     void LoginDialog::urlChanged(const QUrl& newUrl)
     {
         QUrlQuery queryString(newUrl);
-        if (queryString.hasQueryItem(TOKEN_QUERY_STRING_KEY))
+        if (queryString.hasQueryItem(DIRECTED_ID_QUERY_STRING_KEY))
         {
-            m_oauthToken = queryString.queryItemValue(DIRECTED_ID_QUERY_STRING_KEY);
+            QString oauthToken = queryString.queryItemValue(DIRECTED_ID_QUERY_STRING_KEY);
+            if (oauthToken.contains(VALID_IDENTITY_STRING_KEY))
+            {
+                m_oauthToken = oauthToken;
+                sendUserEvent(EDITOR_LOGIN_EVENT_NAME, m_oauthToken.toStdString().c_str());
 
-			sendUserEvent(EDITOR_LOGIN_EVENT_NAME, m_oauthToken.toStdString().c_str());
-
-            accept();
+                accept();
+            }
         }
     }
 
     void LoginDialog::networkFinished(QNetworkReply* reply)
     {
+
+
         m_loadingLbl.hide();
         if (reply->error() != QNetworkReply::NetworkError::NoError && reply->error() != QNetworkReply::NetworkError::OperationCanceledError)
         {
@@ -297,7 +302,7 @@ namespace Amazon {
             sendUserEvent(EDITOR_OPENED_EVENT_NAME, aToken.c_str());
             s_EditorOpenedEventSent = true;
         }
-		
+
         return m_identity;
     }
 

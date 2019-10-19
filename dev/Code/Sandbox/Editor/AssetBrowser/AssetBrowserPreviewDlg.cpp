@@ -13,7 +13,7 @@
 
 // Description : Implementation of AssetBrowserPreviewDlg.h
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "AssetBrowserPreviewDlg.h"
 
 #include <AssetBrowser/ui_AssetBrowserPreviewDlg.h>
@@ -25,11 +25,6 @@
 #include <QTimer>
 
 // CAssetBrowserPreviewDlg dialog
-
-namespace AssetBrowser
-{
-    const UINT  kPreview_ViewportMargin = 5;
-};
 
 CAssetBrowserPreviewDlg::CAssetBrowserPreviewDlg(QWidget* pParent)
     : QWidget(pParent)

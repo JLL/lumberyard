@@ -15,7 +15,7 @@
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/Serialization/EditContext.h>
 #include <AzCore/Math/Quaternion.h>
-#include <AzFramework/Math/MathUtils.h>
+#include <AzCore/Math/Transform.h>
 #include <ICryAnimation.h>
 
 namespace LmbrCentral
@@ -43,7 +43,7 @@ namespace LmbrCentral
                     "Attachment", "The Attachment component lets an entity attach to a bone on the skeleton of another entity")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Animation")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Attachment.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Attachment.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Attachment.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -123,7 +123,7 @@ namespace LmbrCentral
 
     AZ::Transform EditorAttachmentComponent::GetTargetOffset() const
     {
-        AZ::Transform offset = AzFramework::ConvertEulerDegreesToTransformPrecise(m_rotationOffset);
+        AZ::Transform offset = AZ::ConvertEulerDegreesToTransformPrecise(m_rotationOffset);
         offset.SetTranslation(m_positionOffset);
         offset.MultiplyByScale(m_scaleOffset);
         return offset;

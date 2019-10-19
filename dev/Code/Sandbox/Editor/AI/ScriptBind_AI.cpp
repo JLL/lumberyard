@@ -21,7 +21,7 @@
 #include <ScriptHelpers.h>
 
 
-// TODO(márcio): Exterminate this file
+// TODO(marcio): Exterminate this file
 
 
 CScriptBind_AI::CScriptBind_AI(ISystem* pSystem)
@@ -32,7 +32,7 @@ CScriptBind_AI::CScriptBind_AI(ISystem* pSystem)
 
     RegisterFunction(
         "AssignPFPropertiesToPathType",
-        functor_ret(*this, &CScriptBind_AI::AssignPFPropertiesToPathType));
+        functor(*this, static_cast<int(CScriptBind_AI::*)(IFunctionHandler*)>(&CScriptBind_AI::AssignPFPropertiesToPathType)));
 
     m_pSS->ExecuteFile("scripts/ai/pathfindProperties.lua", true, true);
 }

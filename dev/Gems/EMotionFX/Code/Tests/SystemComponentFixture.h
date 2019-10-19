@@ -23,6 +23,7 @@
 
 #include <AzCore/Asset/AssetManager.h>
 #include <AzCore/Memory/PoolAllocator.h>
+#include <AzCore/Jobs/JobManagerComponent.h>
 
 namespace EMotionFX
 {
@@ -40,7 +41,6 @@ namespace EMotionFX
         void SetUp() override
         {
             AZ::ComponentApplication::Descriptor appDesc;
-            appDesc.m_memoryBlocksByteSize = 10 * 1024 * 1024;
             mSystemEntity = mApp.Create(appDesc);
 
             mLocalFileIO = AZStd::make_unique<AZ::IO::LocalFileIO>();
@@ -71,22 +71,47 @@ namespace EMotionFX
             mApp.Destroy();
         }
 
+        AZ::SerializeContext* GetSerializeContext() const
+        {
+            return m_serializeContext;
+        }
+
+        AZStd::string ResolvePath(const char* path)
+        {
+            AZStd::string result;
+            result.resize(AZ::IO::MaxPathLength);
+            AZ::IO::LocalFileIO::GetInstance()->ResolvePath(path, result.data(), result.size());
+            return result;
+        }
+
     protected:
         virtual void Activate()
         {
             // Poor-man's c++11 fold expression
-            std::initializer_list<int> {(Components::CreateDescriptor(), 0)...};
+            std::initializer_list<int> {(mApp.RegisterComponentDescriptor(Components::CreateDescriptor()), 0)...};
             std::initializer_list<int> {(mSystemEntity->CreateComponent<Components>(), 0)...};
             mSystemEntity->Init();
             mSystemEntity->Activate();
+
+            m_serializeContext = mApp.GetSerializeContext();
+            m_serializeContext->CreateEditContext();
         }
 
         virtual void Deactivate()
         {
+            m_serializeContext->DestroyEditContext();
             // Clear the queue of messages from unit tests on our buses
             EMotionFX::Integration::ActorNotificationBus::ClearQueuedEvents();
 
             mSystemEntity->Deactivate();
+            // Remove SceneAPI components before the DLL is uninitialized
+            std::initializer_list<int> {(([&]() {
+                auto component = mSystemEntity->FindComponent<Components>();
+                mSystemEntity->RemoveComponent(component);
+                delete component;
+            })(), 0)...};
+
+            std::initializer_list<int> {(mApp.UnregisterComponentDescriptor(Components::CreateDescriptor()), 0)...};
         }
 
     private:
@@ -102,12 +127,15 @@ namespace EMotionFX
         // sure that it still exists when this fixture is destroyed.
         AZStd::unique_ptr<AZ::IO::LocalFileIO> mLocalFileIO;
 
-        AZ::Entity* mSystemEntity;
+        AZ::Entity* mSystemEntity = nullptr;
+
+        AZ::SerializeContext* m_serializeContext = nullptr;
     };
 
     // Note that the SystemComponent depends on the AssetManagerComponent
     using SystemComponentFixture = ComponentFixture<
         AZ::AssetManagerComponent,
+        AZ::JobManagerComponent,
         EMotionFX::Integration::SystemComponent
     >;
 

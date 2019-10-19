@@ -12,16 +12,21 @@
 
 def build(bld):
 
-    bld.DefineGem(
+    kw = dict(
         # Add custom build options here
         use         = ['GridMate'],
         uselib      = ['OPENSSL'],
-        includes    = [bld.Path('Code/CryEngine/CryAction'),
-                       bld.Path('Code/CryEngine/CryNetwork')],
+        includes    = [bld.Path('Code/CryEngine/CryCommon'),
+                       bld.Path('Code/CryEngine/CryAction'),
+                       bld.Path('Code/CryEngine/CryNetwork')
+                      ],
         file_list   = [
                         'Multiplayer.waf_files',
                       ],
 
+        # Platform Roots
+        platform_roots = [bld.PlatformRoot('Source/Platform', export_includes=True)],
+        
         # Platform Specific
         win_use     = ['AWS_CPP_SDK_GAMELIFT',
                        'AWS_CPP_SDK_CORE'],
@@ -29,7 +34,7 @@ def build(bld):
         win_profile_dedicated_uselib = ['AWS_GAMELIFT_SERVER_SHARED'],
         win_performance_dedicated_uselib = ['AWS_GAMELIFT_SERVER_STATIC'],
         win_release_dedicated_uselib = ['AWS_GAMELIFT_SERVER_STATIC'],
-        win_lib          = ['gdi32', 'Winhttp', 'Ws2_32', 'mswsock'],
+        win_lib          = ['gdi32', 'Winhttp', 'Ws2_32', 'mswsock','crypt32'],
         win_defines      = ['NET_SUPPORT_SECURE_SOCKET_DRIVER=1'],
 
         linux_defines    = ['NET_SUPPORT_SECURE_SOCKET_DRIVER=1'],
@@ -37,12 +42,6 @@ def build(bld):
         linux_profile_dedicated_uselib = ['AWS_GAMELIFT_SERVER_STATIC'],
         linux_performance_dedicated_uselib = ['AWS_GAMELIFT_SERVER_STATIC'],
         linux_release_dedicated_uselib = ['AWS_GAMELIFT_SERVER_STATIC'],
-
-       
-
-       
-
-       
-       
-
     )
+
+    bld.DefineGem(**kw)

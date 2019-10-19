@@ -45,6 +45,17 @@ CTexture* SPostEffectsUtils::m_UpscaleTarget = nullptr;
 
 bool SPostEffectsUtils::Create()
 {
+    assert(gRenDev);
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // disregard size changes or texture creation for render scene to texture passes 
+    // or we will introduce texture create/delete thrashing
+    if (gRenDev->m_RP.m_TI[gRenDev->m_RP.m_nProcessThreadID].m_PersFlags & RBPF_RENDER_SCENE_TO_TEXTURE)
+    {
+        return false;
+    }
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
     const SViewport& MainVp = gRenDev->m_MainViewport;
     const bool bCreatePostAA = CRenderer::CV_r_AntialiasingMode && !CTexture::IsTextureExist(CTexture::s_ptexPrevBackBuffer[0][0]);
     //@NOTE: CV_r_watercaustics will be removed when the infinite ocean component feature toggle is removed.
@@ -165,7 +176,7 @@ bool SPostEffectsUtils::Create()
         // TODO: Only create necessary RTs for minimal ring?
         for (int i = 0; i < MAX_OCCLUSION_READBACK_TEXTURES; i++)
         {
-            sprintf(str, "$FlaresOcclusion_%d", i);
+            azsprintf(str, "$FlaresOcclusion_%d", i);
 
             CreateRenderTarget(str, CTexture::s_ptexFlaresOcclusionRing[i], CFlareSoftOcclusionQuery::s_nIDColMax, CFlareSoftOcclusionQuery::s_nIDRowMax, Clr_Unknown, 1, 0, eTF_R8G8B8A8, -1, FT_DONT_RELEASE | FT_STAGE_READBACK);
         }
@@ -402,8 +413,6 @@ void SPostEffectsUtils::SetTexture(CTexture* pTex, int nStage, int nFilter, int 
 
 bool SPostEffectsUtils::CreateRenderTarget(const char* szTexName, CTexture*& pTex, int nWidth, int nHeight, const ColorF& cClear, bool bUseAlpha, bool bMipMaps, ETEX_Format eTF, int nCustomID, int nFlags)
 {
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Texture, 0, "PostEffects CreateRenderTarget: %s", szTexName);
-
     // check if parameters are valid
     if (!nWidth || !nHeight)
     {
@@ -417,14 +426,6 @@ bool SPostEffectsUtils::CreateRenderTarget(const char* szTexName, CTexture*& pTe
     if (!CTexture::IsTextureExist(pTex))
     {
         pTex = CTexture::CreateRenderTarget(szTexName, nWidth, nHeight, cClear, eTT_2D, flags, eTF, nCustomID);
-
-        // Following will mess up don't care resolve/restore actions since Fill() sets textures to be cleared on next draw
-#if !defined(CRY_USE_METAL) && !defined(OPENGL_ES)
-        if (pTex)
-        {
-            pTex->Clear();
-        }
-#endif
     }
     else
     {
@@ -433,6 +434,14 @@ bool SPostEffectsUtils::CreateRenderTarget(const char* szTexName, CTexture*& pTe
         pTex->SetHeight(nHeight);
         pTex->CreateRenderTarget(eTF, cClear);
     }
+
+    // Following will mess up don't care resolve/restore actions since Fill() sets textures to be cleared on next draw
+#if !defined(CRY_USE_METAL) && !defined(OPENGL_ES)
+    if (pTex)
+    {
+        pTex->Clear();
+    }
+#endif
 
     return CTexture::IsTextureExist(pTex) ? 1 : 0;
 }

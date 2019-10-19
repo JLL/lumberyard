@@ -50,7 +50,6 @@ CParticleContainer::CParticleContainer(CParticleContainer* pParent, CParticleEmi
     , m_pGPUData(0)
     , m_LodBlend(0.f)
     , m_LodOverlap(0.f)
-    , m_FadeEffectContainer(nullptr)
 {
     assert(pEffect);
     assert(pEffect->IsActive() || gEnv->IsEditing());
@@ -239,11 +238,7 @@ CParticle* CParticleContainer::AddParticle(SParticleUpdateContext& context, cons
     {
         float fNewDist = part.GetMinDist(context.vMainCamPos);
 
-        Array<SParticleUpdateContext::SSortElem>* particles = &context.aFadeParticleSort;
-        if (context.aFadeParticleSort.empty())
-        {
-            particles = &context.aParticleSort;
-        }
+        Array<SParticleUpdateContext::SSortElem>* particles = &context.aParticleSort;
 
         if (!particles->empty())
         {
@@ -776,6 +771,9 @@ void CParticleContainer::UpdateParticleStates(SParticleUpdateContext& context)
     }
     for (ParticleList<CParticle>::iterator pPart(m_Particles); pPart; )
     {
+        // Update the particle before the IsAlive check so it can be removed immediately if it is killed by the update
+        pPart->Update(context, context.fUpdateTime);
+
         if (!pPart->IsAlive(fLifetimeCheck))
         {
             if (m_pParams->bRemainWhileVisible)
@@ -789,10 +787,6 @@ void CParticleContainer::UpdateParticleStates(SParticleUpdateContext& context)
             {
                 ERASE_PARTICLE(pPart)
             }
-        }
-        else
-        {
-            pPart->Update(context, context.fUpdateTime);
         }
 
         if (!context.aParticleSort.empty() && !params.IsConnectedParticles())
@@ -812,34 +806,11 @@ void CParticleContainer::UpdateParticleStates(SParticleUpdateContext& context)
         ++pPart;
     }
 
-    //Check if there are Emitter Fading particles. If there are, we create a sortlist for them.
-    if (params.IsConnectedParticles() && GetEffect()->HasFadeEffect())
-    {
-        uint32 fadeEnvFlags = GetFadeEffectContainer()->GetEnvironmentFlags();
-        if ((fadeEnvFlags & REN_SORT) && context.nSortQuality > 0)
-        {
-            int nMaxParticles = GetMaxParticleCount(context);
-            STACK_ARRAY(SParticleUpdateContext::SSortElem, aFadeParticleSort, nMaxParticles);
-            context.aFadeParticleSort.set(aFadeParticleSort, nMaxParticles);
-            GetFadeEffectContainer()->FillFadeParticleSortArray(context);
-        }
-    }
-
-    if (!params.bIsCameraNonFacingFadeParticle)
-    {
-        // Emit new particles.
-        UpdateEmitters(&context);
-    }
+    UpdateEmitters(&context);
 }
 
 void CParticleContainer::UpdateEmitters(SParticleUpdateContext* pUpdateContext)
 {
-    //Do not emit particles when you have a camera non facing fade particle.
-    if (GetParams().bIsCameraNonFacingFadeParticle)
-    {
-        return;
-    }
-
     for_all_ptrs(CParticleSubEmitter, e, m_Emitters)
     {
         if (e->UpdateState())
@@ -1084,12 +1055,6 @@ void CParticleContainer::Render(SRendParams const& RenParams, SPartRenderParams 
             job.pRenderObject->m_ObjFlags |= FOB_RENDER_TRANS_AFTER_DOF;
         }
 
-        if (job.pRenderObject->m_ObjFlags & FOB_PARTICLE_SHADOWS)
-        {
-            pOD->m_ShadowCasters = RenParams.m_ShadowMapCasters;
-            job.pRenderObject->m_bHasShadowCasters = pOD->m_ShadowCasters != 0;
-        }
-
         // Ambient color for shader incorporates actual ambient lighting, as well as the constant emissive value.
         job.pRenderObject->m_II.m_Matrix.SetIdentity();
         job.pRenderObject->m_II.m_AmbColor = ColorF(fEmissive) + RenParams.AmbientColor * pParams->fDiffuseLighting * Get3DEngine()->m_fParticlesAmbientMultiplier;
@@ -1119,11 +1084,11 @@ void CParticleContainer::Render(SRendParams const& RenParams, SPartRenderParams 
         // Set sort distance based on params and bounding box.
         if (pParams->fSortBoundsScale == PRParams.m_fMainBoundsScale)
         {
-            job.pRenderObject->m_fDistance = PRParams.m_fCamDistance;
+            job.pRenderObject->m_fDistance = PRParams.m_fCamDistance * passInfo.GetZoomFactor();
         }
         else
         {
-            job.pRenderObject->m_fDistance = GetMain().GetNearestDistance(passInfo.GetCamera().GetPosition(), pParams->fSortBoundsScale);
+            job.pRenderObject->m_fDistance = GetMain().GetNearestDistance(passInfo.GetCamera().GetPosition(), pParams->fSortBoundsScale) * passInfo.GetZoomFactor();
         }
         job.pRenderObject->m_fDistance += pParams->fSortOffset;
         job.pRenderObject->m_ParticleObjFlags = (pParams->bHalfRes ? CREParticle::ePOF_HALF_RES : 0)
@@ -1136,8 +1101,7 @@ void CParticleContainer::Render(SRendParams const& RenParams, SPartRenderParams 
         if (pParams->pMaterial)
         {
             _smart_ptr<IMaterial> material = pParams->pMaterial;
-            SShaderItem& shaderItem = material->GetShaderItem();
-
+            SShaderItem shaderItem = material->GetShaderItem();
             if (shaderItem.m_pShader == nullptr)
             {
                 //Attempt retrieving sub-materials if the base material was invalid
@@ -1166,9 +1130,11 @@ void CParticleContainer::Render(SRendParams const& RenParams, SPartRenderParams 
                     //Issue a warning if we're using the default sub-material's shader item
                     AZ_Warning("Particle Container", false, "No valid shader item was found for %s or any of its sub-materials. Using default material.", material->GetName());
                 }
+
+                material->SetShaderItem(shaderItem);
             }
 
-            job.pShaderItem = &shaderItem; 
+            job.pShaderItem = &material->GetShaderItem();
             if (job.pShaderItem->m_pShader && (job.pShaderItem->m_pShader->GetFlags() & EF_REFRACTIVE))
             {
                 SetScreenBounds(passInfo.GetCamera(), pOD->m_screenBounds);
@@ -1433,33 +1399,6 @@ void CParticleContainer::OffsetPosition(const Vec3& delta)
     for (ParticleList<CParticle>::iterator pPart(m_Particles); pPart; ++pPart)
     {
         pPart->OffsetPosition(delta);
-    }
-}
-
-
-void CParticleContainer::FillFadeParticleSortArray(SParticleUpdateContext& context)
-{
-    const ResourceParticleParams& params = GetParams();
-    float fLifetimeCheck = 0.f;
-
-    if (context.aFadeParticleSort.empty())
-    {
-        return;
-    }
-    SParticleUpdateContext::SSortElem* pElem = context.aFadeParticleSort.begin();
-    for (ParticleList<CParticle>::iterator pPart(m_Particles); pPart; )
-    {
-        assert(pElem < context.aFadeParticleSort.end());
-        pElem->pPart = pPart;
-        pElem->fDist = -pPart->GetMinDist(context.vMainCamPos);
-
-        if (context.nSortQuality == 1 && pElem > context.aFadeParticleSort.begin() && pElem->fDist < pElem[-1].fDist)
-        {
-            // Force progressive sort order.
-            pElem->fDist = pElem[-1].fDist;
-        }
-        pElem++;
-        ++pPart;
     }
 }
 

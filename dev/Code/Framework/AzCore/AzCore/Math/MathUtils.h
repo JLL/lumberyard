@@ -128,6 +128,9 @@ namespace AZ
         return a % 2 != 0;
     }
 
+    AZ_MATH_FORCE_INLINE float GetAbs(float a) { return std::fabs(a); }
+    AZ_MATH_FORCE_INLINE double GetAbs(double a) { return std::abs(a); }
+
     AZ_MATH_FORCE_INLINE float GetMod(float a, float b) { return fmod(a, b); }
     AZ_MATH_FORCE_INLINE double GetMod(double a, double b) { return fmod(a, b); }
 
@@ -146,7 +149,7 @@ namespace AZ
     template<typename T>
     AZ_MATH_FORCE_INLINE bool IsCloseMag(T x, T y, T epsilonValue = std::numeric_limits<T>::epsilon())
     {
-        return (std::fabs(x - y) <= epsilonValue * GetMax(GetMax(T(1.0), std::fabs(x)), std::fabs(y)));
+        return (std::fabs(x - y) <= epsilonValue * GetMax<T>(GetMax<T>(T(1.0), std::fabs(x)), std::fabs(y)));
     }
 
     //! ClampIfCloseMag(x, y, epsilon) returns y when x and y are within epsilon of each other (taking magnitude into account).  Otherwise returns x.

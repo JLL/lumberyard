@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "StreamerDataAggregator.hxx"
 #include <Woodpecker/Driller/IO/StreamerDataAggregator.moc>
@@ -36,9 +36,9 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<StreamerDataAggregatorSavedState, AZ::UserSettings>()
+                serialize->Class<StreamerDataAggregatorSavedState>()
                     ->Version(1)
-                    ->SerializerForEmptyClass();
+                    ;
             }
         }
     };
@@ -64,7 +64,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<StreamerDataAggregatorWorkspace, AZ::UserSettings>()
+                serialize->Class<StreamerDataAggregatorWorkspace>()
                     ->Field("m_activeViewCount", &StreamerDataAggregatorWorkspace::m_activeViewCount)
                     ->Field("m_activeViewTypes", &StreamerDataAggregatorWorkspace::m_activeViewTypes)
                     ->Version(1);
@@ -303,7 +303,7 @@ namespace Driller
 
             serialize->Class<StreamerDataAggregator>()
                 ->Version(1)
-                ->SerializerForEmptyClass();
+                ;
         }
     }
 

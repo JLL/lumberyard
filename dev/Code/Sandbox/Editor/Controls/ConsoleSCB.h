@@ -48,14 +48,12 @@ public:
     explicit ConsoleLineEdit(QWidget* parent = nullptr);
 
 protected:
-    void mousePressEvent(QMouseEvent* ev) override;
     void mouseDoubleClickEvent(QMouseEvent* ev) override;
     void keyPressEvent(QKeyEvent* ev) override;
     bool event(QEvent* ev) override;
 
 signals:
     void variableEditorRequested();
-    void setWindowTitle(const QString&);
 
 private:
     void DisplayHistory(bool bForward);
@@ -73,6 +71,9 @@ class ConsoleTextEdit
 public:
     explicit ConsoleTextEdit(QWidget* parent = nullptr);
     virtual bool event(QEvent* theEvent) override;
+
+signals:
+    void searchBarRequested();
 
 private:
     void showContextMenu(const QPoint& pt);
@@ -175,6 +176,9 @@ public Q_SLOTS:
 
 private Q_SLOTS:
     void showVariableEditor();
+    void toggleConsoleSearch();
+    void findPrevious();
+    void findNext();
 
 private:
     QScopedPointer<Ui::Console> ui;
@@ -185,6 +189,9 @@ private:
 
     QList<QColor> m_colorTable;
     SEditorSettings::ConsoleColorTheme m_backgroundTheme;
+
+    class SearchHighlighter;
+    SearchHighlighter* m_highlighter;
 };
 
 #endif // CRYINCLUDE_EDITOR_CONTROLS_CONSOLESCB_H

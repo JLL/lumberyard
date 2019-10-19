@@ -285,6 +285,32 @@ namespace EMotionFX
     }
 
 
+    AZ::Vector3 Transform::TransformPoint(const AZ::Vector3& point) const
+    {
+        #ifdef EMFX_SCALE_DISABLED
+        return mPosition + mRotation * point;
+        #else
+        return mPosition + mRotation * point * mScale;
+        #endif
+    }
+
+
+    AZ::Vector3 Transform::RotateVector(const AZ::Vector3& v) const
+    {
+        return mRotation * v;
+    }
+
+
+    AZ::Vector3 Transform::TransformVector(const AZ::Vector3& v) const
+    {
+        #ifdef EMFX_SCALE_DISABLED
+        return mRotation * v;
+        #else
+        return mRotation * v * mScale;
+        #endif
+    }
+
+
     // multiply
     Transform& Transform::Multiply(const Transform& other)
     {
@@ -560,6 +586,32 @@ namespace EMotionFX
     }
 
 
+    Transform& Transform::ApplyAdditive(const Transform& additive)
+    {
+        mPosition += additive.mPosition;
+        mRotation = mRotation * additive.mRotation;
+
+        EMFX_SCALECODE
+        (
+            mScale *= additive.mScale;
+        )
+        return *this;
+    }
+
+
+    Transform& Transform::ApplyAdditive(const Transform& additive, float weight)
+    {
+        mPosition += additive.mPosition * weight;
+        mRotation = mRotation.NLerp(mRotation * additive.mRotation, weight);
+
+        EMFX_SCALECODE
+        (
+            mScale *= AZ::Vector3::CreateOne().Lerp(additive.mScale, weight);
+        )
+        return *this;
+    }
+
+
     // sum the transforms
     Transform& Transform::Add(const Transform& other, float weight)
     {
@@ -618,17 +670,17 @@ namespace EMotionFX
             MCore::LogInfo("Transform(%s):", name);
         }
 
-        MCore::LogInfo("mPosition = %.6f, %.6f, %.6f", 
-            static_cast<float>(mPosition.GetX()), 
-            static_cast<float>(mPosition.GetY()), 
+        MCore::LogInfo("mPosition = %.6f, %.6f, %.6f",
+            static_cast<float>(mPosition.GetX()),
+            static_cast<float>(mPosition.GetY()),
             static_cast<float>(mPosition.GetZ()));
         MCore::LogInfo("mRotation = %.6f, %.6f, %.6f, %.6f", mRotation.x, mRotation.y, mRotation.z, mRotation.w);
 
         EMFX_SCALECODE
         (
-            MCore::LogInfo("mScale    = %.6f, %.6f, %.6f", 
-                static_cast<float>(mScale.GetX()), 
-                static_cast<float>(mScale.GetY()), 
+            MCore::LogInfo("mScale    = %.6f, %.6f, %.6f",
+                static_cast<float>(mScale.GetX()),
+                static_cast<float>(mScale.GetY()),
                 static_cast<float>(mScale.GetZ()));
         )
     }

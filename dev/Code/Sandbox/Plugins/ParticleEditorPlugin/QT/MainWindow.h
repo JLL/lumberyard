@@ -83,6 +83,7 @@ private:
     bool ShortcutEvent(QShortcutEvent* e);
     ////////////////////////////////////////////////////////
 
+    void UpdateEditActions(bool menuShown);
     bool OnCloseWindowCheck();
     void CleanupOnClose();
     void OnAddNewLayout(QString path, bool loading);
@@ -123,6 +124,8 @@ private:
 
     //LibraryItemUIRequests::Bus
     void UpdateItemUI(const AZStd::string& itemId, bool selected, int lodIdx) override;
+    void RefreshItemUI() override;
+ 
     //end LibraryItemUIRequests::Bus
 
     //LibraryChangeEvents::Bus
@@ -193,8 +196,14 @@ private: // Internal particle editor members
     QMenu* m_showLayoutMenu;
     QActionGroup* m_libraryMenuActionGroup;
 
-    QAction* m_undoAction;
-    QAction* m_redoAction;
+    QAction* m_undoAction = nullptr;
+    QAction* m_redoAction = nullptr;
+    QAction* m_copyAction = nullptr;
+    QAction* m_duplicateAction = nullptr;
+    QAction* m_addLODAction = nullptr;
+    QAction* m_resetSelectedItem = nullptr;
+    QAction* m_renameSelectedItem = nullptr;
+    QAction* m_deleteSelectedItem = nullptr;
 
     QAction* m_lodAction;
     QList < QAction* > m_actionsRequiringASelection;

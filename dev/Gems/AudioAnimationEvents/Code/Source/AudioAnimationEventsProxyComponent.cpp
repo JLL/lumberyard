@@ -1,3 +1,14 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
 
 #include "AudioAnimationEvents_precompiled.h"
 #include "AudioAnimationEventsProxyComponent.h"
@@ -56,7 +67,7 @@ namespace AudioAnimationEvents
                 ->Version(0)
                 ->Field("Tracks Entity Position",&AudioAnimationEventsProxyComponent::m_tracksEntityPosition )
                 ->Field("Audio Event Name",&AudioAnimationEventsProxyComponent::m_audioEventName )
-                ->SerializerForEmptyClass();
+                ;
 
             if (AZ::EditContext* ec = serialize->GetEditContext())
             {
@@ -102,17 +113,10 @@ namespace AudioAnimationEvents
         {
             // get the audio trigger id
             Audio::TAudioControlID triggerId = INVALID_AUDIO_CONTROL_ID;
-			Audio::AudioSystemRequestBus::BroadcastResult(triggerId, &Audio::AudioSystemRequestBus::Events::GetAudioTriggerID, event.m_parameter);
+            Audio::AudioSystemRequestBus::BroadcastResult(triggerId, &Audio::AudioSystemRequestBus::Events::GetAudioTriggerID, event.m_parameter);
             if (triggerId == INVALID_AUDIO_CONTROL_ID)
             {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(AudioAnimationEventsProxyComponent_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
                 AZ_Warning("AudioAnimationEventProxy", triggerId != INVALID_AUDIO_CONTROL_ID, "AudioAnimationEventsProxy given invalid trigger ID %d", triggerId);
-#endif
                 return;
             }
 
@@ -135,8 +139,8 @@ namespace AudioAnimationEvents
             JointAudioProxy* proxy = stl::find_in_map(m_jointAudioProxies, jointId, nullptr);
             if (proxy == nullptr)
             {
-				Audio::IAudioProxy* audioProxy = nullptr;
-				Audio::AudioSystemRequestBus::BroadcastResult(audioProxy, &Audio::AudioSystemRequestBus::Events::GetFreeAudioProxy);
+                Audio::IAudioProxy* audioProxy = nullptr;
+                Audio::AudioSystemRequestBus::BroadcastResult(audioProxy, &Audio::AudioSystemRequestBus::Events::GetFreeAudioProxy);
                 AZ_Assert(audioProxy, "AudioAnimationEventsProxyComponent::OnAnimationEvent - Failed to get free audio proxy");
                 if (audioProxy)
                 {

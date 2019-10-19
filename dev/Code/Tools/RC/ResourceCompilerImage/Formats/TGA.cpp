@@ -11,9 +11,10 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "Util.h"                                       // Util
+#include "TGA.h"
 
 namespace ImageTGA
 {
@@ -133,7 +134,8 @@ namespace ImageTGA
 
     void WriteTga(const char* fname, int width, int height, const float* p, int step)
     {
-        FILE* f = fopen(fname, "wb");
+        FILE* f = nullptr; 
+        azfopen(&f, fname, "wb");
 
         TgaFileHeader h;
         h.setBw8(width, height);
@@ -178,6 +180,49 @@ namespace ImageTGA
         }
         fclose(f);
     }
-
     ///////////////////////////////////////////////////////////////////////////////////
+
+    Type ReadTgaType(const char* fname)
+    {
+        FILE* f = nullptr;
+        azfopen(&f, fname, "rb");
+        
+        if (!f)
+        {
+            return Type::Unknown;
+        }
+
+        TgaFileHeader h;
+        size_t countRead = fread(&h, sizeof(h), 1, f);
+        if (countRead != 1)
+        {
+            return Type::Unknown;
+        }
+
+        fclose(f);
+        f = nullptr;
+
+        Type mapping[] = {
+            Type::NoImageData,                  // 0
+            Type::UncompressedPalettized,       // 1
+            Type::UncompressedTrueColor,        // 2
+            Type::UncompressedGrayscale,        // 3
+            Type::Unknown,                      // 4
+            Type::Unknown,                      // 5
+            Type::Unknown,                      // 6
+            Type::Unknown,                      // 7
+            Type::Unknown,                      // 8
+            Type::RunLengthEncodedPalettized,   // 9
+            Type::RunLengthEncodedTrueColor,    // 10
+            Type::RunLengthEncodedGrayscale     // 11
+        };
+
+        size_t typeCount = sizeof(mapping) / sizeof(mapping[0]);
+        if (h.imageType < typeCount)
+        {
+            return mapping[h.imageType];
+        }
+
+        return Type::Unknown;
+    }
 };

@@ -15,7 +15,6 @@
 
 #include <CryPool/PoolAlloc.h>
 #include "TextMessages.h"                                                           // CTextMessages
-#include <CryEngineAPI.h>
 #include "RenderAuxGeom.h"
 #include "Shaders/Vertex.h"
 #include <AzFramework/Asset/AssetCatalogBus.h>
@@ -23,6 +22,13 @@
 #include <AzCore/Jobs/LegacyJobExecutor.h>
 
 #include <LoadScreenBus.h>
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
+namespace AzRTT
+{
+    class RenderContextManager;
+}
+#endif // AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #undef AZ_RESTRICTED_SECTION
@@ -34,7 +40,11 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_1
-#include AZ_RESTRICTED_FILE(Renderer_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Renderer_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Renderer_h_provo.inl"
+    #endif
 #endif
 
 typedef void (PROCRENDEF)(SShaderPass* l, int nPrimType);
@@ -105,7 +115,7 @@ typedef int (* pDrawModelFunc)(void);
 
 #define DEF_SHAD_DBT_DEFAULT_VAL 1
 
-#if defined(AZ_PLATFORM_APPLE_IOS) || defined(AZ_PLATFORM_APPLE_TV) || defined (AZ_PLATFORM_ANDROID)
+#if defined(AZ_PLATFORM_IOS) || defined(AZ_PLATFORM_APPLE_TV) || defined (AZ_PLATFORM_ANDROID)
     #define TEXSTREAMING_DEFAULT_VAL 0
 #else
     #define TEXSTREAMING_DEFAULT_VAL 1
@@ -151,7 +161,11 @@ typedef int (* pDrawModelFunc)(void);
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_2
-#include AZ_RESTRICTED_FILE(Renderer_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Renderer_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Renderer_h_provo.inl"
+    #endif
 #endif
 
 //////////////////////////////////////////////////////////////////////
@@ -497,7 +511,7 @@ struct SShowRenderTargetInfo
     int col;
     struct RT
     {
-        CTexture* pTexture;
+        int textureID;
         Vec4 channelWeight;
         bool bFiltered;
         bool bRGBKEncoded;
@@ -532,7 +546,11 @@ class CRenderer
     : public IRenderer
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_3
-#include AZ_RESTRICTED_FILE(Renderer_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Renderer_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Renderer_h_provo.inl"
+    #endif
 #endif
 {
 public:
@@ -700,6 +718,8 @@ public:
     SFogState m_FSStack[8];
     int m_nCurFSStackLevel;
 
+    AZStd::string m_apiVersion;
+    AZStd::string m_adapterDescription;
     DWORD m_Features;
     int m_MaxTextureSize;
     size_t m_MaxTextureMemory;
@@ -768,7 +788,11 @@ public:
     // Multithreading support
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION RENDERER_H_SECTION_4
-#include AZ_RESTRICTED_FILE(Renderer_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Renderer_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Renderer_h_provo.inl"
+    #endif
 #endif
 
     virtual void SyncComputeVerticesJobs();
@@ -783,6 +807,7 @@ public:
     virtual int  RT_CurThreadList();
     virtual void RT_BeginFrame() = 0;
     virtual void RT_EndFrame() = 0;
+    virtual void RT_EndFrame(bool isLoading) {};
     virtual void RT_ForceSwapBuffers() = 0;
     virtual void RT_SwitchToNativeResolutionBackbuffer(bool resolveBackBuffer) = 0;
     virtual void RT_Init() = 0;
@@ -811,6 +836,7 @@ public:
     virtual void RT_ReleaseVBStream(void* pVB, int nStream) = 0;
     virtual void RT_ReleaseCB(void* pCB) = 0;
     virtual void RT_DrawDynVB(SVF_P3F_C4B_T2F* pBuf, uint16* pInds, uint32 nVerts, uint32 nInds, const PublicRenderPrimitiveType nPrimType) = 0;
+    virtual void RT_DrawDynVBUI(SVF_P2F_C4B_T2F_F4B* pBuf, uint16* pInds, uint32 nVerts, uint32 nInds, const PublicRenderPrimitiveType nPrimType) = 0;
     virtual void RT_Draw2dImage(float xpos, float ypos, float w, float h, CTexture* pTexture, float s0, float t0, float s1, float t1, float angle, DWORD col, float z) = 0;
     virtual void RT_Draw2dImageStretchMode(bool bStretch) = 0;
     virtual void RT_Push2dImage(float xpos, float ypos, float w, float h, CTexture* pTexture, float s0, float t0, float s1, float t1, float angle, DWORD col, float z, float stereoDepth) = 0;
@@ -820,11 +846,12 @@ public:
     virtual void RT_PushRenderTarget(int nTarget, CTexture* pTex, SDepthTexture* pDS, int nS) = 0;
     virtual void RT_PopRenderTarget(int nTarget) = 0;
     virtual void RT_SetViewport(int x, int y, int width, int height, int id = 0) = 0;
-    virtual void RT_ClearTarget(CTexture* pTex, const ColorF& color) = 0;
+    virtual void RT_ClearTarget(ITexture* pTex, const ColorF& color) = 0;
     virtual void RT_RenderDebug(bool bRenderStats = true) = 0;
     virtual void RT_SetRendererCVar(ICVar* pCVar, const char* pArgText, const bool bSilentMode = false) = 0;
-    void RT_PrepareLevelTexStreaming();
-    void RT_PostLevelLoading();
+
+    virtual void RT_PostLevelLoading();
+
     void RT_DisableTemporalEffects();
 
     virtual bool FlushRTCommands(bool bWait, bool bImmediatelly, bool bForce);
@@ -867,6 +894,13 @@ public:
     virtual bool IsCurrentContextMainVP() { return true; }
 
     virtual int GetFeatures() {return m_Features; }
+    virtual const void SetApiVersion(const AZStd::string& apiVersion) { m_apiVersion = apiVersion; }
+    virtual const void SetAdapterDescription(const AZStd::string& adapterDescription) { m_adapterDescription = adapterDescription; }
+    virtual const AZStd::string& GetApiVersion() const { return m_apiVersion; }
+    virtual const AZStd::string& GetAdapterDescription() const { return m_adapterDescription; }
+    
+    unsigned long GetNvidiaDriverVersion() const { return m_nvidiaDriverVersion; }
+    void SetNvidiaDriverVersion(unsigned long version) { m_nvidiaDriverVersion = version; }
 
     virtual int GetNumGeomInstances()
     {
@@ -1041,9 +1075,24 @@ public:
     virtual void    RemoveTexture(unsigned int TextureId) = 0;
 
     virtual void    SetTexture(int tnum);
+    virtual void    SetTexture(int tnum, int nUnit);
     virtual void    SetWhiteTexture();
     virtual int     GetWhiteTextureId() const;
     virtual int     GetBlackTextureId() const;
+
+    // Methods exposed to external libraries
+    virtual void ApplyDepthTextureState(int unit, int nFilter, bool clamp) override;
+    virtual ITexture* GetZTargetTexture() override;
+    virtual int GetTextureState(const STexState& TS) override;
+    virtual uint32 TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, uint32 nMips, uint32 nSlices, const ETEX_Format eTF, ETEX_TileMode eTM = eTM_None) override;
+    virtual void ApplyForID(int nID, int nTUnit, int nTState, int nTexMaterialSlot, int nSUnit, bool useWhiteDefault) override;
+    virtual ITexture* Create3DTexture(const char* szName, int nWidth, int nHeight, int nDepth, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst) override;
+    virtual bool IsTextureExist(const ITexture* pTex) override;
+    virtual const char* NameForTextureFormat(ETEX_Format eTF) override;
+    virtual const char* NameForTextureType(ETEX_Type eTT) override;
+    virtual bool IsVideoThreadModeEnabled() override;
+    virtual IDynTexture* CreateDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool) override;
+    virtual uint32 GetCurrentTextureAtlasSize() override;
 
     virtual void  PrintToScreen(float x, float y, float size, const char* buf);
     virtual void TextToScreen(float x, float y, const char* format, ...);
@@ -1119,19 +1168,34 @@ public:
         ScaleCoordInternal(x, y);
     }
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    bool IsRenderToTextureActive() const override;
+
+    int GetWidth() const override;
+    void SetWidth(int width);
+    int GetHeight() const override;
+    void SetHeight(int height);
+
+    int GetOverlayWidth() const override;
+    int GetOverlayHeight() const override;
+#else
     void SetWidth(int nW) { m_width = nW; }
     void SetHeight(int nH) { m_height = nH; }
+
+    virtual int     GetWidth() const { return (m_width); }
+    virtual int     GetHeight() const { return (m_height); }
+
+    virtual int GetOverlayWidth() const { return m_nativeWidth; }
+    virtual int GetOverlayHeight() const { return m_nativeHeight; }
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
     void SetPixelAspectRatio(float fPAR) {m_pixelAspectRatio = fPAR; }
-    virtual int     GetWidth()  { return (m_width); }
-
-    virtual int     GetHeight() { return (m_height); }
-    virtual float   GetPixelAspectRatio() const { return (m_pixelAspectRatio); }
-
-    virtual int GetOverlayWidth() { return m_nativeWidth; }
-    virtual int GetOverlayHeight() { return m_nativeHeight; }
+    virtual float GetPixelAspectRatio() const { return (m_pixelAspectRatio); }
 
     int GetBackbufferWidth() { return m_backbufferWidth; }
     int GetBackbufferHeight() { return m_backbufferHeight; }
+
+    void GetClampedWindowSize(int& widthPixels, int& heightPixels);
 
     inline int GetMaxSquareRasterDimension() const override
     {
@@ -1144,7 +1208,8 @@ public:
     virtual float   GetNearestRangeMax() const { return (CV_r_DrawNearZRange); }
 
     //  Get mipmap distance factor (depends on screen width, screen height and aspect ratio)
-    _inline float GetMipDistFactor() { return TANGENT30_2 * TANGENT30_2 / (m_height * m_height); }
+
+    _inline float GetMipDistFactor() { return TANGENT30_2 * TANGENT30_2 / (GetHeight() * GetHeight()); }
 
     virtual int     GetWireframeMode() { return(m_wireframe_mode); }
 
@@ -1177,25 +1242,10 @@ public:
     int GetPolyCount()
     {
 #if defined(ENABLE_PROFILING_CODE)
-        ASSERT_IS_MAIN_THREAD(m_pRT);
         int nPolys = 0;
         for (int i = 0; i < EFSLIST_NUM; i++)
         {
-            nPolys += m_RP.m_PS[m_RP.m_nFillThreadID].m_nPolygons[i];
-        }
-        return nPolys;
-#else
-        return 0;
-#endif
-    }
-    int RT_GetPolyCount()
-    {
-#if defined(ENABLE_PROFILING_CODE)
-        ASSERT_IS_RENDER_THREAD(m_pRT);
-        int nPolys = 0;
-        for (int i = 0; i < EFSLIST_NUM; i++)
-        {
-            nPolys += m_RP.m_PS[m_RP.m_nProcessThreadID].m_nPolygons[i];
+            nPolys += m_RP.m_PS[m_pRT->IsMainThread()?m_RP.m_nFillThreadID:m_RP.m_nProcessThreadID].m_nPolygons[i];
         }
         return nPolys;
 #else
@@ -1216,6 +1266,16 @@ public:
     virtual void SetTextureStreamListener(ITextureStreamListener* pListener);
 
     virtual void GetLogVBuffers() = 0;
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // Returns a frame ID that is sequential for the active camera.  This is 
+    // useful for camera-specific temporal data like motion vectors.
+    virtual int GetCameraFrameID() const
+    {
+        const int nThreadID = m_pRT ? m_pRT->GetThreadList() : 0;
+        return m_RP.m_TI[nThreadID].m_cam.GetFrameUpdateId();
+    }
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 
     virtual int GetFrameID(bool bIncludeRecursiveCalls = true)
     {
@@ -1293,7 +1353,6 @@ public:
     bool m_bTimeProfileUpdated;
     int m_PrevProfiler;
     int m_nCurSlotProfiler;
-    bool m_hasSmallUniformBuffers;
 
     AZ::IO::HandleType m_logFileHandle;
     AZ::IO::HandleType m_logFileStrHandle;
@@ -1355,7 +1414,7 @@ public:
     void EF_AddClientPolys(const SRenderingPassInfo& passInfo);
     void EF_RemovePolysFromScene();
 
-    bool FX_TryToMerge(CRenderObject* pNewObject, CRenderObject* pOldObject, CRendElementBase* pRE, bool bResIdentical);
+    bool FX_TryToMerge(CRenderObject* pNewObject, CRenderObject* pOldObject, IRenderElement* pRE, bool bResIdentical);
     virtual void* FX_AllocateCharInstCB(SSkinningData*, uint32) { return NULL; }
     virtual void  FX_ClearCharInstCB(uint32) {}
 
@@ -1486,7 +1545,7 @@ public:
     virtual ERenderQuality EF_GetRenderQuality() const;
 
     void RefreshSystemShaders();
-    uint32 EF_BatchFlags(SShaderItem& SH, CRenderObject* pObj, CRendElementBase* re, const SRenderingPassInfo& passInfo);
+    uint32 EF_BatchFlags(SShaderItem& SH, CRenderObject* pObj, IRenderElement* re, const SRenderingPassInfo& passInfo);
 
     virtual void FX_PipelineShutdown(bool bFastShutdown = false) = 0;
 
@@ -1501,8 +1560,8 @@ public:
     virtual CRenderObject* EF_AddPolygonToScene(SShaderItem& si, int numPts, const SVF_P3F_C4B_T2F* verts, const SPipTangents* tangs, CRenderObject* obj, const SRenderingPassInfo& passInfo, uint16* inds, int ninds, int nAW, const SRendItemSorter& rendItemSorter);
     virtual CRenderObject* EF_AddPolygonToScene(SShaderItem& si, CRenderObject* obj, const SRenderingPassInfo& passInfo, int numPts, int ninds, SVF_P3F_C4B_T2F*& verts, SPipTangents*& tangs, uint16*& inds, int nAW, const SRendItemSorter& rendItemSorter);
 
-    virtual void FX_CheckOverflow(int nVerts, int nInds, CRendElementBase* re, int* nNewVerts = NULL, int* nNewInds = NULL) override;
-    virtual void FX_Start(CShader* ef, int nTech, CShaderResources* Res, CRendElementBase* re) override;
+    virtual void FX_CheckOverflow(int nVerts, int nInds, IRenderElement* re, int* nNewVerts = NULL, int* nNewInds = NULL) override;
+    virtual void FX_Start(CShader* ef, int nTech, CShaderResources* Res, IRenderElement* re) override;
 
     virtual int GenerateTextureId() override { return m_TexGenID++; }
 
@@ -1536,11 +1595,11 @@ public:
     // Summary:
     virtual void BeginSpawningGeneratingRendItemJobs(int nThreadID);
     virtual void BeginSpawningShadowGeneratingRendItemJobs(int nThreadID);
-    virtual void EndSpawningGeneratingRendItemJobs(int nThreadID);
+    virtual void EndSpawningGeneratingRendItemJobs();
 
-    AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutor(int nThreadID) override;
-    AZ::LegacyJobExecutor* GetGenerateShadowRendItemJobExecutor(int nThreadID) override;
-    AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutorPreProcess(int nThreadID) override;
+    AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutor() override;
+    AZ::LegacyJobExecutor* GetGenerateShadowRendItemJobExecutor() override;
+    AZ::LegacyJobExecutor* GetGenerateRendItemJobExecutorPreProcess() override;
     AZ::LegacyJobExecutor* GetFinalizeRendItemJobExecutor(int nThreadID) override;
     AZ::LegacyJobExecutor* GetFinalizeShadowRendItemJobExecutor(int nThreadID) override;
 
@@ -1554,7 +1613,7 @@ public:
     virtual uint64          EF_GetRemapedShaderMaskGen(const char* name, uint64 nMaskGen = 0, bool bFixup = 0);
 
     virtual uint64      EF_GetShaderGlobalMaskGenFromString(const char* szShaderName, const char* szShaderGen, uint64 nMaskGen = 0);
-    virtual const char* EF_GetStringFromShaderGlobalMaskGen(const char* szShaderName, uint64 nMaskGen = 0);
+    virtual AZStd::string EF_GetStringFromShaderGlobalMaskGen(const char* szShaderName, uint64 nMaskGen = 0);
 
     // reload file
     virtual bool EF_ReloadFile(const char* szFileName);
@@ -1575,7 +1634,7 @@ public:
     virtual _smart_ptr<IImageFile> EF_LoadImage(const char* szFileName, uint32 nFlags);
 
     // Create new RE of type (edt)
-    virtual CRendElementBase* EF_CreateRE (EDataType edt);
+    virtual IRenderElement* EF_CreateRE (EDataType edt);
 
     // Begin using shaders
     virtual void EF_StartEf (const SRenderingPassInfo& passInfo);
@@ -1588,10 +1647,10 @@ public:
     CRenderObject* EF_DuplicateRO(CRenderObject* pObj, const SRenderingPassInfo& passInfo);
 
     // Add shader to the list (virtual)
-    virtual void EF_AddEf (CRendElementBase* pRE, SShaderItem& pSH,  CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter);
+    virtual void EF_AddEf (IRenderElement* pRE, SShaderItem& pSH,  CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter);
 
     // Add shader to the list
-    void EF_AddEf_NotVirtual (CRendElementBase* pRE, SShaderItem& pSH, CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter);
+    void EF_AddEf_NotVirtual (IRenderElement* pRE, SShaderItem& pSH, CRenderObject* pObj, const SRenderingPassInfo& passInfo, int nList, int nAW, const SRendItemSorter& rendItemSorter);
 
     // Draw all shaded REs in the list
     virtual void EF_EndEf3D (const int nFlags, const int nPrecacheUpdateId, const int nNearPrecacheUpdateId, const SRenderingPassInfo& passInfo) = 0;
@@ -1694,8 +1753,8 @@ public:
     };
     virtual void SetProfileMarker(const char* label, ESPM mode) const {};
 
-    virtual uint16 PushFogVolumeContribution(const ColorF& fogVolumeContrib, const SRenderingPassInfo& passInfo);
-    void GetFogVolumeContribution(uint16 idx, ColorF& rColor) const;
+    virtual uint16 PushFogVolumeContribution(const SFogVolumeData& fogVolData, const SRenderingPassInfo& passInfo);
+    void GetFogVolumeContribution(uint16 idx, SFogVolumeData& fogVolData) const;
     virtual void PushFogVolume(class CREFogVolume* pFogVolume, const SRenderingPassInfo& passInfo) {assert(false); }
 
     virtual int GetMaxTextureSize() { return m_MaxTextureSize; }
@@ -1829,6 +1888,7 @@ public:
     uint32 m_nFrameSwapID;                          // without recursive calls, access through GetFrameID(false)
 
     ColorF m_cClearColor;
+    bool m_clearBackground;
     int  m_NumResourceSlots;
     int  m_NumSamplerSlots;
 
@@ -1914,6 +1974,8 @@ public:
     //=================================================================
 
     virtual void SetClearColor(const Vec3& vColor) { m_cClearColor.r = vColor[0]; m_cClearColor.g = vColor[1]; m_cClearColor.b = vColor[2]; }
+    
+    virtual void SetClearBackground(bool clearBackground) { m_clearBackground = clearBackground; }
 
     static void ChangeGeomInstancingThreshold(ICVar* pVar = 0);
 
@@ -1968,6 +2030,7 @@ public:
     DeclareStaticConstIntCVar(CV_r_MotionVectorsDebug, 0);
     static float CV_r_MotionVectorsTransparencyAlphaThreshold;
     static int CV_r_MotionBlur;
+    static int CV_r_RenderMotionBlurAfterHDR;
     static int CV_r_MotionBlurScreenShot;
     static int CV_r_MotionBlurQuality;
     static int CV_r_MotionBlurGBufferVelocity;
@@ -2015,9 +2078,6 @@ public:
     static int CV_r_dyntexatlascloudsmaxsize;
     static int CV_r_texminanisotropy;
     static int CV_r_texmaxanisotropy;
-    static int CV_r_texturesstreampooldefragmentation;
-    static int CV_r_texturesstreampooldefragmentationmaxmoves;
-    static int CV_r_texturesstreampooldefragmentationmaxamount;
     static int CV_r_texturesskiplowermips;
     static int CV_r_rendertargetpoolsize;
     static int CV_r_texturesstreamingsync;
@@ -2033,12 +2093,15 @@ public:
     static int CV_r_shadersGL4;
     static int CV_r_shadersGLES3;
     static int CV_r_shadersdurango; // ACCEPTED_USE
-    // Confetti Nicholas Baldwin: adding metal shader language support
     static int CV_r_shadersMETAL;
+    
+    static int CV_r_ProvoHardwareMode;
+
+    static int CV_r_shadersPlatform;
 #endif
     //  static int CV_r_envcmwrite;
     static int CV_r_shaderspreactivate;
-    static int CV_r_shadersremotecompiler;
+    DeclareStaticConstIntCVar(CV_r_shadersremotecompiler, 0);
     static int CV_r_shadersasynccompiling;
     static int CV_r_shadersasyncactivation;
     static int CV_r_shadersasyncmaxthreads;
@@ -2049,6 +2112,7 @@ public:
     static int CV_r_shadersImport;
     static int CV_r_shadersExport;
     static int CV_r_shadersCacheUnavailableShaders;
+    DeclareStaticConstIntCVar(CV_r_ShadersUseLLVMDirectXCompiler, 0);
     static int CV_r_meshpoolsize;
     static int CV_r_meshinstancepoolsize;
     static int CV_r_multigpu;
@@ -2098,7 +2162,8 @@ public:
     DeclareStaticConstIntCVar(CV_r_profiler, 0);
     static float CV_r_profilerTargetFPS;
     DeclareStaticConstIntCVar(CV_r_ShadowPoolMaxFrames, 30);
-    DeclareStaticConstIntCVar(CV_r_log, 0);
+    static int CV_r_log;
+    static int CV_r_VRAMDebug;
     DeclareStaticConstIntCVar(CV_r_logTexStreaming, 0);
     DeclareStaticConstIntCVar(CV_r_logShaders, 0);
     static int CV_r_logVBuffers;
@@ -2162,6 +2227,11 @@ public:
     static int CV_r_PostProcess;
     DeclareStaticConstIntCVar(CV_r_PostProcessFilters, 1);
     DeclareStaticConstIntCVar(CV_r_PostProcessGameFx, 1);
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    static int CV_r_FinalOutputsRGB;
+    static int CV_r_FinalOutputAlpha;
+    static int CV_r_RTT;
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
     static int CV_r_colorgrading;
     DeclareStaticConstIntCVar(CV_r_colorgrading_levels, 1);
     DeclareStaticConstIntCVar(CV_r_colorgrading_filters, 1);
@@ -2248,6 +2318,7 @@ public:
     static int CV_r_ParticlesTessellation;
     static int CV_r_ParticlesTessellationTriSize;
     static float CV_r_ParticlesAmountGI;
+    static int CV_r_ParticlesGpuMaxEmitCount;
     static int CV_r_ParticlesHalfRes;
     DeclareStaticConstIntCVar(CV_r_ParticlesHalfResAmount, 0);
     DeclareStaticConstIntCVar(CV_r_ParticlesHalfResBlendMode, 0);
@@ -2283,10 +2354,11 @@ public:
 
     // Confetti David Srour: Upscaling Quality (Metal only at the moment)
     DeclareStaticConstIntCVar(CV_r_UpscalingQuality, 0);
-    // Confetti David Srour: Clears GMEM G-Buffer
+    //Clears GMEM G-Buffer
     DeclareStaticConstIntCVar(CV_r_ClearGMEMGBuffer, 0);
-    // Confetti David Srour: 0 = disable, 1= resolves LDR GMEM path to an RGBA8 target after deferred composition
-    DeclareStaticConstIntCVar(CV_r_GMEM_LDR_ForceResolvePostComposition, 0);
+
+    // 0 = disable, 1 = enables fast math for metal shaders
+    DeclareStaticConstIntCVar(CV_r_MetalShadersFastMath, 1);
     // Confetti Vera
     static int CV_r_CubeDepthMapResolution;
 
@@ -2399,6 +2471,7 @@ public:
 
     static int CV_r_AntialiasingMode_CB;
     static int CV_r_AntialiasingMode;
+    static float CV_r_AntialiasingNonTAASharpening;
     static int CV_r_AntialiasingTAAJitterPattern;
     DeclareStaticConstIntCVar(CV_r_AntialiasingTAAUseAntiFlickerFilter, 1);
     DeclareStaticConstIntCVar(CV_r_AntialiasingTAAUseJitterMipBias, 1);
@@ -2508,21 +2581,31 @@ public:
     static int CV_r_FurFinShadowPass;
     static float CV_r_FurMovementBendingBias;
     static float CV_r_FurMaxViewDist;
+    
+    static int CV_r_SkipNativeUpscale;
+    static int CV_r_SkipRenderComposites;
+
+    static float CV_r_minConsoleFontSize;
+    static float CV_r_maxConsoleFontSize;
+
+    // Graphics programmers: Use these in your code for local tests/debugging.
+    // Delete all references in your code before you submit
+    static int CV_r_GraphicsTest00;
+    static int CV_r_GraphicsTest01;
+    static int CV_r_GraphicsTest02;
+    static int CV_r_GraphicsTest03;
+    static int CV_r_GraphicsTest04;
+    static int CV_r_GraphicsTest05;
+    static int CV_r_GraphicsTest06;
+    static int CV_r_GraphicsTest07;
+    static int CV_r_GraphicsTest08;
+    static int CV_r_GraphicsTest09;
+
     //--------------end cvars------------------------
 
 
     virtual void MakeMatrix(const Vec3& pos, const Vec3& angles, const Vec3& scale, Matrix34* mat){assert(0); };
 
-    void* operator new(size_t Size)
-    {
-        void* pPtrRes = CryModuleMemalign(Size, 16);
-        memset(pPtrRes, 0, Size);
-        return pPtrRes;
-    }
-    void operator delete(void* Ptr)
-    {
-        CryModuleMemalignFree(Ptr);
-    }
 
     virtual WIN_HWND GetHWND() = 0;
 
@@ -2638,19 +2721,23 @@ public:
     int m_nFlushAllPendingTextureStreamingJobs;
     float m_fTexturesStreamingGlobalMipFactor;
 
-
-    AZ::LegacyJobExecutor m_generateRendItemJobExecutor[RT_COMMAND_BUF_COUNT];
-    AZ::LegacyJobExecutor m_generateShadowRendItemJobExecutor[RT_COMMAND_BUF_COUNT];
-    AZ::LegacyJobExecutor m_generateRendItemPreProcessJobExecutor[RT_COMMAND_BUF_COUNT];
-
 protected:
 
+    AZ::LegacyJobExecutor m_generateRendItemJobExecutor;
+    AZ::LegacyJobExecutor m_generateRendItemPreProcessJobExecutor;
+    AZ::LegacyJobExecutor m_generateShadowRendItemJobExecutor;
     AZ::LegacyJobExecutor m_finalizeRendItemsJobExecutor[RT_COMMAND_BUF_COUNT];
     AZ::LegacyJobExecutor m_finalizeShadowRendItemsJobExecutor[RT_COMMAND_BUF_COUNT];
 
 private:
     std::vector<ISyncMainWithRenderListener*> m_syncMainWithRenderListeners;
     RendererAssetListener m_assetListener;
+
+    unsigned long m_nvidiaDriverVersion = 0;
+    
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
+    AZStd::unique_ptr<AzRTT::RenderContextManager> m_contextManager;
+#endif // AZ_RENDER_TO_TEXTURE_GEM_ENABLED && !defined(NULL_RENDERER)
 };
 
 

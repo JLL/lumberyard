@@ -111,23 +111,25 @@ namespace GraphCanvas
             void DisplaySlot(const AZ::EntityId& slotId);
             void RemoveSlot(const AZ::EntityId& slotId);
 
-            const AZStd::vector< AZ::EntityId >& GetInputSlots() const;
-            const AZStd::vector< AZ::EntityId >& GetOutputSlots() const;
+            const AZStd::vector< SlotLayoutInfo >& GetInputSlots() const;
+            const AZStd::vector< SlotLayoutInfo >& GetOutputSlots() const;
 
             bool IsEmpty() const;
             void UpdateStyle(const Styling::StyleHelper& styleHelper);
 
         private:
 
+            int LayoutSlot(AZStd::vector<SlotLayoutInfo>& slotList, const SlotLayoutInfo& slotInfo);
+
             QGraphicsLayoutItem* GetLayoutItem(const AZ::EntityId& slotId) const;
 
             QGraphicsWidget* m_horizontalSpacer;
 
             QGraphicsLinearLayout* m_inputs;
-            AZStd::vector< AZ::EntityId > m_inputSlots;
+            AZStd::vector< SlotLayoutInfo > m_inputSlots;
 
             QGraphicsLinearLayout* m_outputs;
-            AZStd::vector< AZ::EntityId > m_outputSlots;
+            AZStd::vector< SlotLayoutInfo > m_outputSlots;
         };
 
     public:
@@ -144,8 +146,8 @@ namespace GraphCanvas
         // NodeNotificationBus
         void OnNodeActivated() override;
 
-        void OnSlotAdded(const AZ::EntityId& slot) override;        
-        void OnSlotRemoved(const AZ::EntityId& slot) override;
+        void OnSlotAddedToNode(const AZ::EntityId& slot) override;        
+        void OnSlotRemovedFromNode(const AZ::EntityId& slot) override;
         ////
 
         // NodeSlotsRequestBus
@@ -159,6 +161,7 @@ namespace GraphCanvas
         // SlotLayoutRequestBus
         void SetDividersEnabled(bool enabled) override;
         void ConfigureSlotGroup(SlotGroup group, SlotGroupConfiguration configuration) override;
+        int GetSlotGroupDisplayOrder(SlotGroup group) const override;
 
         bool IsSlotGroupVisible(SlotGroup group) const override;
         void SetSlotGroupVisible(SlotGroup group, bool visible) override;

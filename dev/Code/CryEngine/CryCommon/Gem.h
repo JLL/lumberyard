@@ -14,7 +14,11 @@
 #include <platform.h>
 
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(Gem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Gem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Gem_h_provo.inl"
+    #endif
 #endif
 
 #if defined(LINUX) || defined(APPLE) || defined(ANDROID)
@@ -50,7 +54,7 @@
 #include <cvars.h>
 #include <Material.h>
 #include <terrain.h>
-#include <3DEngine.h>
+#include <3dEngine.h>
 #include <ObjMan.h>
 #include <StlUtils.h>
 

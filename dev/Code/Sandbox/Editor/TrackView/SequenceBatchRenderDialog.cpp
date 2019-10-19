@@ -14,7 +14,7 @@
 // Description : A dialog for batch-rendering sequences
 
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "SequenceBatchRenderDialog.h"
 #include "CustomResolutionDlg.h"
 #include "ViewPane.h"
@@ -97,7 +97,8 @@ CSequenceBatchRenderDialog::CSequenceBatchRenderDialog(float fps, QWidget* pPare
     , m_bFFMPEGCommandAvailable(false)
     , m_ui(new Ui::SequenceBatchRenderDialog)
     , m_renderListModel(new QStringListModel(this))
-
+    , CV_TrackViewRenderOutputCapturing(0)
+    , m_prefixValidator(new CPrefixValidator(this))
 {
     m_ui->setupUi(this);
     setFixedSize(size());
@@ -108,6 +109,8 @@ CSequenceBatchRenderDialog::CSequenceBatchRenderDialog(float fps, QWidget* pPare
     connect(&m_renderTimer, &QTimer::timeout, this, &CSequenceBatchRenderDialog::OnKickIdleTimout);
     m_renderTimer.setInterval(0);
     m_renderTimer.setSingleShot(true);
+
+    REGISTER_CVAR3("TrackViewRenderOutputCapturing", CV_TrackViewRenderOutputCapturing, 0, VF_NULL, "Set to 1 when Track View is actively capturing render output.");
 }
 
 CSequenceBatchRenderDialog::~CSequenceBatchRenderDialog()
@@ -129,7 +132,7 @@ void CSequenceBatchRenderDialog::reject()
 void CSequenceBatchRenderDialog::OnInitDialog()
 {
     QAction* browseAction = m_ui->m_destinationEdit->addAction(style()->standardPixmap(QStyle::SP_DirOpenIcon), QLineEdit::TrailingPosition);
-    connect(browseAction, &QAction::triggered, [=]()
+    connect(browseAction, &QAction::triggered, this, [=]()
     {
         const QString dir = QFileDialog::getExistingDirectory(this);
         if (!dir.isEmpty())
@@ -226,6 +229,7 @@ void CSequenceBatchRenderDialog::OnInitDialog()
     m_ui->m_buffersToCaptureCombo->setCurrentIndex(0);
 
     m_ui->BATCH_RENDER_FILE_PREFIX->setText("Frame");
+    m_ui->BATCH_RENDER_FILE_PREFIX->setValidator(m_prefixValidator.data());
 
     m_ui->m_progressStatusMsg->setText("Not running");
 
@@ -560,14 +564,7 @@ void CSequenceBatchRenderDialog::OnDone()
 {
     if (m_renderContext.IsInRendering())
     {
-        // No cancellation in these two phases
-        if (m_renderContext.captureState == CaptureState::WarmingUpAfterResChange || m_renderContext.captureState == CaptureState::FFMPEGProcessing)
-        {
-            return;
-        }
-
-        // Cancel the batch.
-        GetIEditor()->GetMovieSystem()->AbortSequence(m_renderItems[m_renderContext.currentItemIndex].pSequence);
+        OnCancelRender();
     }
     else
     {
@@ -729,7 +726,7 @@ bool CSequenceBatchRenderDialog::GetResolutionFromCustomResText(const char* cust
     int     scannedHeight = retCustomHeight;
 
     QString strFormat = QString::fromLatin1(customResFormat).replace(QRegularExpression(QStringLiteral("%\\d")), QStringLiteral("%d"));
-    scanSuccess = (sscanf(customResText, strFormat.toStdString().c_str(), &scannedWidth, &scannedHeight) == 2);
+    scanSuccess = (azsscanf(customResText, strFormat.toStdString().c_str(), &scannedWidth, &scannedHeight) == 2);
     if (scanSuccess)
     {
         retCustomWidth = scannedWidth;
@@ -872,7 +869,15 @@ void CSequenceBatchRenderDialog::InitializeContext()
 
 void CSequenceBatchRenderDialog::CaptureItemStart()
 {
+    // Disable most of the UI in group chunks.
+    // (Leave the start/cancel button and feedback elements).
+    m_ui->BATCH_RENDER_LIST_GROUP_BOX->setEnabled(false);
+    m_ui->BATCH_RENDER_INPUT_GROUP_BOX->setEnabled(false);
+    m_ui->BATCH_RENDER_OUTPUT_GROUP_BOX->setEnabled(false);
+
     m_renderContext.canceled = false;
+
+    CV_TrackViewRenderOutputCapturing = 1;
 
     SRenderItem renderItem = m_renderItems[m_renderContext.currentItemIndex];
     IAnimSequence* nextSequence = renderItem.pSequence;
@@ -1039,6 +1044,16 @@ void CSequenceBatchRenderDialog::OnUpdateBeginPlayingSequence()
 
 void CSequenceBatchRenderDialog::OnUpdateCapturing()
 {
+    // Make sure we are still in game mode if we are capturing, so we can never
+    // get soft locked if we somehow leave game mode without this module knowing about it.
+    if (!GetIEditor()->IsInGameMode())
+    {
+        m_renderContext.endingSequence = m_renderItems[m_renderContext.currentItemIndex].pSequence;
+        m_renderContext.canceled = true;
+        EnterCaptureState(CaptureState::End);
+        return;
+    }
+
     // Progress bar
     IAnimSequence* pCurSeq = m_renderItems[m_renderContext.currentItemIndex].pSequence;
     Range rng = pCurSeq->GetTimeRange();
@@ -1096,7 +1111,7 @@ void CSequenceBatchRenderDialog::OnUpdateEnd(IAnimSequence* sequence)
             [renderItem, outputFolder]
         {
             AZStd::string outputFile;
-            AzFramework::StringFunc::Path::Join(outputFolder.c_str(), renderItem.prefix.toLatin1().data(), outputFile);
+            AzFramework::StringFunc::Path::Join(outputFolder.c_str(), renderItem.prefix.toUtf8().data(), outputFile);
 
             QString inputFile = outputFile.c_str();
             outputFile += ".mp4";
@@ -1121,7 +1136,7 @@ void CSequenceBatchRenderDialog::OnUpdateEnd(IAnimSequence* sequence)
         );
 
         // Use a watcher to set a flag when the mpeg processing is complete.
-        connect(&m_renderContext.processingFFMPEGWatcher, &QFutureWatcher<void>::finished, [this]()
+        connect(&m_renderContext.processingFFMPEGWatcher, &QFutureWatcher<void>::finished, this, [this]()
         {
             m_renderContext.processingFFMPEG = false;
         });
@@ -1150,6 +1165,11 @@ void CSequenceBatchRenderDialog::OnUpdateFinalize()
     SetEnableEditorIdleProcessing(true);
     m_renderTimer.stop();
 
+    // Turn disabled UI elements back on
+    m_ui->BATCH_RENDER_LIST_GROUP_BOX->setEnabled(true);
+    m_ui->BATCH_RENDER_INPUT_GROUP_BOX->setEnabled(true);
+    m_ui->BATCH_RENDER_OUTPUT_GROUP_BOX->setEnabled(true);
+
     // Check to see if there is more items to process
     bool done = m_renderContext.currentItemIndex == m_renderItems.size() - 1;
     if (done)
@@ -1171,6 +1191,8 @@ void CSequenceBatchRenderDialog::OnUpdateFinalize()
         GetIEditor()->GetMovieSystem()->EnableBatchRenderMode(false);
         m_renderContext.currentItemIndex = -1;
         m_ui->BATCH_RENDER_PRESS_ESC_TO_CANCEL->setText(m_ffmpegPluginStatusMsg);
+
+        CV_TrackViewRenderOutputCapturing = 0;
 
         EnterCaptureState(CaptureState::Idle);
     }
@@ -1276,14 +1298,20 @@ void CSequenceBatchRenderDialog::OnKickIdle()
 
 void CSequenceBatchRenderDialog::OnCancelRender()
 {
-    // No cancellation in these two phases
-    if (m_renderContext.captureState == CaptureState::WarmingUpAfterResChange || m_renderContext.captureState == CaptureState::FFMPEGProcessing)
+    if (m_renderContext.captureState == CaptureState::Capturing)
     {
-        return;
+        // In the capturing state, abort the sequence, OnMovieEvent with an abort will fire and cause
+        // the transition to CaptureState::End.
+        GetIEditor()->GetMovieSystem()->AbortSequence(m_renderItems[m_renderContext.currentItemIndex].pSequence);
     }
-
-    // Cancel the batch.
-    GetIEditor()->GetMovieSystem()->AbortSequence(m_renderItems[m_renderContext.currentItemIndex].pSequence);
+    else if (m_renderContext.captureState == CaptureState::EnteringGameMode)
+    {
+        // In the EnteringGameMode state, the movie sequences hasn't started yet, so we can't count on an
+        // OnMovieEvent event to end the capture early. So transition into the End state manually.
+        m_renderContext.endingSequence = m_renderItems[m_renderContext.currentItemIndex].pSequence;
+        m_renderContext.canceled = true;
+        EnterCaptureState(CaptureState::End);
+    }
 }
 
 void CSequenceBatchRenderDialog::OnLoadBatch()

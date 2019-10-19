@@ -82,7 +82,7 @@ public:                                                                         
 
 // game object extensions need more information than the generic interface can provide
 struct IGameObjectExtension;
-DECLARE_COMPONENT_POINTERS(IGameObjectExtension);
+DECLARE_SMART_POINTERS(IGameObjectExtension);
 
 struct IGameObjectExtensionCreatorBase
 {
@@ -464,6 +464,8 @@ enum EFRAMEWORKLISTENERPRIORITY
 struct IGameFrameworkListener
 {
     virtual ~IGameFrameworkListener() {}
+    //! Called before frame is created.
+    virtual void OnPreUpdate() { }
     //! Called after Render, before PostUpdate.
     virtual void OnPostUpdate(float fDeltaTime) { }
     //! Called before the game is saved.
@@ -580,7 +582,7 @@ struct IGameFramework
 
     // Description:
     //    Marks the game started.
-    virtual void MarkGameStarted() = 0;
+    virtual void MarkGameStarted(bool started) = 0;
 
     // Description:
     //      Check if the game is allowed to start the actual gameplay
@@ -933,8 +935,6 @@ struct IGameFramework
 
     virtual IDebugHistoryManager* CreateDebugHistoryManager() = 0;
 
-    virtual void DumpMemInfo(const char* format, ...) PRINTF_PARAMS(2, 3) = 0;
-
     // Description:
     //      Check whether the client actor is using voice communication.
     virtual bool IsVoiceRecordingEnabled() = 0;
@@ -1056,9 +1056,18 @@ public:
     static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
 
     /*!
+    * Creates an IGameFramework instance, but does not initialize the framework or load the
+    * CryGame module like InitFramework. Needed to support legacy games that still call the
+    * DLL_EXPORT version of CreateGameFramework defined in CryAction/Main.cpp, which now in
+    * turn calls this EBus method directly.
+    * /return returns Pointer to the game framework if it was created, nullptr otherwise
+    */
+    virtual IGameFramework* CreateFramework() = 0;
+
+    /*!
     * Creates an IGameFramework instance, initialize the framework and load CryGame module
     * /param[in] startupParams various parameters related to game startup
-    * /return returns true if the game framework initialized, false if failed
+    * /return returns Pointer to the game framework if it was created and initialized, nullptr otherwise
     */
     virtual IGameFramework* InitFramework(SSystemInitParams& startupParams) = 0;
 

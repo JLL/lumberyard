@@ -18,6 +18,8 @@
 
 struct IStatObj;
 struct ICharacterInstance;
+struct SRenderingPassInfo;
+struct SRendParams;
 
 namespace LmbrCentral
 {
@@ -146,6 +148,11 @@ namespace LmbrCentral
 
         virtual void OnBoundsReset() {};
 
+        /*
+         * Notifies listeners prior to making the render call 
+         */
+        virtual void OnMeshPreRender(const struct SRendParams& inOutRenderParams, const SRenderingPassInfo& passInfo) {};
+
         /**
          * When connecting to this bus if the asset is ready you will immediately get an OnMeshCreated event
         **/
@@ -161,7 +168,6 @@ namespace LmbrCentral
                 EBUS_EVENT_ID_RESULT(asset, id, MeshComponentRequestBus, GetMeshAsset);
                 if (asset.GetStatus() == AZ::Data::AssetData::AssetStatus::Ready)
                 {
-                    typename Bus::template CallstackEntryIterator<typename Bus::InterfaceType**> callstack(nullptr, &id); // Workaround for GetCurrentBusId in callee
                     handler->OnMeshCreated(asset);
                 }
             }

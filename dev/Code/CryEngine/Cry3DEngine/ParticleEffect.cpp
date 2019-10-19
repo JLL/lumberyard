@@ -33,7 +33,7 @@ DEFINE_INTRUSIVE_LINKED_LIST(CParticleEffect)
 // IMPORTANT: Remember to update nSERIALIZE_VERSION if you update the
 // particle system
 //////////////////////////////////////////////////////////////////////////
-static const int nSERIALIZE_VERSION = 32;
+static const int nSERIALIZE_VERSION = 33;
 static const int nMIN_SERIALIZE_VERSION = 19;
 
 // Write a struct to an XML node.
@@ -728,6 +728,7 @@ void ResourceParticleParams::ComputeEnvironmentFlags()
     }
 
     if (!fParticleLifeTime || bRemainWhileVisible                       // Infinite particle lifetime
+        || bDynamicCulling
         || bBindEmitterToCamera                                                             // Visible every frame
         || ePhysicsType >= EPhysics::SimplePhysics)                     // Physicalized particles
     {
@@ -796,13 +797,17 @@ bool ResourceParticleParams::IsActive() const
         !Platforms.hasMacOSMetal && platform_spec == CONFIG_OSX_METAL ||
         !Platforms.hasAndroid && platform_spec == CONFIG_ANDROID ||
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(ParticleEffect_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ParticleEffect_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ParticleEffect_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
-#define AZ_TOOLS_RESTRICTED_PLATFORM_EXPANSION(PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
+#define AZ_RESTRICTED_PLATFORM_EXPANSION(CodeName, CODENAME, codename, PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
         !Platforms.PublicAuxName1 && platform_spec == CONFIG_##PUBLICNAME ||
         AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
-#undef AZ_TOOLS_RESTRICTED_PLATFORM_EXPANSION
+#undef AZ_RESTRICTED_PLATFORM_EXPANSION
 #endif
         !Platforms.hasIOS && platform_spec == CONFIG_IOS)
     {
@@ -1517,6 +1522,13 @@ void CompatibilityParticleParams::Correct(CParticleEffect* pEffect)
         Warning("Particle Effect '%s' has zero space loop volume: disabled", pEffect->GetFullName().c_str());
         bEnabled = false;
     }
+
+    //In version 33, particle sizeZ was introduced for geometry particle. The default value of sizeZ should be set as sizeY 
+    //when load from any previous version
+    if (nVersion < 33)
+    {
+        fSizeZ = fSizeY;
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1901,64 +1913,6 @@ string CParticleEffect::GetFullName() const
     return m_parent->GetFullName() + "." + m_strName;
 }
 
-bool CParticleEffect::HasFadeEffect() const
-{
-    if (m_pParticleParams != nullptr &&
-        m_pParticleParams->bCameraNonFacingFade &&
-        m_FadeParticle != nullptr &&
-        GetParticleParams().GetEmitterShape() == ParticleParams::EEmitterShapeType::TRAIL)
-    {
-        return true;
-    }
-    return false;
-}
-
-CParticleEffect* CParticleEffect::GetFadeEffect() const
-{
-    return m_FadeParticle;
-}
-
-void CParticleEffect::UpdateFadeEffect()
-{
-    ResourceParticleParams fadeParams = static_cast<const ResourceParticleParams> (GetParticleParams());
-
-    if (fadeParams.GetEmitterShape() != ParticleParams::EEmitterShapeType::TRAIL &&
-        fadeParams.bCameraNonFacingFade != true)
-    {
-        return;
-    }
-
-    fadeParams.eEmitterType = ParticleParams::EEmitterType::CPU;
-    fadeParams.GetEmitterShape() = ParticleParams::EEmitterShapeType::ANGLE;
-    fadeParams.eFacing = ParticleParams::EFacing::Camera;
-    fadeParams.sTexture = fadeParams.sTrailFading;
-    fadeParams.bCameraNonFacingFade.set(false);
-    fadeParams.sMaterial.reset(); //We do not use the material, as we want to use the given fade texture
-
-    if (m_FadeParticle == nullptr)
-    {
-        string name = m_strName + string("_FadeParticle");
-        m_FadeParticle = new CParticleEffect(name.c_str(), fadeParams);
-    }
-    else
-    {
-        m_FadeParticle->UnloadResources();
-        m_FadeParticle->SetParticleParams(fadeParams);
-        m_FadeParticle->m_pParticleParams->nEnvFlags |= REN_SPRITE;
-    }
-
-    m_FadeParticle->SetFadeParticleParams(new ResourceParticleParams(GetParticleParams()));
-    m_FadeParticle->LoadResources();
-}
-
-void CParticleEffect::SetFadeParticleParams(ResourceParticleParams* param)
-{
-    if (m_pParticleParams)
-    {
-        m_pParticleParams->pFadeTrailParams = param;
-        m_pParticleParams->bIsCameraNonFacingFadeParticle = true;
-    }
-}
 
 //////////////////////////////////////////////////////////////////////////
 void CParticleEffect::SetParent(IParticleEffect* pParent)
@@ -2195,10 +2149,6 @@ void CParticleEffect::UnloadResources(bool bAll) const
         m_levelofdetail[i].GetParticle()->UnloadResources(bAll);
     }
 
-    if (HasFadeEffect())
-    {
-        m_FadeParticle->UnloadResources();
-    }
     if (bAll)
     {
         for_all(m_children).UnloadResources(true);
@@ -2712,10 +2662,6 @@ void CParticleEffect::SetParticleParams(const ParticleParams& params)
     PropagateParticleParams(*m_pParticleParams, params);
 
 
-    if (params.bCameraNonFacingFade)
-    {
-        UpdateFadeEffect();
-    }
 
     static_cast<ParticleParams&>(*m_pParticleParams) = params;
     CalculateFinalGroupValues(*m_pParticleParams);

@@ -22,6 +22,7 @@
 #include <QToolTip>
 #include <QMenu>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QUrl>
 #include <QTimer>
 #include <QMessageBox>
@@ -83,7 +84,7 @@ WelcomeScreenDialog::WelcomeScreenDialog(QWidget* pParent)
         auto switchProjAction = currentProjectButtonMenu->addAction("Switch project...");
         auto openSAAction = currentProjectButtonMenu->addAction("Setup Assistant...");
 
-        QObject::connect(switchProjAction, &QAction::triggered, [this] {
+        QObject::connect(switchProjAction, &QAction::triggered, this, [this] {
             // close this dialog first before attempting to close the editor
             CCryEditApp* cryEdit = CCryEditApp::instance();
             if (cryEdit->OpenProjectConfiguratorSwitchProject())
@@ -95,7 +96,7 @@ WelcomeScreenDialog::WelcomeScreenDialog(QWidget* pParent)
             }
         });
 
-        QObject::connect(openSAAction, &QAction::triggered, [this] {
+        QObject::connect(openSAAction, &QAction::triggered, this, [this] {
             // close this dialog first before attempting to close the editor
             CCryEditApp* cryEdit = CCryEditApp::instance();
 
@@ -105,7 +106,7 @@ WelcomeScreenDialog::WelcomeScreenDialog(QWidget* pParent)
             {
                 // close the dialog box before closing the editor
                 accept();
-                if (cryEdit->ToExternalToolSave() && cryEdit->OpenSetupAssistant())
+                if (cryEdit->OpenSetupAssistant())
                 {
                     // close the window at the end of the qt event loop
                     QTimer::singleShot(0, []() {MainWindow::instance()->close(); });
@@ -131,6 +132,10 @@ WelcomeScreenDialog::WelcomeScreenDialog(QWidget* pParent)
 
     connect(ui->newLevelButton, &QPushButton::clicked, this, &WelcomeScreenDialog::OnNewLevelBtnClicked);
     connect(ui->openLevelButton, &QPushButton::clicked, this, &WelcomeScreenDialog::OnOpenLevelBtnClicked);
+
+    connect(ui->newSliceButton, &QPushButton::clicked, this, &WelcomeScreenDialog::OnNewSliceBtnClicked);
+    connect(ui->openSliceButton, &QPushButton::clicked, this, &WelcomeScreenDialog::OnOpenSliceBtnClicked);
+
     connect(ui->documentationButton, &QPushButton::clicked, this, &WelcomeScreenDialog::OnDocumentationBtnClicked);
     connect(ui->showOnStartup, &QCheckBox::clicked, this, &WelcomeScreenDialog::OnShowOnStartupBtnClicked);
     connect(ui->autoLoadLevel, &QCheckBox::clicked, this, &WelcomeScreenDialog::OnAutoLoadLevelBtnClicked);
@@ -148,6 +153,11 @@ WelcomeScreenDialog::WelcomeScreenDialog(QWidget* pParent)
     ui->articleViewContainerRoot->layout()->addWidget(m_articleViewContainer);
 
     m_manifest->Sync();
+
+#ifndef ENABLE_SLICE_EDITOR
+    ui->newSliceButton->hide();
+    ui->openSliceButton->hide();
+#endif
 
     // Adjust the height, if need be
     // Do it in the constructor so that the WindowDecoratorWrapper handles it correctly
@@ -174,14 +184,10 @@ void WelcomeScreenDialog::done(int result)
 {
     if (m_waitingOnAsync)
     {
-        m_closing = true;
-        m_doneResult = result;
         m_manifest->Abort();
     }
-    else
-    {
-        QDialog::done(result);
-    }
+
+    QDialog::done(result);
 }
 
 const QString& WelcomeScreenDialog::GetLevelPath()
@@ -354,6 +360,30 @@ void WelcomeScreenDialog::OnOpenLevelBtnClicked(bool checked)
     SendMetricsEvent("OpenLevelButtonClicked");
 }
 
+void WelcomeScreenDialog::OnNewSliceBtnClicked(bool checked)
+{
+    m_levelPath = "new slice";
+    accept();
+
+    SendMetricsEvent("NewSliceButtonClicked");
+}
+
+void WelcomeScreenDialog::OnOpenSliceBtnClicked(bool)
+{
+    QString fileName = QFileDialog::getOpenFileName(MainWindow::instance(),
+        tr("Open Slice"),
+        Path::GetEditingGameDataFolder().c_str(),
+        tr("Slice (*.slice)"));
+
+    if (!fileName.isEmpty())
+    {
+        m_levelPath = fileName;
+        accept();
+    }
+
+    SendMetricsEvent("OpenSliceButtonClicked");
+}
+
 void WelcomeScreenDialog::OnRecentLevelListItemClicked(const QModelIndex& modelIndex)
 {
     int index = modelIndex.row();
@@ -410,28 +440,14 @@ void WelcomeScreenDialog::OnDocumentationBtnClicked(bool checked)
 
 void WelcomeScreenDialog::SyncFail(News::ErrorCode error)
 {
-    if (m_closing || !ui->articleViewContainerRoot)
-    {
-        QDialog::done(m_doneResult);
-    }
-    else
-    {
-        m_articleViewContainer->AddErrorMessage();
-        m_waitingOnAsync = false;
-    }
+    m_articleViewContainer->AddErrorMessage();
+    m_waitingOnAsync = false;
 }
 
 void WelcomeScreenDialog::SyncSuccess()
 {
-    if (m_closing || !ui->articleViewContainerRoot)
-    {
-        QDialog::done(m_doneResult);
-    }
-    else
-    {
-        m_articleViewContainer->PopulateArticles();
-        m_waitingOnAsync = false;
-    }
+    m_articleViewContainer->PopulateArticles();
+    m_waitingOnAsync = false;
 }
 
 void WelcomeScreenDialog::previewAreaScrolled()

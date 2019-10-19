@@ -15,7 +15,7 @@
 #pragma once
 
 #include <AzCore/base.h>
-#include <AzCore/Memory/systemallocator.h>
+#include <AzCore/Memory/SystemAllocator.h>
 #include "ReflectedVar.h"
 #include <QtWidgets/QWidget>
 #include <QPointer>
@@ -57,6 +57,8 @@ protected slots:
     void OnApplyClicked();
 
 private:
+    void SetLabelText(const AZStd::string& motion);
+
     QToolButton* m_pBrowseButton;
     QToolButton* m_pApplyButton;
     QLabel* m_motionLabel;

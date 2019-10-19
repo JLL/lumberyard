@@ -17,7 +17,7 @@
 #include "Core/Polygon.h"
 #include "ElementManager.h"
 
-#include <QUuid>
+#include <AzCore/Math/Uuid.h>
 
 void EdgeSharpnessManager::Serialize(XmlNodeRef& xmlNode, bool bLoading, bool bUndo, CD::Model* pModel)
 {
@@ -121,7 +121,7 @@ bool EdgeSharpnessManager::AddEdges(const char* name, const std::vector<BrushEdg
     edgeSharpness.name = name;
     edgeSharpness.edges = edges;
     edgeSharpness.sharpness = sharpness;
-    edgeSharpness.guid = QUuid::createUuid();
+    edgeSharpness.guid = AZ::Uuid::CreateRandom();
     m_EdgeSharpnessList.push_back(edgeSharpness);
 
     return true;
@@ -132,7 +132,7 @@ void EdgeSharpnessManager::RemoveEdgeSharpness(const char* name)
     std::vector<CD::SEdgeSharpness>::iterator ii = m_EdgeSharpnessList.begin();
     for (; ii != m_EdgeSharpnessList.end(); ++ii)
     {
-        if (!stricmp(name, ii->name.c_str()))
+        if (!azstricmp(name, ii->name.c_str()))
         {
             m_EdgeSharpnessList.erase(ii);
             break;
@@ -221,7 +221,7 @@ bool EdgeSharpnessManager::HasName(const char* name) const
 {
     for (int i = 0, iCount(m_EdgeSharpnessList.size()); i < iCount; ++i)
     {
-        if (!stricmp(m_EdgeSharpnessList[i].name.c_str(), name))
+        if (!azstricmp(m_EdgeSharpnessList[i].name.c_str(), name))
         {
             return true;
         }

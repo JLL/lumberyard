@@ -18,6 +18,7 @@ import util
 import json
 import datetime
 import botocore
+import boto3
 from boto3 import Session
 from botocore.exceptions import ProfileNotFound
 from botocore.exceptions import ClientError
@@ -225,9 +226,9 @@ class ClientWrapper(object):
 
 class CloudFormationClientWrapper(ClientWrapper):
 
-    BACKOFF_BASE_SECONDS = 0.1
-    BACKOFF_MAX_SECONDS = 20.0
-    BACKOFF_MAX_TRYS = 5
+    BACKOFF_BASE_SECONDS = 0.75
+    BACKOFF_MAX_SECONDS = 30.0
+    BACKOFF_MAX_TRYS = 10
 
     def __init__(self, wrapped_client, verbose):
         super(CloudFormationClientWrapper, self).__init__(wrapped_client, verbose)
@@ -249,7 +250,7 @@ class CloudFormationClientWrapper(ClientWrapper):
 
                         backoff = min(self.BACKOFF_MAX_SECONDS, random.uniform(self.BACKOFF_BASE_SECONDS, backoff * 3.0))
                         if self.verbose:
-                            self.log(attr, 'throttled attempt {}. Sleeping {} seconds'.format(count, backoff))
+                            self.log(attr, 'throttled on attempt {}. Sleeping {} seconds at {}'.format(count, backoff, str(datetime.datetime.now())))
                         time.sleep(backoff)
                         count += 1
 
@@ -270,7 +271,6 @@ class AWSContext(object):
         self.__args = args
 
     def __init_session(self):
-
         if self.__args.aws_access_key or self.__args.aws_secret_key:
 
             if self.__args.profile:
@@ -281,7 +281,7 @@ class AWSContext(object):
             self.__session = Session(
                 aws_access_key_id = self.__args.aws_access_key,
                 aws_secret_access_key = self.__args.aws_secret_key)
-
+            self.__set_boto3_environment_variables(self.__args.aws_access_key, self.__args.aws_secret_key)
         else:
             
             if self.__args.profile:
@@ -304,6 +304,14 @@ class AWSContext(object):
                 except (ProfileNotFound) as e:
                     raise HandledError('The AWS session failed to locate AWS credentials from the environment. Ensure that an AWS profile is present with command \'lmbr_aws list-profiles\' or using the Credentials Manager (AWS -> Credentials manager) in Lumberyard.  The AWS error message is \'{}\''.format(e.message))
 
+            credentials = self.__session.get_credentials()
+
+            if not credentials:
+                raise HandledError(
+                    'The AWS session failed to locate AWS credentials for profile {}. Ensure that an AWS profile is present with command \'lmbr_aws list-profiles\' or using the Credentials Manager (AWS -> Credentials manager) in Lumberyard.'.format(profile))
+
+            credentials = credentials.get_frozen_credentials()
+            self.__set_boto3_environment_variables(credentials.access_key, credentials.secret_key)
         self.__add_cloud_canvas_attribution(self.__session)
 
 
@@ -316,9 +324,14 @@ class AWSContext(object):
             aws_access_key_id = credentials.get('AccessKeyId'), 
             aws_secret_access_key = credentials.get('SecretAccessKey'),
             aws_session_token = credentials.get('SessionToken'))
-
+        self.__set_boto3_environment_variables(credentials.get('AccessKeyId'), credentials.get('SecretAccessKey') )
+        
         self.__add_cloud_canvas_attribution(self.__session)
 
+    def __set_boto3_environment_variables(self, access_key, secret_key):
+        #set the environment attributes that boto3 utilizes in case some initializes directly from the boto3 library
+        os.environ["AWS_ACCESS_KEY_ID"] = access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key 
 
     def __add_cloud_canvas_attribution(self, session):
         if session._session.user_agent_extra is None:
@@ -388,6 +401,17 @@ class AWSContext(object):
             wrapped_client = ClientWrapper(client, self.__args.verbose)
         return wrapped_client
 
+    def resource(self, service_name, region = None, use_role = True):
+
+        if self.__session is None:
+            self.__init_session()
+
+        if use_role:
+            session = self.__session
+        else:
+            session = self.__session_without_role
+
+        return session.resource(service_name, region_name = region, config=Config(signature_version='s3v4'))
 
     @property
     def session(self):

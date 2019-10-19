@@ -13,7 +13,10 @@
 
 #define CRY_STATIC_LINK
 
-//#define NEW_OVERRIDEN
+#if defined(AZ_MONOLITHIC_BUILD)
+#define USE_CRY_NEW_AND_DELETE
+#endif
+
 #define _LAUNCHER
 
 #include "resource.h"
@@ -73,7 +76,7 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
     //restart parameters
     static const size_t MAX_RESTART_LEVEL_NAME = 256;
     char fileName[MAX_RESTART_LEVEL_NAME];
-    strcpy(fileName, "");
+    azstrcpy(fileName, AZ_ARRAY_SIZE(fileName),  "");
     static const char logFileName[] = "@log@/Game.log";
 
     // If there are no handlers for the editor game bus, attempt to load the legacy gamedll instead
@@ -122,12 +125,11 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
     startupParams.pSharedEnvironment = AZ::Environment::GetInstance();
     startupParams.hInstance = GetModuleHandle(0);
     startupParams.sLogFileName = logFileName;
-    strcpy(startupParams.szSystemCmdLine, commandLine);
+    azstrcpy(startupParams.szSystemCmdLine, AZ_ARRAY_SIZE(startupParams.szSystemCmdLine), commandLine);
     //startupParams.pProtectedFunctions[0] = &TestProtectedFunction;
 
     engineCfg.CopyToStartupParams(startupParams);
 
-#if defined(AZ_PLATFORM_WINDOWS)
     char root[AZ_MAX_PATH_LEN];
     // Override the branch token to be the actual running branch instead of the one in the file:
     if (_fullpath(root, engineCfg.m_rootFolder.c_str(), AZ_MAX_PATH_LEN))
@@ -138,7 +140,6 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
         AZ::Crc32 branchTokenCrc(devRoot.c_str(), devRoot.size(), false);
         azsnprintf(startupParams.branchToken, 12, "0x%08X", static_cast<AZ::u32>(branchTokenCrc));
     }
-#endif
 
     // on PC, we also might have access to the asset cache directly, in which case, go look there.
     // if we don't have access to the asset cache, default back to the original behavior.
@@ -154,33 +155,29 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
         EditorGameRequestBus::BroadcastResult(pGameStartup, &EditorGameRequestBus::Events::CreateGameStartup);
     }
 
-
-    if (!pGameStartup)
-    {
-        // failed to create the startup interface
-        if (legacyGameDllStartup)
-        {
-            CryFreeLibrary(gameDll);
-        }
-
-        const char* noPromptArg = strstr(commandLine, "-noprompt");
-        if (noPromptArg == NULL)
-        {
-            MessageBox(0, "Failed to create the GameStartup Interface!", "Error", MB_OK | MB_DEFAULT_DESKTOP_ONLY);
-        }
-
-        return 0;
-    }
-
-    bool oaRun = false;
-
     if (strstr(commandLine, "-norandom"))
     {
         startupParams.bNoRandom = 1;
     }
 
+    // The legacy IGameStartup and IGameFramework are now optional,
+    // if they don't exist we need to create CrySystem here instead.
+    if (!pGameStartup || !pGameStartup->Init(startupParams))
+    {
+    #if !defined(AZ_MONOLITHIC_BUILD)
+        HMODULE systemLib = CryLoadLibraryDefName("CrySystem");
+        PFNCREATESYSTEMINTERFACE CreateSystemInterface = systemLib ? (PFNCREATESYSTEMINTERFACE)CryGetProcAddress(systemLib, "CreateSystemInterface") : nullptr;
+        if (CreateSystemInterface)
+        {
+            startupParams.pSystem = CreateSystemInterface(startupParams);
+        }
+    #else
+        startupParams.pSystem = CreateSystemInterface(startupParams);
+    #endif // AZ_MONOLITHIC_BUILD
+    }
+
     // run the game
-    if (pGameStartup->Init(startupParams))
+    if (startupParams.pSystem)
     {
 #if !defined(SYS_ENV_AS_STRUCT)
         gEnv = startupParams.pSystem->GetGlobalEnvironment();
@@ -194,21 +191,22 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
 
         // Execute autoexec.cfg to load the initial level
         gEnv->pConsole->ExecuteString("exec autoexec.cfg");
+        gEnv->pSystem->ExecuteCommandLine(false);
 
         // Run the main loop
-        LumberyardLauncher::RunMainLoop(gameApp, *gEnv->pGame->GetIGameFramework());
+        LumberyardLauncher::RunMainLoop(gameApp);
 
-        bool isLevelRequested = pGameStartup->GetRestartLevel(&pRestartLevelName);
+        bool isLevelRequested = pGameStartup && pGameStartup->GetRestartLevel(&pRestartLevelName);
         if (pRestartLevelName)
         {
             if (strlen(pRestartLevelName) < MAX_RESTART_LEVEL_NAME)
             {
-                strcpy(fileName, pRestartLevelName);
+                azstrcpy(fileName, AZ_ARRAY_SIZE(fileName), pRestartLevelName);
             }
         }
 
         char pRestartMod[255];
-        bool isModRequested = pGameStartup->GetRestartMod(pRestartMod, sizeof(pRestartMod));
+        bool isModRequested = pGameStartup && pGameStartup->GetRestartMod(pRestartMod, sizeof(pRestartMod));
 
         if (isLevelRequested || isModRequested)
         {
@@ -244,7 +242,7 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
         else
         {
             // check if there is a patch to install. If there is, do it now.
-            const char* pfilename = pGameStartup->GetPatch();
+            const char* pfilename = pGameStartup ? pGameStartup->GetPatch() : nullptr;
             if (pfilename)
             {
                 STARTUPINFO si;
@@ -255,8 +253,11 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
             }
         }
 
-        pGameStartup->Shutdown();
-        pGameStartup = 0;
+        if (pGameStartup)
+        {
+            pGameStartup->Shutdown();
+            pGameStartup = 0;
+        }
 
         if (legacyGameDllStartup)
         {
@@ -269,12 +270,15 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
         const char* noPromptArg = strstr(commandLine, "-noprompt");
         if (noPromptArg == NULL)
         {
-            MessageBox(0, "Failed to initialize the GameStartup Interface!", "Error", MB_OK | MB_DEFAULT_DESKTOP_ONLY);
+            MessageBox(0, "Failed to initialize the CrySystem Interface!", "Error", MB_OK | MB_DEFAULT_DESKTOP_ONLY);
         }
 #endif
-        // if initialization failed, we still need to call shutdown
-        pGameStartup->Shutdown();
-        pGameStartup = 0;
+        if (pGameStartup)
+        {
+            // if initialization failed, we still need to call shutdown
+            pGameStartup->Shutdown();
+            pGameStartup = 0;
+        }
 
         if (legacyGameDllStartup)
         {
@@ -290,7 +294,6 @@ int RunGame(const char* commandLine, CEngineConfig& engineCfg, const char* szExe
 //////////////////////////////////////////////////////////////////////////
 // Support relaunching for windows media center edition.
 //////////////////////////////////////////////////////////////////////////
-#if defined(WIN32)
 #if (_WIN32_WINNT < 0x0501)
 #define SM_MEDIACENTER          87
 #endif
@@ -319,12 +322,10 @@ bool ReLaunchMediaCenter()
     INT_PTR result = (INT_PTR)ShellExecute(NULL, TEXT("open"), szExpandedPath, NULL, NULL, SW_SHOWNORMAL);
     return (result > 32);
 }
-#endif //defined(WIN32)
 
 
 //////////////////////////////////////////////
 
-#if defined(AZ_PLATFORM_WINDOWS)
 //Due to some laptops not autoswitching to the discrete gpu correctly we are adding these 
 //dllspecs as defined in the amd and nvidia white papers to 'force on' the use of the 
 //discrete chips.  This will be overriden by users setting application profiles 
@@ -340,22 +341,20 @@ extern "C"
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
     __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 }
-#endif
+
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-    // we need pass the full command line, including the filename
-    // lpCmdLine does not contain the filename.
-#if CAPTURE_REPLAY_LOG
-#ifndef AZ_MONOLITHIC_BUILD
-    CryLoadLibrary("CrySystem.dll");
-#endif // AZ_MONOLITHIC_BUILD
-    CryGetIMemReplay()->StartOnCommandLine(lpCmdLine);
-#endif // CAPTURE_REPLAY_LOG
-
     char szExeFileName[AZ_MAX_PATH_LEN];
     InitRootDir(szExeFileName, AZ_MAX_PATH_LEN);
     int nRes = 0;
     AzGameFramework::GameApplication gameApp;
+
+    AZ_Assert(!AZ::AllocatorInstance<AZ::OSAllocator>::IsReady(), "Expected allocator to not be initialized, hunt down the static that is initializing it");
+    AZ::AllocatorInstance<AZ::OSAllocator>::Create();
+    AZ_Assert(!AZ::AllocatorInstance<AZ::LegacyAllocator>::IsReady(), "Expected allocator to not be initialized, hunt down the static that is initializing it");
+    AZ::AllocatorInstance<AZ::LegacyAllocator>::Create();
+    AZ_Assert(!AZ::AllocatorInstance<CryStringAllocator>::IsReady(), "Expected allocator to not be initialized, hunt down the static that is initializing it");
+    AZ::AllocatorInstance<CryStringAllocator>::Create();
 
     {
         CEngineConfig engineCfg;
@@ -391,6 +390,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             MessageBox(0, msg, "File not found", MB_OK | MB_DEFAULT_DESKTOP_ONLY | MB_ICONERROR);
             return 1;
         }
+    
+        // Prevent allocator from growing in small chunks
+        // Pre-create our system allocator and configure it to ask for larger chunks from the OS
+        // Creating this here to be consistent with other platforms
+        AZ::SystemAllocator::Descriptor sysHeapDesc;
+        sysHeapDesc.m_heap.m_systemChunkSize = 64 * 1024 * 1024;
+        AZ::AllocatorInstance<AZ::SystemAllocator>::Create(sysHeapDesc);
 
         AzGameFramework::GameApplication::StartupParameters gameAppParams;
 #ifdef AZ_MONOLITHIC_BUILD
@@ -422,12 +428,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         //////////////////////////////////////////////////////////////////////////
         // Support relaunching for windows media center edition.
         //////////////////////////////////////////////////////////////////////////
-#if defined(WIN32)
         if (strstr(lpCmdLine, "ReLaunchMediaCenter") != 0)
         {
             ReLaunchMediaCenter();
         }
-#endif // win32
         //////////////////////////////////////////////////////////////////////////
     } // scoped to get rid of any stack (and any heap they allocated) before we tear down gameapp and thus memory management.
 
@@ -449,5 +453,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     }
 #endif // AZ_MONOLITHIC_BUILD
 
+    AZ::AllocatorInstance<CryStringAllocator>::Destroy();
+    AZ::AllocatorInstance<AZ::LegacyAllocator>::Destroy();
+    AZ::AllocatorInstance<AZ::OSAllocator>::Destroy();
+
     return nRes;
 }
+
+#if defined(AZ_MONOLITHIC_BUILD)
+#include <StaticModules.inl>
+#endif

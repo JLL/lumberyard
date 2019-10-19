@@ -529,6 +529,7 @@ void UiDraggableComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiDraggableComponent>("Draggable", "An interactable component for drag and drop behavior");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiDraggable.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiDraggable.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -556,7 +557,6 @@ void UiDraggableComponent::Reflect(AZ::ReflectContext* context)
             ->Enum<(int)UiDraggableInterface::DragState::Invalid>("eUiDragState_Invalid");
 
         behaviorContext->EBus<UiDraggableBus>("UiDraggableBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetDragState", &UiDraggableBus::Events::GetDragState)
             ->Event("SetDragState", &UiDraggableBus::Events::SetDragState)
             ->Event("RedoDrag", &UiDraggableBus::Events::RedoDrag)
@@ -568,7 +568,6 @@ void UiDraggableComponent::Reflect(AZ::ReflectContext* context)
             ->Event("SetCanDropOnAnyCanvas", &UiDraggableBus::Events::SetCanDropOnAnyCanvas);
 
         behaviorContext->EBus<UiDraggableNotificationBus>("UiDraggableNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiDraggableNotificationBusBehaviorHandler>();
     }
 }
@@ -714,7 +713,7 @@ void UiDraggableComponent::FindNavigableDropTargetElements(AZ::EntityId ignoreEl
     std::list<AZ::Entity*> elementList(elements.begin(), elements.end());
     while (!elementList.empty())
     {
-        auto& entity = elementList.front();
+        auto entity = elementList.front();
         elementList.pop_front();
 
         if (ignoreElement.IsValid() && entity->GetId() == ignoreElement)

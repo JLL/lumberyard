@@ -10,65 +10,112 @@
 *
 */
 
-// include required headers
-#include "EMotionFXConfig.h"
-#include "BlendTreeParameterNode.h"
-#include "AnimGraphInstance.h"
-#include "AnimGraph.h"
-#include "EventManager.h"
-#include <MCore/Source/AttributeSettings.h>
+#include <AzCore/Serialization/SerializeContext.h>
+#include <AzCore/Serialization/EditContext.h>
+#include <AzCore/std/sort.h>
+#include <EMotionFX/Source/AnimGraph.h>
+#include <EMotionFX/Source/AnimGraphInstance.h>
+#include <EMotionFX/Source/BlendTreeParameterNode.h>
+#include <EMotionFX/Source/EventManager.h>
 
 
 namespace EMotionFX
 {
-    // only motion and playback info are known
-    BlendTreeParameterNode::BlendTreeParameterNode(AnimGraph* animGraph)
-        : AnimGraphNode(animGraph, nullptr, TYPE_ID)
+    AZ_CLASS_ALLOCATOR_IMPL(BlendTreeParameterNode, AnimGraphAllocator, 0)
+
+    static const char* sParameterNamesMember = "parameterNames";
+
+    BlendTreeParameterNode::BlendTreeParameterNode()
+        : AnimGraphNode()
     {
-        mParameterIndices.SetMemoryCategory(EMFX_MEMCATEGORY_ANIMGRAPH_NODES);
-
-        // allocate space for the variables
-        CreateAttributeValues();
-        RegisterPorts();
-        InitInternalAttributesForAllInstances();
-
-        mUpdateParameterMaskLocked = false;
+        // since this node dynamically sets the ports we don't really pre-create anything
+        // The reinit function handles that
     }
 
 
-    // destructor
     BlendTreeParameterNode::~BlendTreeParameterNode()
     {
     }
 
 
-    // create
-    BlendTreeParameterNode* BlendTreeParameterNode::Create(AnimGraph* animGraph)
+    void BlendTreeParameterNode::Reinit()
     {
-        return new BlendTreeParameterNode(animGraph);
+        // Sort the parameter name mask in the way the parameters are stored in the anim graph.
+        SortParameterNames(mAnimGraph, m_parameterNames);
+
+        // Iterate through the parameter name mask and find the corresponding cached value parameter indices.
+        // This expects the parameter names to be sorted in the way the parameters are stored in the anim graph.
+        m_parameterIndices.clear();
+        for (const AZStd::string& parameterName : m_parameterNames)
+        {
+            const AZ::Outcome<size_t> parameterIndex = mAnimGraph->FindValueParameterIndexByName(parameterName);
+            // during removal of parameters, we could end up with a parameter that was removed until the node gets the mask updated
+            if (parameterIndex.IsSuccess())
+            {
+                m_parameterIndices.push_back(static_cast<uint32>(parameterIndex.GetValue()));
+            }
+        }
+
+        RemoveInternalAttributesForAllInstances();
+
+        if (m_parameterIndices.empty())
+        {
+            // Parameter mask is empty, add ports for all parameters.
+            const ValueParameterVector& valueParameters = mAnimGraph->RecursivelyGetValueParameters();
+            const uint32 valueParameterCount = static_cast<uint32>(valueParameters.size());
+            InitOutputPorts(valueParameterCount);
+
+            for (uint32 i = 0; i < valueParameterCount; ++i)
+            {
+                const ValueParameter* parameter = valueParameters[i];
+                SetOutputPortName(static_cast<uint32>(i), parameter->GetName().c_str());
+
+                mOutputPorts[i].mPortID = i;
+                mOutputPorts[i].mCompatibleTypes[0] = parameter->GetType();
+                if (GetTypeSupportsFloat(parameter->GetType()))
+                {
+                    mOutputPorts[i].mCompatibleTypes[1] = MCore::AttributeFloat::TYPE_ID;
+                }
+            }
+        }
+        else
+        {
+            // Parameter mask not empty, only add ports for the parameters in the mask.
+            const size_t parameterCount = m_parameterIndices.size();
+            InitOutputPorts(static_cast<uint32>(parameterCount));
+
+            for (size_t i = 0; i < parameterCount; ++i)
+            {
+                const ValueParameter* parameter = mAnimGraph->FindValueParameter(m_parameterIndices[i]);
+                SetOutputPortName(static_cast<uint32>(i), parameter->GetName().c_str());
+
+                mOutputPorts[i].mPortID = static_cast<uint32>(i);
+                mOutputPorts[i].mCompatibleTypes[0] = parameter->GetType();
+                if (GetTypeSupportsFloat(parameter->GetType()))
+                {
+                    mOutputPorts[i].mCompatibleTypes[1] = MCore::AttributeFloat::TYPE_ID;
+                }
+            }
+        }
+
+        InitInternalAttributesForAllInstances();
+
+        AnimGraphNode::Reinit();
+        SyncVisualObject();
     }
 
 
-    // create unique data
-    AnimGraphObjectData* BlendTreeParameterNode::CreateObjectData()
+    bool BlendTreeParameterNode::InitAfterLoading(AnimGraph* animGraph)
     {
-        return AnimGraphNodeData::Create(this, nullptr);
-    }
+        if (!AnimGraphNode::InitAfterLoading(animGraph))
+        {
+            return false;
+        }
 
+        InitInternalAttributesForAllInstances();
 
-    // register the ports
-    void BlendTreeParameterNode::RegisterPorts()
-    {
-        // since this node dynamically sets the ports we don't really pre-create anything
-        // The init function handles that
-    }
-
-
-    void BlendTreeParameterNode::RegisterAttributes()
-    {
-        MCore::AttributeSettings* attrib = RegisterAttribute("Mask", "mask", "The visible and available of the node.", ATTRIBUTE_INTERFACETYPE_PARAMETERNAMES);
-        attrib->SetDefaultValue(AttributeParameterMask::Create());
-        attrib->SetReinitGuiOnValueChange(true);
+        Reinit();
+        return true;
     }
 
 
@@ -86,86 +133,15 @@ namespace EMotionFX
     }
 
 
-    // create a clone of this node
-    AnimGraphObject* BlendTreeParameterNode::Clone(AnimGraph* animGraph)
-    {
-        // create the clone
-        BlendTreeParameterNode* clone = new BlendTreeParameterNode(animGraph);
-
-        // copy base class settings such as parameter values to the new clone
-        CopyBaseObjectTo(clone);
-
-        // return a pointer to the clone
-        return clone;
-    }
-
-
-    // after the node has been created, initialize it
-    void BlendTreeParameterNode::InitForAnimGraph(AnimGraph* animGraph)
-    {
-        RemoveInternalAttributesForAllInstances();
-
-        // check if the parameter mask is empty
-        if (mParameterIndices.GetIsEmpty())
-        {
-            // create an output port for each parameter
-            const uint32 numParameters = animGraph->GetNumParameters();
-            InitOutputPorts(numParameters);
-
-            // name the output ports
-            for (uint32 i = 0; i < numParameters; ++i)
-            {
-                MCore::AttributeSettings* parameter = animGraph->GetParameter(i);
-                SetOutputPortName(i, parameter->GetName());
-
-                // delete the old output port attribute and create a clone of the actual one from the anim graph parameter
-                /////if (mOutputPorts[i].mValue)
-                //////mOutputPorts[i].mValue->Destroy();
-                //////mOutputPorts[i].mValue = MCore::GetAttributePool().RequestNew( parameter->GetDefaultValue()->GetType() );
-
-                mOutputPorts[i].mPortID = i;
-                mOutputPorts[i].mCompatibleTypes[0] = parameter->GetDefaultValue()->GetType();
-            }
-        }
-        else
-        {
-            // create an output port for the parameters inside the parameter mask
-            const uint32 numParameters = mParameterIndices.GetLength();
-            InitOutputPorts(numParameters);
-
-            // name the output ports
-            for (uint32 i = 0; i < numParameters; ++i)
-            {
-                MCore::AttributeSettings* parameter = animGraph->GetParameter(mParameterIndices[i]);
-                SetOutputPortName(i, parameter->GetName());
-
-                // delete the old output port attribute and create a clone of the actual one from the anim graph parameter
-                //////if (mOutputPorts[i].mValue)
-                //////mOutputPorts[i].mValue->Destroy();
-                //////mOutputPorts[i].mValue = MCore::GetAttributePool().RequestNew( parameter->GetDefaultValue()->GetType() );
-
-                mOutputPorts[i].mPortID = i;
-                mOutputPorts[i].mCompatibleTypes[0] = parameter->GetDefaultValue()->GetType();
-            }
-        }
-
-        // reinit
-        InitInternalAttributesForAllInstances();
-    }
-
-
-
     // the main process method of the final node
     void BlendTreeParameterNode::Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds)
     {
         MCORE_UNUSED(timePassedInSeconds);
 
-        //AnimGraphNodeData* uniqueData = FindUniqueNodeData(animGraphInstance);
-        // check if the parameter mask is empty
-        if (mParameterIndices.GetIsEmpty())
+        if (m_parameterIndices.empty())
         {
             // output all anim graph instance parameter values into the output ports
-            const uint32 numParameters = mOutputPorts.GetLength();
+            const uint32 numParameters = static_cast<uint32>(mOutputPorts.size());
             for (uint32 i = 0; i < numParameters; ++i)
             {
                 GetOutputValue(animGraphInstance, i)->InitFrom(animGraphInstance->GetParameterValue(i));
@@ -174,10 +150,10 @@ namespace EMotionFX
         else
         {
             // output only the parameter values that have been selected in the parameter mask
-            const uint32 numParameters = mParameterIndices.GetLength();
-            for (uint32 i = 0; i < numParameters; ++i)
+            const size_t parameterCount = m_parameterIndices.size();
+            for (size_t i = 0; i < parameterCount; ++i)
             {
-                GetOutputValue(animGraphInstance, i)->InitFrom(animGraphInstance->GetParameterValue(mParameterIndices[i]));
+                GetOutputValue(animGraphInstance, static_cast<AZ::u32>(i))->InitFrom(animGraphInstance->GetParameterValue(m_parameterIndices[i]));
             }
         }
     }
@@ -187,15 +163,15 @@ namespace EMotionFX
     uint32 BlendTreeParameterNode::GetParameterIndex(uint32 portNr) const
     {
         // check if the parameter mask is empty
-        if (mParameterIndices.GetIsEmpty())
+        if (m_parameterIndices.empty())
         {
             return portNr;
         }
 
         // get the mapped parameter index in case the given port is valid
-        if (portNr < mParameterIndices.GetLength())
+        if (portNr < m_parameterIndices.size())
         {
-            return mParameterIndices[portNr];
+            return m_parameterIndices[portNr];
         }
 
         // return failure, the input port is not in range
@@ -203,192 +179,318 @@ namespace EMotionFX
     }
 
 
-    // find the port number based on the parameter index
-    uint32 BlendTreeParameterNode::GetPortForParameterIndex(uint32 parameterIndex) const
+    bool BlendTreeParameterNode::GetTypeSupportsFloat(uint32 parameterType)
     {
-        // check if the parameter mask is empty
-        if (mParameterIndices.GetIsEmpty())
+        switch (parameterType)
         {
-            return parameterIndex;
-        }
-
-        // else find the parameter index in the mapped parameter index array
-        return mParameterIndices.Find(parameterIndex);
-    }
-
-
-    uint32 BlendTreeParameterNode::CalcNewPortForParameterIndex(uint32 parameterIndex, const AZStd::vector<AZStd::string>& parametersToBeRemoved) const
-    {
-        uint32 newIndex = 0;
-        AttributeParameterMask* parameterMaskAttribute = static_cast<AttributeParameterMask*>(mAttributeValues[ATTRIB_MASK]);
-
-        // Get the name of the given parameter.
-        AZStd::string parameterName = mAnimGraph->GetParameter(parameterIndex)->GetName();
-        AZ_Assert(AZStd::find(parametersToBeRemoved.begin(), parametersToBeRemoved.end(), parameterName.c_str()) == parametersToBeRemoved.end(),
-            "Can't calculate the new parameter index for a parameter that is going to be removed.");
-
-        const uint32 numParameters = mAnimGraph->GetNumParameters();
-        for (uint32 i = 0; i < numParameters; ++i)
-        {
-            const char* currentParameterName = mAnimGraph->GetParameter(i)->GetName();
-
-            // Skip all parameters that are going to be removed.
-            if (AZStd::find(parametersToBeRemoved.begin(), parametersToBeRemoved.end(), currentParameterName) != parametersToBeRemoved.end())
-            {
-                continue;
-            }
-
-            // Do we have a parameter mask set?
-            if (parameterMaskAttribute->GetNumParameterNames() > 0)
-            {
-                // Skip the parameter in case it is not part of the parameter mask.
-                if (parameterMaskAttribute->FindParameterNameIndex(currentParameterName) == MCORE_INVALIDINDEX32)
-                {
-                    continue;
-                }
-            }
-
-            // Did we reach the parameter we're interested in?
-            if (parameterName == currentParameterName)
-            {
-                return newIndex;
-            }
-
-            newIndex++;
-        }
-
-        // failure, the given parameter name hasn't been found
-        return MCORE_INVALIDINDEX32;
-    }
-
-
-    // update the parameter mask and init the node again
-    void BlendTreeParameterNode::Reinit()
-    {
-        // get the parameter mask attribute
-        AttributeParameterMask* parameterMaskAttribute = static_cast<AttributeParameterMask*>(mAttributeValues[ATTRIB_MASK]);
-
-        // get the number of parameters inside the parameter mask and resize the parameter index array correspondingly
-        const uint32 numParameters = parameterMaskAttribute->GetNumParameterNames();
-        mParameterIndices.Resize(numParameters);
-
-        // iterate through all parameters and fill the parameter index array
-        for (uint32 i = 0; i < numParameters; ++i)
-        {
-            const char* parameterName = parameterMaskAttribute->GetParameterName(i);
-            const uint32 parameterIndex = mAnimGraph->FindParameterIndex(parameterName);
-            MCORE_ASSERT(parameterIndex != MCORE_INVALIDINDEX32);
-            mParameterIndices[i]        = parameterIndex;
-        }
-
-        // reinit the parameter node
-        InitForAnimGraph(mAnimGraph);
-    }
-
-
-    bool BlendTreeParameterNode::CheckIfParameterIndexUpdateNeeded() const
-    {
-        // get the parameter mask attribute and the number of parameters inside it
-        AttributeParameterMask* parameterMaskAttribute = static_cast<AttributeParameterMask*>(mAttributeValues[ATTRIB_MASK]);
-        const uint32 numParameters = parameterMaskAttribute->GetNumParameterNames();
-
-        // check if the two arrays have the same length, if not return directly
-        if (mParameterIndices.GetLength() != numParameters)
-        {
+        case MCore::AttributeBool::TYPE_ID:
+        case MCore::AttributeInt32::TYPE_ID:
             return true;
+        default:
+            // MCore::AttributeFloat is not considered because float->float conversion is not required
+            return false;
+        }
+    }
+
+
+    void BlendTreeParameterNode::SortParameterNames(AnimGraph* animGraph, AZStd::vector<AZStd::string>& outParameterNames)
+    {
+        // Iterate over all value parameters in the anim graph in the order they are stored.
+        size_t currentIndex = 0;
+        const size_t parameterCount = animGraph->GetNumValueParameters();
+        for (size_t i = 0; i < parameterCount; ++i)
+        {
+            const ValueParameter* parameter = animGraph->FindValueParameter(i);
+
+            // Check if the parameter is part of the parameter mask.
+            auto parameterIterator = AZStd::find(outParameterNames.begin(), outParameterNames.end(), parameter->GetName());
+            if (parameterIterator != outParameterNames.end())
+            {
+                // We found the parameter in the parameter mask. Swap the found element position with the current parameter index.
+                // Increase the current parameter index as we found another parameter that got inserted.
+                AZStd::iter_swap(outParameterNames.begin() + currentIndex, parameterIterator);
+                currentIndex++;
+            }
+        }
+    }
+
+
+    const AZStd::vector<AZ::u32>& BlendTreeParameterNode::GetParameterIndices() const
+    {
+        return m_parameterIndices;
+    }
+
+
+    AZ::Color BlendTreeParameterNode::GetVisualColor() const
+    {
+        return AZ::Color(0.59f, 0.59f, 0.59f, 1.0f);
+    }
+
+
+    void BlendTreeParameterNode::AddParameter(const AZStd::string& parameterName)
+    {
+        m_parameterNames.emplace_back(parameterName);
+        Reinit();
+    }
+
+
+    void BlendTreeParameterNode::SetParameters(const AZStd::vector<AZStd::string>& parameterNames)
+    {
+        m_parameterNames = parameterNames;
+        if (mAnimGraph)
+        {
+            Reinit();
+        }
+    }
+
+
+    void BlendTreeParameterNode::SetParameters(const AZStd::string& parameterNamesWithSemicolons)
+    {
+        AZStd::vector<AZStd::string> parameterNames;
+        AzFramework::StringFunc::Tokenize(parameterNamesWithSemicolons.c_str(), parameterNames, ";", false, true);
+
+        SetParameters(parameterNames);
+    }
+
+
+    AZStd::string BlendTreeParameterNode::ConstructParameterNamesString() const
+    {
+        return ConstructParameterNamesString(m_parameterNames);
+    }
+
+
+    AZStd::string BlendTreeParameterNode::ConstructParameterNamesString(const AZStd::vector<AZStd::string>& parameterNames)
+    {
+        AZStd::string result;
+
+        for (const AZStd::string& parameterName : parameterNames)
+        {
+            if (!result.empty())
+            {
+                result += ';';
+            }
+
+            result += parameterName;
         }
 
-        // iterate through all parameters and check the parameter index array
-        for (uint32 i = 0; i < numParameters; ++i)
+        return result;
+    }
+
+
+    AZStd::string BlendTreeParameterNode::ConstructParameterNamesString(const AZStd::vector<AZStd::string>& parameterNames, const AZStd::vector<AZStd::string>& excludedParameterNames)
+    {
+        AZStd::string result;
+
+        for (const AZStd::string& parameterName : parameterNames)
         {
-            const uint32 parameterIndex = mAnimGraph->FindParameterIndex(parameterMaskAttribute->GetParameterName(i));
-            MCORE_ASSERT(parameterIndex != MCORE_INVALIDINDEX32);
-            if (mParameterIndices[i] != parameterIndex)
+            if (AZStd::find(excludedParameterNames.begin(), excludedParameterNames.end(), parameterName) == excludedParameterNames.end())
             {
-                return true;
+                if (!result.empty())
+                {
+                    result += ';';
+                }
+
+                result += parameterName;
             }
         }
 
-        // everything is okay, no update needed
-        return false;
+        return result;
     }
 
 
-    // when the attributes change
-    void BlendTreeParameterNode::OnUpdateAttributes()
+    void BlendTreeParameterNode::RemoveParameterByName(const AZStd::string& parameterName)
     {
-        if (mUpdateParameterMaskLocked == false && CheckIfParameterIndexUpdateNeeded())
+        m_parameterNames.erase(AZStd::remove(m_parameterNames.begin(), m_parameterNames.end(), parameterName), m_parameterNames.end());
+        if (mAnimGraph)
         {
-            mUpdateParameterMaskLocked = true;
-            GetEventManager().OnParameterNodeMaskChanged(this);
-            mUpdateParameterMaskLocked = false;
-
-        #ifndef EMFX_EMSTUDIOBUILD
-            MCore::LogWarning("Please do not adjust the parameter mask at runtime! Only adjust the parameter mask inside EMotion Studio.");
-        #endif
+            Reinit();
         }
     }
 
 
-    // get the type string
-    const char* BlendTreeParameterNode::GetTypeString() const
+    void BlendTreeParameterNode::RenameParameterName(const AZStd::string& currentName, const AZStd::string& newName)
     {
-        return "BlendTreeParameterNode";
+        bool somethingChanged = false;
+        for (AZStd::string& parameterName : m_parameterNames)
+        {
+            if (parameterName == currentName)
+            {
+                somethingChanged = true;
+                parameterName = newName;
+                break; // we should have only one parameter with this name
+            }
+        }
+        if (somethingChanged && mAnimGraph)
+        {
+            Reinit();
+        }
     }
 
 
-    void BlendTreeParameterNode::CalcConnectedParameterNames(AZStd::vector<AZStd::string>& outParameterNames)
+    void BlendTreeParameterNode::Reflect(AZ::ReflectContext* context)
     {
-        outParameterNames.clear();
-
-        AnimGraphNode* parentNode = GetParentNode();
-        if (!parentNode)
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
         {
             return;
         }
 
-        // Check if any of the nodes in the graph is connected to the parameter node.
-        const uint32 numNodes = parentNode->GetNumChildNodes();
-        for (uint32 i = 0; i < numNodes; ++i)
+        serializeContext->Class<BlendTreeParameterNode, AnimGraphNode>()
+            ->Version(1)
+            ->Field(sParameterNamesMember, &BlendTreeParameterNode::m_parameterNames)
+        ;
+
+        AZ::EditContext* editContext = serializeContext->GetEditContext();
+        if (!editContext)
         {
-            EMotionFX::AnimGraphNode* childNode = parentNode->GetChildNode(i);
-            if (childNode == this)
+            return;
+        }
+
+        editContext->Class<BlendTreeParameterNode>("Parameters", "Parameter node attributes")
+            ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+            ->Attribute(AZ::Edit::Attributes::AutoExpand, "")
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
+            ->DataElement(AZ_CRC("AnimGraphParameterMask", 0x67dd0993), &BlendTreeParameterNode::m_parameterNames, "Mask", "The visible and available of the node.")
+            ->Attribute(AZ::Edit::Attributes::ContainerCanBeModified, false)
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::HideChildren)
+        ;
+    }
+
+    AZStd::vector<AZStd::string> BlendTreeParameterNode::GetParameters() const
+    {
+        return m_parameterNames;
+    }
+
+    AnimGraph* BlendTreeParameterNode::GetParameterAnimGraph() const
+    {
+        return GetAnimGraph();
+    }
+
+    void BlendTreeParameterNode::ParameterMaskChanged(const AZStd::vector<AZStd::string>& newParameterMask)
+    {
+        if (newParameterMask.empty())
+        {
+            AZStd::vector<AZStd::string> newOutputPorts;
+            const ValueParameterVector& valueParameters = GetAnimGraph()->RecursivelyGetValueParameters();
+            for (const ValueParameter* valueParameter : valueParameters)
             {
-                continue;
+                newOutputPorts.emplace_back(valueParameter->GetName());
             }
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, newParameterMask);
+        }
+        else
+        {
+            AZStd::vector<AZStd::string> newOutputPorts = newParameterMask;
+            SortAndRemoveDuplicates(GetAnimGraph(), newOutputPorts);
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, newOutputPorts);
+        }
+    }
 
-            // Iterate over the incoming connections for all nodes (each node only knows about the incoming nodes).
-            const uint32 numConnections = childNode->GetNumConnections();
-            for (uint32 c = 0; c < numConnections; ++c)
+    void BlendTreeParameterNode::AddRequiredParameters(AZStd::vector<AZStd::string>& parameterNames) const
+    {
+        // Add all connected parameters
+        for (const AnimGraphNode::Port& port : GetOutputPorts())
+        {
+            if (port.mConnection)
             {
-                EMotionFX::BlendTreeConnection* connection = childNode->GetConnection(c);
+                parameterNames.emplace_back(port.GetNameString());
+            }
+        }
 
-                // Is the node connected to the parameter node?
-                if (connection->GetSourceNode() == this)
+        SortAndRemoveDuplicates(GetAnimGraph(), parameterNames);
+    }
+
+    void BlendTreeParameterNode::ParameterAdded(size_t newParameterIndex)
+    {
+        AZ_UNUSED(newParameterIndex);
+
+        AZStd::vector<AZStd::string> newOutputPorts;
+        const ValueParameterVector& valueParameters = GetAnimGraph()->RecursivelyGetValueParameters();
+        for (const ValueParameter* valueParameter : valueParameters)
+        {
+            newOutputPorts.emplace_back(valueParameter->GetName());
+        }
+
+        if (m_parameterNames.empty())
+        {
+            // We don't use the parameter mask and show all of them. Pass an empty vector as serialized member value
+            // so that the parameter mask won't be adjusted in the callbacks.
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, AZStd::vector<AZStd::string>());
+        }
+        else
+        {
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, newOutputPorts);
+        }
+    }
+
+    void BlendTreeParameterNode::ParameterRenamed(const AZStd::string& oldParameterName, const AZStd::string& newParameterName)
+    {
+        bool somethingChanged = false;
+        AZStd::vector<AZStd::string> newOutputPorts = m_parameterNames;
+        for (AZStd::string& outputPort : newOutputPorts)
+        {
+            if (outputPort == oldParameterName)
+            {
+                outputPort = newParameterName;
+                somethingChanged = true;
+                break;
+            }
+        }
+
+        if (somethingChanged)
+        {
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, newOutputPorts);
+        }
+    }
+
+    void BlendTreeParameterNode::ParameterOrderChanged(const ValueParameterVector& beforeChange, const ValueParameterVector& afterChange)
+    {
+        AZ_UNUSED(beforeChange);
+
+        // Check if any of the indices have changed
+        // If we are looking at all the parameters, then something changed
+        if (m_parameterNames.empty())
+        {
+            AZStd::vector<AZStd::string> newOutputPorts;
+            const ValueParameterVector& valueParameters = GetAnimGraph()->RecursivelyGetValueParameters();
+            for (const ValueParameter* valueParameter : valueParameters)
+            {
+                newOutputPorts.emplace_back(valueParameter->GetName());
+            }
+            // Keep the member variable as it is (thats why we pass m_parameterNames)
+            GetEventManager().OnOutputPortsChanged(this, newOutputPorts, sParameterNamesMember, m_parameterNames);
+        }
+        else
+        {
+            // if not, we have to see if for all the parameters, the index is maintained between the before and after
+            bool somethingChanged = false;
+            const size_t parameterCount = m_parameterNames.size();
+            const size_t afterChangeParameterCount = afterChange.size();
+            for (size_t valueParameterIndex = 0; valueParameterIndex < parameterCount; ++valueParameterIndex)
+            {
+                if (valueParameterIndex >= afterChangeParameterCount || afterChange[valueParameterIndex]->GetName() != m_parameterNames[valueParameterIndex])
                 {
-                    const uint16 sourcePort     = connection->GetSourcePort();
-                    const uint32 parameterIndex = GetParameterIndex(sourcePort);
-
-                    // Add the parameter name to the resulting array.
-                    if (parameterIndex != MCORE_INVALIDINDEX32)
-                    {
-                        outParameterNames.push_back(mAnimGraph->GetParameter(parameterIndex)->GetName());
-                    }
+                    somethingChanged = true;
+                    break;
                 }
+            }
+            if (somethingChanged)
+            {
+                // The list of parameters is the same, we just need to re-sort it
+                AZStd::vector<AZStd::string> newParameterNames = m_parameterNames;
+                SortAndRemoveDuplicates(GetAnimGraph(), newParameterNames);
+                GetEventManager().OnOutputPortsChanged(this, newParameterNames, sParameterNamesMember, newParameterNames);
             }
         }
     }
 
-
-    const MCore::Array<uint32>& BlendTreeParameterNode::GetParameterIndices() const
+    void BlendTreeParameterNode::ParameterRemoved(const AZStd::string& oldParameterName)
     {
-        return mParameterIndices;
+        AZ_UNUSED(oldParameterName);
+        // This may look unnatural, but the method ParameterOrderChanged deals with this as well, we just need to pass an empty before the change
+        // and the current parameters after the change
+        ParameterOrderChanged(ValueParameterVector(), GetAnimGraph()->RecursivelyGetValueParameters());
     }
 
-
-    uint32 BlendTreeParameterNode::GetVisualColor() const
-    {
-        return MCore::RGBA(150, 150, 150);
-    }
-}   // namespace EMotionFX
+} // namespace EMotionFX
 

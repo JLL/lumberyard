@@ -23,26 +23,22 @@ def build(bld):
         vs_filter       = 'CryEngine/Audio/Implementations',
         copyright_org   = 'Amazon-CryTek',
         file_list       = 'audioimplnosound.waf_files',
-        platforms       = ['win',
-                        'linux',
-                        'android',
-                        'darwin',
-                        'ios',
-                        'appletv'
-                        ],
+        platforms       = ['all'],
         configurations  = ['all'],
 
         pch             = 'StdAfx.cpp',
         use             = ['AzCore'],
 
+        # Platform Roots
+        platform_roots  = [bld.PlatformRoot('Platform', export_includes=False)],
 
         includes        = ['.',
-                           bld.Path('Code/CryEngine/CrySoundSystem/Common') ],
+                           bld.Path('Code/CryEngine/CrySoundSystem/Common'),
+                           bld.Path('Code/CryEngine/CryCommon')
+                          ],
         libpath         = [bld.Path('Code/Tools/CryCommonTools') ],
 
-       
-
-       
+        defines         = ['USE_CRY_NEW_AND_DELETE'],
 
         # Testing
         test_all_file_list = ['audioimplnosound_test.waf_files'],

@@ -45,6 +45,25 @@ namespace AZ
         class ObjectStreamImpl;
     }
 
+    namespace SerializeContextAttributes
+    {
+        // Attribute used to set an override function on a SerializeContext::ClassData attribute array
+        // which can be used to override the ObjectStream WriteElement call to write out reflected data differently
+        static const AZ::Crc32 ObjectStreamWriteElementOverride = AZ_CRC("ObjectStreamWriteElementOverride", 0x35eb659f);
+    }
+
+    ///< Callback that the object stream invokes to override saving an instance of the registered class
+    ///< @param callContext EnumerateInstanceCallContext which contains the WriteElement BeingElemCB and the CloseElement EndElemCB
+    ///< the callContext parameter can be passed to the SerializeContext::EnumerateInstance to continue object stream writing
+    ///< @param classPtr class type which is of pointer to the type represented by the m_typeId value
+    ///< @param classData reference to this instance Class Data that will be supplied to the callback
+    ///< @param classElement class element pointer which contains information about the element being serialized.
+    ///< root elements do not not have a valid class element pointer
+    using ObjectStreamWriteOverrideCB = AZStd::function<void(SerializeContext::EnumerateInstanceCallContext& callContext,
+        const void* classPtr, const SerializeContext::ClassData& classData, const SerializeContext::ClassElement* classElement)>;
+
+    AZ_TYPE_INFO_SPECIALIZE(ObjectStreamWriteOverrideCB, "{87B1A36B-8C8A-42B6-A0B5-E770D9FDBAD4}");
+
     class ObjectStream;
 
     /**
@@ -58,6 +77,7 @@ namespace AZ
             ST_XML,
             ST_JSON,
             ST_BINARY,
+            ST_MAX // insert new types before this.
         };
 
         StreamType  GetType() const         { return m_type; }
@@ -162,6 +182,12 @@ namespace AZ
 
         virtual bool WriteClass(const void* classPtr, const Uuid& classId, const SerializeContext::ClassData* classData = nullptr) = 0;
 
+        /// Default asset filter obeys the Asset<> holder's load flags.
+        static bool AssetFilterDefault(const Data::Asset<Data::AssetData>& asset);
+
+        /// SlicesOnly filter ignores all asset references except for slices.
+        static bool AssetFilterSlicesOnly(const Data::Asset<Data::AssetData>& asset);
+
         /// returns true if successfully flushed and closed the object stream, false otherwise
         virtual bool Finalize() = 0;
 
@@ -172,11 +198,13 @@ namespace AZ
         template<typename T>
         bool WriteClass(const T* obj, const char* elemName = nullptr);
 
-        /// Default asset filter obeys the Asset<> holder's load flags.
-        static bool AssetFilterDefault(const Data::Asset<Data::AssetData>& asset);
 
-        /// SlicesOnly filter ignores all asset references except for slices.
-        static bool AssetFilterSlicesOnly(const Data::Asset<Data::AssetData>& asset);
+        /// Filter ignores all asset references except for the specified classes.
+        template<typename T>
+        static bool AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset);
+
+        template<typename T0, typename T1, typename... Args>
+        static bool AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset);
 
         /// NoAssetLoading filter ignores all asset references.
         static bool AssetFilterNoAssetLoading(const Data::Asset<Data::AssetData>& asset);
@@ -193,7 +221,7 @@ namespace AZ
     bool ObjectStream::WriteClass(const T* obj, const char* elemName)
     {
         (void)elemName;
-        AZ_Assert(!AZStd::is_pointer<T>::value, "Cannot serialize pointer-to-pointer as root element! This makes no sense!");
+        static_assert(!AZStd::is_pointer<T>::value, "Cannot serialize pointer-to-pointer as root element! This makes no sense!");
         // Call SaveClass with the potential pointer to derived class fully resolved.
         const void* classPtr = SerializeTypeInfo<T>::RttiCast(obj, SerializeTypeInfo<T>::GetRttiTypeId(obj));
         const Uuid& classId = SerializeTypeInfo<T>::GetUuid(obj);
@@ -216,6 +244,28 @@ namespace AZ
         }
         return WriteClass(classPtr, classId);
     }
+
+    /// Filter ignores all asset references except for the specified classes.
+    template<typename T>
+    /*static*/ bool ObjectStream::AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset)
+    {
+        static_assert(std::is_base_of<Data::AssetData, T>::value, "T not derived from Data::AssetData.");
+
+        const bool isValidAsset = asset.GetType() == AzTypeInfo<T>::Uuid();
+        if (isValidAsset)
+        {
+            return asset.GetAutoLoadBehavior() != AZ::Data::AssetLoadBehavior::NoLoad;
+        }
+
+        return false;
+    }
+
+    template<typename T0, typename T1, typename... Args>
+    /*static*/ bool ObjectStream::AssetFilterAssetTypesOnly(const Data::Asset<Data::AssetData>& asset)
+    {
+        return ObjectStream::AssetFilterAssetTypesOnly<T0>(asset) || AssetFilterAssetTypesOnly<T1, Args...>(asset);
+    }
+
 } // namespace AZ
 
 #endif  // AZCORE_OBJECT_STREAM_H

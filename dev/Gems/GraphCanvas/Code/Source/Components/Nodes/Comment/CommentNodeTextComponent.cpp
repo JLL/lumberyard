@@ -33,49 +33,10 @@
 #include <GraphCanvas/GraphCanvasBus.h>
 #include <GraphCanvas/tools.h>
 #include <GraphCanvas/Styling/StyleHelper.h>
-#include <Utils/ConversionUtils.h>
+#include <GraphCanvas/Utils/ConversionUtils.h>
 
 namespace GraphCanvas
 {
-    /////////////////////////////////////
-    // CommentNodeTextComponentSaveData
-    /////////////////////////////////////
-
-    CommentNodeTextComponent::CommentNodeTextComponentSaveData::CommentNodeTextComponentSaveData()
-        : m_callback(nullptr)
-    {
-    }
-
-    CommentNodeTextComponent::CommentNodeTextComponentSaveData::CommentNodeTextComponentSaveData(CommentNodeTextComponent* nodeComponent)
-        : m_callback(nodeComponent)
-    {
-    }
-
-    void CommentNodeTextComponent::CommentNodeTextComponentSaveData::operator=(const CommentNodeTextComponentSaveData& other)
-    {
-        // Purposefully skipping over the callback.
-        m_comment = other.m_comment;
-        m_fontConfiguration = other.m_fontConfiguration;
-    }
-
-    void CommentNodeTextComponent::CommentNodeTextComponentSaveData::OnCommentChanged()
-    {
-        if (m_callback)
-        {
-            m_callback->OnCommentChanged();
-            SignalDirty();
-        }
-    }
-
-    void CommentNodeTextComponent::CommentNodeTextComponentSaveData::UpdateStyleOverrides()
-    {
-        if (m_callback)
-        {
-            m_callback->UpdateStyleOverrides();
-            SignalDirty();
-        }
-    }
-
     /////////////////////////////
     // CommentNodeTextComponent
     /////////////////////////////
@@ -86,7 +47,7 @@ namespace GraphCanvas
             AZ::Crc32 commentId = AZ_CRC("Comment", 0x9474526c);
             AZ::Crc32 fontId = AZ_CRC("FontSettings", 0x9d90b4cf);
 
-            CommentNodeTextComponent::CommentNodeTextComponentSaveData saveData;
+            CommentNodeTextSaveData saveData;
 
             AZ::SerializeContext::DataElementNode* dataNode = classElement.FindSubElement(commentId);
 
@@ -117,10 +78,11 @@ namespace GraphCanvas
         AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
         if (serializeContext)
         {
-            serializeContext->Class<CommentNodeTextComponentSaveData>()
-                ->Version(1)
-                ->Field("Comment", &CommentNodeTextComponentSaveData::m_comment)
-                ->Field("FontSettings", &CommentNodeTextComponentSaveData::m_fontConfiguration)
+            serializeContext->Class<CommentNodeTextSaveData, ComponentSaveData>()
+                ->Version(2)
+                ->Field("Comment", &CommentNodeTextSaveData::m_comment)
+                ->Field("BackgroundColor", &CommentNodeTextSaveData::m_backgroundColor)
+                ->Field("FontSettings", &CommentNodeTextSaveData::m_fontConfiguration)
                 ;
 
             serializeContext->Class<CommentNodeTextComponent, GraphCanvasPropertyComponent>()
@@ -141,13 +103,17 @@ namespace GraphCanvas
             AZ::EditContext* editContext = serializeContext->GetEditContext();
             if (editContext)
             {
-                editContext->Class < CommentNodeTextComponentSaveData >("SaveData", "The save information regarding a comment node")
+                editContext->Class < CommentNodeTextSaveData >("SaveData", "The save information regarding a comment node")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "Properties")
                         ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
-                    ->DataElement(AZ::Edit::UIHandlers::Default, &CommentNodeTextComponentSaveData::m_comment, "Comment", "The comment to display on this node")
-                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &CommentNodeTextComponentSaveData::OnCommentChanged)
-                    ->DataElement(AZ::Edit::UIHandlers::Default, &CommentNodeTextComponentSaveData::m_fontConfiguration, "Font Settings", "The font settings used to render the font in the comment.")
-                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &CommentNodeTextComponentSaveData::UpdateStyleOverrides)
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &CommentNodeTextSaveData::m_comment, "Title", "The comment to display on this node")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &CommentNodeTextSaveData::OnCommentChanged)
+                        ->Attribute(AZ::Edit::Attributes::NameLabelOverride, &CommentNodeTextSaveData::GetCommentLabel)
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &CommentNodeTextSaveData::m_fontConfiguration, "Font Settings", "The font settings used to render the font in the comment.")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &CommentNodeTextSaveData::UpdateStyleOverrides)
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &CommentNodeTextSaveData::m_backgroundColor, "Background Color", "The background color to display the node comment on")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &CommentNodeTextSaveData::OnBackgroundColorChanged)
+                        ->Attribute(AZ::Edit::Attributes::NameLabelOverride, &CommentNodeTextSaveData::GetBackgroundLabel)
                 ;
 
                 editContext->Class<CommentNodeTextComponent>("Comment", "The node's customizable properties")
@@ -161,6 +127,7 @@ namespace GraphCanvas
                     ->DataElement(AZ::Edit::UIHandlers::Default, &FontConfiguration::m_fontFamily, "Font Family", "The font family to use when rendering this comment.")
                     ->DataElement(AZ::Edit::UIHandlers::Default, &FontConfiguration::m_pixelSize, "Pixel Size", "The size of the font(in pixels)")
                         ->Attribute(AZ::Edit::Attributes::Min, 1)
+                        ->Attribute(AZ::Edit::Attributes::Max, 200)
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &FontConfiguration::m_weight, "Weight", "The weight of the font")
                         ->EnumAttribute(QFont::Thin, "Thin")
                         ->EnumAttribute(QFont::ExtraLight, "Extra Light")
@@ -190,7 +157,14 @@ namespace GraphCanvas
     CommentNodeTextComponent::CommentNodeTextComponent()
         : m_saveData(this)
         , m_commentTextWidget(nullptr)
+        , m_commentMode(CommentMode::Comment)        
     {
+    }
+
+    CommentNodeTextComponent::CommentNodeTextComponent(AZStd::string_view initialText)
+        : CommentNodeTextComponent()
+    {
+        m_saveData.m_comment = initialText;
     }
 
     void CommentNodeTextComponent::Init()
@@ -217,8 +191,6 @@ namespace GraphCanvas
         NodeNotificationBus::Handler::BusConnect(GetEntityId());
         
         m_commentTextWidget->Activate();
-
-        UpdateStyleOverrides();
     }
 
     void CommentNodeTextComponent::Deactivate()
@@ -252,7 +224,9 @@ namespace GraphCanvas
         NodeUIRequestBus::Event(GetEntityId(), &NodeUIRequests::SetGrid, grid);        
 
         m_commentTextWidget->OnAddedToScene();
+        UpdateStyleOverrides();
         OnCommentChanged();
+        OnBackgroundColorChanged();
 
         m_saveData.RegisterIds(GetEntityId(), sceneId);
     }
@@ -275,6 +249,7 @@ namespace GraphCanvas
     {
         NodeUIRequestBus::Event(GetEntityId(), &NodeUIRequests::SetSnapToGrid, true);
         m_commentTextWidget->SetCommentMode(commentMode);
+        m_commentMode = commentMode;
 
         if (m_commentTextWidget->GetCommentMode() == CommentMode::Comment)
         {
@@ -284,6 +259,24 @@ namespace GraphCanvas
         {
             NodeUIRequestBus::Event(GetEntityId(), &NodeUIRequests::SetResizeToGrid, true);
         }
+    }
+
+    void CommentNodeTextComponent::SetBackgroundColor(const AZ::Color& backgroundColor)
+    {
+        m_saveData.m_backgroundColor = backgroundColor;
+        m_saveData.SignalDirty();
+
+        OnBackgroundColorChanged();
+    }
+
+    AZ::Color CommentNodeTextComponent::GetBackgroundColor() const
+    {
+        return m_saveData.m_backgroundColor;
+    }
+
+    CommentMode CommentNodeTextComponent::GetCommentMode() const
+    {
+        return m_commentMode;
     }
 
     const AZStd::string& CommentNodeTextComponent::GetComment() const
@@ -298,7 +291,7 @@ namespace GraphCanvas
 
     void CommentNodeTextComponent::WriteSaveData(EntitySaveDataContainer& saveDataContainer) const
     {
-        CommentNodeTextComponentSaveData* saveData = saveDataContainer.FindCreateSaveData<CommentNodeTextComponentSaveData>();
+        CommentNodeTextSaveData* saveData = saveDataContainer.FindCreateSaveData<CommentNodeTextSaveData>();
 
         if (saveData)
         {
@@ -308,7 +301,7 @@ namespace GraphCanvas
 
     void CommentNodeTextComponent::ReadSaveData(const EntitySaveDataContainer& saveDataContainer)
     {
-        CommentNodeTextComponentSaveData* saveData = saveDataContainer.FindSaveDataAs<CommentNodeTextComponentSaveData>();
+        CommentNodeTextSaveData* saveData = saveDataContainer.FindSaveDataAs<CommentNodeTextSaveData>();
 
         if (saveData)
         {
@@ -324,6 +317,11 @@ namespace GraphCanvas
 
             m_commentTextWidget->SetComment(m_saveData.m_comment);
         }
+    }
+
+    void CommentNodeTextComponent::OnBackgroundColorChanged()
+    {
+        CommentNotificationBus::Event(GetEntityId(), &CommentNotifications::OnBackgroundColorChanged, m_saveData.m_backgroundColor);
     }
 
     void CommentNodeTextComponent::UpdateStyleOverrides()

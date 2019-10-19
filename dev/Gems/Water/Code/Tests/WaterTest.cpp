@@ -67,6 +67,9 @@ TEST(WaterTest, ComponentsWithComponentApplication)
     AZ::ComponentApplication app;
     AZ::Entity* systemEntity = app.Create(appDesc);
     ASSERT_TRUE(systemEntity != nullptr);
+    app.RegisterComponentDescriptor(Water::WaterSystemComponent::CreateDescriptor());
+    app.RegisterComponentDescriptor(Water::WaterOceanComponent::CreateDescriptor());
+
     systemEntity->CreateComponent<Water::WaterSystemComponent>();
 
     systemEntity->Init();
@@ -90,6 +93,20 @@ public:
     {
     }
 
+    class MockTransformComponent
+        : public AZ::Component
+    {
+    public:
+        AZ_COMPONENT(MockTransformComponent, "{8F4C932A-6BAD-464B-AFB3-87CC8EA31FB5}", AZ::Component);
+        void Activate() override {}
+        void Deactivate() override {}
+        static void Reflect(AZ::ReflectContext* reflect) { AZ_UNUSED(reflect); }
+        static void GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+        {
+            provided.push_back(AZ_CRC("TransformService", 0x8ee22c50));
+        }
+    };
+
     void SetUp() override
     {
         AZ::ComponentApplication::Descriptor appDesc;
@@ -107,10 +124,14 @@ public:
         m_systemEntity = m_application.Create(appDesc, appStartup);
         m_systemEntity->Init();
         m_systemEntity->Activate();
+
+        m_application.RegisterComponentDescriptor(MockTransformComponent::CreateDescriptor());
+        m_application.RegisterComponentDescriptor(Water::WaterOceanComponent::CreateDescriptor());
     }
 
     void TearDown() override
     {
+        delete m_systemEntity;
         m_application.Destroy();
     }
 
@@ -148,9 +169,9 @@ struct WaterOceanComponentTester : public Water::WaterOceanComponent
         ASSERT_TRUE(m_data.GetAnimationWindSpeed() == cfg.GetAnimationWindSpeed());
         ASSERT_TRUE(m_data.GetReflectResolutionScale() == cfg.GetReflectResolutionScale());
         ASSERT_TRUE(m_data.GetReflectionAnisotropic() == cfg.GetReflectionAnisotropic());
-        ASSERT_TRUE(m_data.GetFogColorMulitplier() == cfg.GetFogColorMulitplier());
+        ASSERT_TRUE(m_data.GetFogColorMultiplier() == cfg.GetFogColorMultiplier());
         ASSERT_TRUE(m_data.GetFogColor() == cfg.GetFogColor());
-        ASSERT_TRUE(m_data.GetFogColorMulitplier() == cfg.GetFogColorMulitplier());
+        ASSERT_TRUE(m_data.GetFogColorMultiplier() == cfg.GetFogColorMultiplier());
         ASSERT_TRUE(m_data.GetFogDensity() == cfg.GetFogDensity());
         ASSERT_TRUE(m_data.GetWaterTessellationAmount() == cfg.GetWaterTessellationAmount());
         ASSERT_TRUE(m_data.GetGodRaysEnabled() == cfg.GetGodRaysEnabled());
@@ -193,7 +214,7 @@ TEST_F(WaterTestApp, Ocean_WaterOceanComponentMatchesConfiguration)
     cfg.SetAnimationWindDirection(9.0f);
     cfg.SetAnimationWindSpeed(10.0f);
     cfg.SetFogColor(AZ::Color((AZ::u8)12, (AZ::u8)13, (AZ::u8)14, (AZ::u8)15));
-    cfg.SetFogColorMulitplier(11.0f);
+    cfg.SetFogColorMultiplier(11.0f);
     cfg.SetFogDensity(12.0f);
     cfg.SetReflectResolutionScale(0.123f);
     cfg.SetReflectRenderFlag(Flags::Entities, (rand.GetRandom() % 2) == 0);
@@ -241,6 +262,7 @@ TEST_F(WaterTestApp, Ocean_ScriptingOceanEnvironmentRequestBus)
 
     AZ::Entity* waterEntity = aznew AZ::Entity("water_entity");
     ASSERT_TRUE(waterEntity != nullptr);
+    waterEntity->CreateComponent<MockTransformComponent>();
     waterEntity->CreateComponent<Water::WaterOceanComponent>();
     waterEntity->Init();
     waterEntity->Activate();
@@ -275,8 +297,8 @@ TEST_F(WaterTestApp, Ocean_ScriptingOceanEnvironmentRequestBus)
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetUnderwaterDistortion() == 10);
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.SetFogColor(Color(1.0,2.0,3.0)) or true);
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetFogColor() == Color(1.0,2.0,3.0));
-            ScriptAssert(OceanEnvironmentRequestBus.Broadcast.SetFogColorMulitplier(2.0) or true);
-            ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetFogColorMulitplier() == 2.0);
+            ScriptAssert(OceanEnvironmentRequestBus.Broadcast.SetFogColorMultiplier(2.0) or true);
+            ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetFogColorMultiplier() == 2.0);
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetFogColorPremultiplied() == Color(2.0,4.0,6.0,2.0));
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.SetNearFogColor(Color(1.1,2.2,3.3)) or true);
             ScriptAssert(OceanEnvironmentRequestBus.Broadcast.GetNearFogColor() == Color(1.1,2.2,3.3));
@@ -310,7 +332,7 @@ TEST_F(WaterTestApp, Ocean_ScriptingOceanEnvironmentRequestBus)
 
 
 #if WATER_GEM_EDITOR
-#include "../Source/WaterOceanEditor.h"
+#include "../Source/Editor/WaterOceanEditor.h"
 
 TEST_F(WaterTestApp, Ocean_EditorCreateGameEntity)
 {
@@ -320,6 +342,7 @@ TEST_F(WaterTestApp, Ocean_EditorCreateGameEntity)
     Water::WaterOceanEditor editor;
     auto* editorBase = static_cast<AzToolsFramework::Components::EditorComponentBase*>(&editor);
     editorBase->BuildGameEntity(infiniteOceanEntity);
+    m_application.AddEntity(infiniteOceanEntity);
 
     // the new game entity's ocean component should look like the default one
     Water::WaterOceanComponentData cfg;

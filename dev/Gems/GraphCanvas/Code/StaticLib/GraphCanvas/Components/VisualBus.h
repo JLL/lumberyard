@@ -50,6 +50,11 @@ namespace GraphCanvas
         
         virtual void SetSelected(bool selected) = 0;
         virtual bool IsSelected() const = 0;
+
+        virtual QPainterPath GetOutline() const = 0;
+
+        virtual void SetZValue(int zValue) = 0;
+        virtual int GetZValue() const = 0;
     };
 
     using SceneMemberUIRequestBus = AZ::EBus<SceneMemberUIRequests>;
@@ -98,6 +103,10 @@ namespace GraphCanvas
         virtual bool OnMousePress(const AZ::EntityId&, const QGraphicsSceneMouseEvent*) { return false; };
         virtual bool OnMouseRelease(const AZ::EntityId&, const QGraphicsSceneMouseEvent*) { return false; };
 
+        virtual bool OnMouseDoubleClick(const QGraphicsSceneMouseEvent*) { return false; };
+
+        virtual void OnItemResized() {};
+
         //! Forwards QGraphicsItem::onItemChange events to the event bus system.
         //! QGraphicsItems can produce a wide variety of informational events, relating to all sorts of changes in their
         //! state. See QGraphicsItem::itemChange and QGraphicsItem::GraphicsItemChange.
@@ -107,20 +116,41 @@ namespace GraphCanvas
         //! 2. The type of change.
         //! 3. The value (if any) associated with the change.
         virtual void OnItemChange(const AZ::EntityId&, QGraphicsItem::GraphicsItemChange, const QVariant&) {}
+
+        virtual void OnPositionAnimateBegin(const AZ::Vector2& targetPoint) {}
+        virtual void OnPositionAnimateEnd() {};
     };
 
     using VisualNotificationBus = AZ::EBus<VisualNotifications>;
 
     class RootGraphicsItemRequests : public AZ::EBusTraits
     {
+        // There are a few classes which need to manipulate the enabled state. But I don't want it public editable.
+        friend class GraphUtils;
+        friend class NodeComponent;
+        friend class WrapperNodeLayoutComponent;        
+
     public:
         // Allow any number of handlers per address.
         static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
         static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
         using BusIdType = AZ::EntityId;
 
+        virtual void AnimatePositionTo(const QPointF& scenePoint, const AZStd::chrono::milliseconds& duration) = 0;
+        virtual void CancelAnimation() = 0;
+
         virtual StateController<RootGraphicsItemDisplayState>* GetDisplayStateStateController() = 0;
         virtual RootGraphicsItemDisplayState GetDisplayState() const = 0;
+        
+        virtual RootGraphicsItemEnabledState GetEnabledState() const = 0;
+        
+        bool IsEnabled() const
+        {
+            return GetEnabledState() == RootGraphicsItemEnabledState::ES_Enabled;
+        }
+
+    private:
+        virtual void SetEnabledState(RootGraphicsItemEnabledState enabledState) = 0;
     };
 
     using RootGraphicsItemRequestBus = AZ::EBus<RootGraphicsItemRequests>;
@@ -132,7 +162,8 @@ namespace GraphCanvas
         static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
         using BusIdType = AZ::EntityId;
 
-        virtual void OnDisplayStateChanged(RootGraphicsItemDisplayState oldState, RootGraphicsItemDisplayState newState) = 0;
+        virtual void OnEnabledChanged(RootGraphicsItemEnabledState enabledState) {};
+        virtual void OnDisplayStateChanged(RootGraphicsItemDisplayState oldState, RootGraphicsItemDisplayState newState) {};
     };
 
     using RootGraphicsItemNotificationBus = AZ::EBus<RootGraphicsItemNotifications>;

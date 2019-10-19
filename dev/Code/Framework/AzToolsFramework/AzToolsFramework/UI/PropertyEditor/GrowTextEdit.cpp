@@ -11,7 +11,10 @@
 */
 
 #include <AzToolsFramework/Debug/TraceContext.h>
+AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option") // 4251: 'QRawFont::d': class 'QExplicitlySharedDataPointer<QRawFontPrivate>' needs to have dll-interface to be used by clients of class 'QRawFont'
+                                                               // 4800: 'QTextEngine *const ': forcing value to bool 'true' or 'false' (performance warning)
 #include <QTextBlock>
+AZ_POP_DISABLE_WARNING
 #include "GrowTextEdit.h"
 #include "PropertyQTConstants.h"
 
@@ -23,23 +26,29 @@ namespace AzToolsFramework
 
     GrowTextEdit::GrowTextEdit(QWidget* parent)
         : QTextEdit(parent)
+        , m_textChanged(false)
     {
         setSizePolicy(QSizePolicy::Policy::Ignored, QSizePolicy::Policy::Maximum);
         setMinimumHeight(PropertyQTConstant_DefaultHeight * 3);
 
-        connect(this, &GrowTextEdit::textChanged,[this]()
+        connect(this, &GrowTextEdit::textChanged, this, [this]()
         {
             if (isVisible())
             {
                 updateGeometry();
             }
+
+            m_textChanged = true;
         });
     }
 
     void GrowTextEdit::SetText(const AZStd::string& text)
     {
+        int cursorPos = textCursor().position();
         setPlainText(text.c_str());
-        document()->adjustSize();
+        QTextCursor cursor = textCursor();
+        cursor.movePosition(QTextCursor::MoveOperation::Right, QTextCursor::MoveMode::MoveAnchor, cursorPos);
+        setTextCursor(cursor);
         updateGeometry();
     }
 
@@ -63,6 +72,16 @@ namespace AzToolsFramework
         QSize documentSize = document()->size().toSize();
         sizeHint.setHeight(documentSize.height() + s_padding);
         return sizeHint;
+    }
+
+    void GrowTextEdit::focusOutEvent(QFocusEvent* /* event*/)
+    {
+        if (m_textChanged)
+        {
+            emit EditCompleted();
+        }
+
+        m_textChanged = false;
     }
 }
 

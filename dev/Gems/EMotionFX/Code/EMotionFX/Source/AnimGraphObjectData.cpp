@@ -15,11 +15,12 @@
 #include "AnimGraphObjectData.h"
 #include "AnimGraphInstance.h"
 #include "AnimGraphNode.h"
-#include "AnimGraphObjectDataPool.h"
-
+#include <EMotionFX/Source/Allocators.h>
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphObjectData, AnimGraphObjectDataAllocator, 0)
+
     // constructor
     AnimGraphObjectData::AnimGraphObjectData(AnimGraphObject* object, AnimGraphInstance* animGraphInstance)
         : BaseObject()
@@ -27,21 +28,19 @@ namespace EMotionFX
         mObject             = object;
         mAnimGraphInstance = animGraphInstance;
         mObjectFlags        = 0;
-        mSubPool            = nullptr;
     }
 
 
     // destructor
     AnimGraphObjectData::~AnimGraphObjectData()
     {
-        mSubPool = nullptr;
     }
 
 
     // static create
     AnimGraphObjectData* AnimGraphObjectData::Create(AnimGraphObject* object, AnimGraphInstance* animGraphInstance)
     {
-        return new AnimGraphObjectData(object, animGraphInstance);
+        return aznew AnimGraphObjectData(object, animGraphInstance);
     }
 
 
@@ -68,23 +67,23 @@ namespace EMotionFX
         return sizeof(*this);
     }
 
-
-    // create an instance in a piece of memory
-    AnimGraphObjectData* AnimGraphObjectData::Clone(void* destMem, AnimGraphObject* object, AnimGraphInstance* animGraphInstance)
+    void AnimGraphObjectData::SaveChunk(const uint8* chunkData, uint32 chunkSize, uint8** inOutBuffer, uint32& inOutSize) const
     {
-        return new(destMem) AnimGraphObjectData(object, animGraphInstance);
+        if (*inOutBuffer)
+        {
+            memcpy(*inOutBuffer, chunkData, chunkSize);
+            *inOutBuffer += chunkSize;
+        }
+        inOutSize += chunkSize;
     }
 
-
-    //
-    void AnimGraphObjectData::SetSubPool(AnimGraphObjectDataPool::SubPool* subPool)
+    void AnimGraphObjectData::LoadChunk(uint8* chunkData, uint32 chunkSize, uint8** inOutBuffer, uint32& inOutSize)
     {
-        mSubPool = subPool;
+        if (*inOutBuffer)
+        {
+            memcpy(chunkData, *inOutBuffer, chunkSize);
+            *inOutBuffer += chunkSize;
+        }
+        inOutSize += chunkSize;
     }
-
-
-    AnimGraphObjectDataPool::SubPool* AnimGraphObjectData::GetSubPool() const
-    {
-        return mSubPool;
-    }
-}   // namespace EMotionFX
+} // namespace EMotionFX

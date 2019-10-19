@@ -27,6 +27,12 @@ using namespace AzFramework::AssetSystem;
 class MockRCJob
     : public RCJob
 {
+public:
+    MockRCJob(QObject* parent = nullptr)
+        :RCJob(parent)
+    {
+    }
+
     void DoWork(AssetBuilderSDK::ProcessJobResponse& /*result*/, BuilderParams& builderParams, AssetUtilities::QuitListener& /*listener*/) override
     {
         m_DoWorkCalled = true;
@@ -42,6 +48,23 @@ RCcontrollerUnitTests::RCcontrollerUnitTests()
 {
 }
 
+void RCcontrollerUnitTests::Reset()
+{
+    m_rcController.m_RCJobListModel.m_jobs.clear();
+    m_rcController.m_RCJobListModel.m_jobs.clear();
+    m_rcController.m_RCJobListModel.m_jobsInFlight.clear();
+    m_rcController.m_RCJobListModel.m_jobsInQueueLookup.clear();
+    
+    m_rcController.m_pendingCriticalJobsPerPlatform.clear();
+    m_rcController.m_jobsCountPerPlatform.clear();
+
+    // Doing this to refresh the SortModel
+    m_rcController.m_RCQueueSortModel.AttachToModel(nullptr);
+    m_rcController.m_RCQueueSortModel.AttachToModel(&m_rcController.m_RCJobListModel);
+    m_rcController.m_RCQueueSortModel.m_currentJobRunKeyToJobEntries.clear();
+    m_rcController.m_RCQueueSortModel.m_currentlyConnectedPlatforms.clear();
+} 
+
 void RCcontrollerUnitTests::StartTest()
 {
     PrepareRCController();
@@ -56,7 +79,9 @@ void RCcontrollerUnitTests::PrepareRCController()
     RCJobListModel* rcJobListModel = m_rcController.GetQueueModel();
 
     AssetProcessor::JobDetails jobDetails;
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile0.txt";
+    jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile0.txt";
+    jobDetails.m_jobEntry.m_watchFolderPath = QCoreApplication::applicationDirPath();
+    jobDetails.m_jobEntry.m_databaseSourceName = "someFile0.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc", { "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
 
@@ -65,35 +90,35 @@ void RCcontrollerUnitTests::PrepareRCController()
     rcJobListModel->addNewJob(job0);
 
     RCJob* job1 = new RCJob(rcJobListModel);
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile1.txt";
+    jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile1.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc", { "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
     job1->Init(jobDetails);
     rcJobListModel->addNewJob(job1);
 
     RCJob* job2 = new RCJob(rcJobListModel);
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile2.txt";
+    jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile2.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc",{ "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
     job2->Init(jobDetails);
     rcJobListModel->addNewJob(job2);
 
     RCJob* job3 = new RCJob(rcJobListModel);
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile3.txt";
+    jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile3.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc",{ "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
     job3->Init(jobDetails);
     rcJobListModel->addNewJob(job3);
 
     RCJob* job4 = new RCJob(rcJobListModel);
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile4.txt";
+    jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile4.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc",{ "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
     job4->Init(jobDetails);
     rcJobListModel->addNewJob(job4);
 
     RCJob* job5 = new RCJob(rcJobListModel);
-    jobDetails.m_jobEntry.m_relativePathToFile = "someFile5.txt";
+    jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = "someFile5.txt";
     jobDetails.m_jobEntry.m_platformInfo = { "pc",{ "desktop", "renderer" } };
     jobDetails.m_jobEntry.m_jobKey = "Text files";
     job5->Init(jobDetails);
@@ -112,9 +137,6 @@ void RCcontrollerUnitTests::PrepareRCController()
 
 void RCcontrollerUnitTests::RunRCControllerTests()
 {
-    // doing this prevents any new jobs being queued:
-    m_rcController.QuitRequested();
-
     int jobsInQueueCount = 0;
     QString platformInQueueCount;
     bool gotJobsInQueueCall = false;
@@ -167,8 +189,12 @@ void RCcontrollerUnitTests::RunRCControllerTests()
 
     QStringList tempJobNames;
 
+    // Note that while this is an OS-SPECIFIC path, this test does not actually invoke the file system
+    // or file operators, so is purely doing in-memory testing.  So the path does not actually matter and the 
+    // test should function on other operating systems too.
+
     // test - exact match
-    tempJobNames << "c:/somerandomfolder/dev/blah/test.dds";
+    tempJobNames << "c:/somerandomfolder/dev/blah/test.dds"; 
     tempJobNames << "c:/somerandomfolder/dev/blah/test.cre"; // must not match
 
     // test - NO MATCH
@@ -199,7 +225,8 @@ void RCcontrollerUnitTests::RunRCControllerTests()
     {
         RCJob* job = new RCJob(rcJobListModel);
         AssetProcessor::JobDetails jobDetails;
-        jobDetails.m_jobEntry.m_relativePathToFile = name;
+        jobDetails.m_jobEntry.m_watchFolderPath = "c:/somerandomfolder/dev";
+        jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = name;
         jobDetails.m_jobEntry.m_platformInfo = { "pc",{ "desktop", "renderer" } };
         jobDetails.m_jobEntry.m_jobKey = "Compile Stuff";
         jobDetails.m_jobEntry.m_sourceFileUUID = uuidOfSource;
@@ -213,8 +240,8 @@ void RCcontrollerUnitTests::RunRCControllerTests()
     {
         RCJob* job0 = new RCJob(rcJobListModel);
         AssetProcessor::JobDetails jobDetails;
-        jobDetails.m_jobEntry.m_relativePathToFile = name;
-        jobDetails.m_jobEntry.m_platformInfo = { "es3" ,{ "mobile", "renderer" } }; 
+        jobDetails.m_jobEntry.m_databaseSourceName = jobDetails.m_jobEntry.m_pathRelativeToWatchFolder = name;
+        jobDetails.m_jobEntry.m_platformInfo = { "es3" ,{ "mobile", "renderer" } };
         jobDetails.m_jobEntry.m_jobKey = "Compile Other Stuff";
         jobDetails.m_jobEntry.m_sourceFileUUID = uuidOfSource;
         job0->Init(jobDetails);
@@ -397,7 +424,7 @@ void RCcontrollerUnitTests::RunRCControllerTests()
 
     AZ::Uuid sourceId = AZ::Uuid("{2206A6E0-FDBC-45DE-B6FE-C2FC63020BD5}");
     JobDetails details;
-    details.m_jobEntry = JobEntry("d:/test/test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "pc" , {"desktop", "renderer"} }, "Test Job", 1234, 1, sourceId);
+    details.m_jobEntry = JobEntry("d:/test", "test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "pc" , {"desktop", "renderer"} }, "Test Job", 1234, 1, sourceId);
     gotJobsInQueueCall = false;
     int priorJobs = jobsInQueueCount;
     m_rcController.JobSubmitted(details);
@@ -409,13 +436,13 @@ void RCcontrollerUnitTests::RunRCControllerTests()
     gotJobsInQueueCall = false;
 
     // submit same job, different run key
-    details.m_jobEntry = JobEntry("d:/test/test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "pc" ,{ "desktop", "renderer" } }, "Test Job", 1234, 2, sourceId);
+    details.m_jobEntry = JobEntry("d:/test", "/test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "pc" ,{ "desktop", "renderer" } }, "Test Job", 1234, 2, sourceId);
     m_rcController.JobSubmitted(details);
     QCoreApplication::processEvents(QEventLoop::AllEvents);
     UNIT_TEST_EXPECT_FALSE(gotJobsInQueueCall);
 
     // submit same job but different platform:
-    details.m_jobEntry = JobEntry("d:/test/test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "es3" ,{ "mobile", "renderer" } }, "Test Job", 1234, 3, sourceId);
+    details.m_jobEntry = JobEntry("d:/test", "test1.txt", "test1.txt", AZ::Uuid("{7954065D-CFD1-4666-9E4C-3F36F417C7AC}"), { "es3" ,{ "mobile", "renderer" } }, "Test Job", 1234, 3, sourceId);
     m_rcController.JobSubmitted(details);
     QCoreApplication::processEvents(QEventLoop::AllEvents);
 
@@ -441,30 +468,32 @@ void RCcontrollerUnitTests::RunRCControllerTests()
 #endif
 
     MockRCJob rcJob;
-    
+    ScanFolderInfo scanFolderInfo("samplepath", "sampledisplayname", "samplekey", "", false, false);
     AssetProcessor::JobDetails jobDetailsToInitWith;
-    jobDetailsToInitWith.m_jobEntry.m_relativePathToFile = "someFile0.txt";
+    jobDetailsToInitWith.m_jobEntry.m_watchFolderPath = tempPath.absoluteFilePath("subfolder4");
+    jobDetailsToInitWith.m_jobEntry.m_databaseSourceName = jobDetailsToInitWith.m_jobEntry.m_pathRelativeToWatchFolder = "needsLock.tiff";
     jobDetailsToInitWith.m_jobEntry.m_platformInfo = { "pc", { "tools", "editor"} };
     jobDetailsToInitWith.m_jobEntry.m_jobKey = "Text files";
     jobDetailsToInitWith.m_jobEntry.m_sourceFileUUID = uuidOfSource;
+    jobDetailsToInitWith.m_scanFolder = &scanFolderInfo;
     rcJob.Init(jobDetailsToInitWith);
 
     bool beginWork = false;
-    QObject::connect(&rcJob, &RCJob::BeginWork, this, [this, &beginWork]()
+    QObject::connect(&rcJob, &RCJob::BeginWork, this, [&beginWork]()
         {
             beginWork = true;
         }
         );
     bool jobFinished = false;
-    QObject::connect(&rcJob, &RCJob::JobFinished, this, [this, &jobFinished](AssetBuilderSDK::ProcessJobResponse /*result*/)
+    QObject::connect(&rcJob, &RCJob::JobFinished, this, [&jobFinished](AssetBuilderSDK::ProcessJobResponse /*result*/)
         {
             jobFinished = true;
         }
         );
-    rcJob.SetInputFileAbsolutePath(fileInUsePath.toUtf8().data());
     rcJob.SetCheckExclusiveLock(true);
     rcJob.Start();
 
+    // we only expect work to begin when we can gain an exclusive lock on this file.
     UNIT_TEST_EXPECT_FALSE(UnitTestUtils::BlockUntil(beginWork, 5000));
 
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -478,16 +507,181 @@ void RCcontrollerUnitTests::RunRCControllerTests()
     UNIT_TEST_EXPECT_TRUE(UnitTestUtils::BlockUntil(jobFinished, 5000));
     UNIT_TEST_EXPECT_TRUE(beginWork);
     UNIT_TEST_EXPECT_TRUE(rcJob.m_DoWorkCalled);
-    
+
     // make sure the source UUID made its way all the way from create jobs to process jobs.
     UNIT_TEST_EXPECT_TRUE(rcJob.m_capturedParams.m_processJobRequest.m_sourceFileUUID == uuidOfSource);
+    ////-----------------------UNIT TEST Order Job Dependency
+
+    QString fileA = AssetUtilities::NormalizeFilePath(tempPath.absoluteFilePath("FileA.txt"));
+    QString fileB = AssetUtilities::NormalizeFilePath(tempPath.absoluteFilePath("FileB.txt"));
+    QString fileC = AssetUtilities::NormalizeFilePath(tempPath.absoluteFilePath("FileC.txt"));
+    QString fileD = AssetUtilities::NormalizeFilePath(tempPath.absoluteFilePath("FileD.txt"));
+
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::CreateDummyFile(fileA, "xxx"));
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::CreateDummyFile(fileB, "xxx"));
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::CreateDummyFile(fileC, "xxx"));
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::CreateDummyFile(fileD, "xxx"));
+
+    Reset();
+    AZ::Uuid builderUuid = AZ::Uuid::CreateRandom();
+    m_assetBuilderDesc.m_name = "Job Dependency UnitTest";
+    m_assetBuilderDesc.m_patterns.push_back(AssetBuilderSDK::AssetBuilderPattern("*.txt", AssetBuilderSDK::AssetBuilderPattern::PatternType::Wildcard));
+    m_assetBuilderDesc.m_busId = builderUuid;
+    m_assetBuilderDesc.m_processJobFunction = []
+    (const AssetBuilderSDK::ProcessJobRequest& request, AssetBuilderSDK::ProcessJobResponse& response)
+    {
+        response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
+    };
+
+    m_rcController.SetDispatchPaused(true);
+
+    // Job B has an order job dependency on Job A
+
+    // Setting up JobA
+    MockRCJob* jobA = new MockRCJob(&m_rcController.m_RCJobListModel);
+    JobDetails jobdetailsA;
+    jobdetailsA.m_scanFolder = &scanFolderInfo;
+    jobdetailsA.m_assetBuilderDesc = m_assetBuilderDesc;
+    jobdetailsA.m_jobEntry.m_databaseSourceName = jobdetailsA.m_jobEntry.m_pathRelativeToWatchFolder = "fileA.txt";
+    jobdetailsA.m_jobEntry.m_watchFolderPath = scanFolderInfo.ScanPath();
+    jobdetailsA.m_jobEntry.m_platformInfo = { "pc" ,{ "desktop", "renderer" } };
+    jobdetailsA.m_jobEntry.m_jobKey = "TestJobA";
+    jobdetailsA.m_jobEntry.m_builderGuid = builderUuid;
+
+    jobA->Init(jobdetailsA);
+    m_rcController.m_RCQueueSortModel.AddJobIdEntry(jobA);
+    m_rcController.m_RCJobListModel.addNewJob(jobA);
+
+    bool beginWorkA = false;
+    QObject::connect(jobA, &RCJob::BeginWork, this, [this, &beginWorkA]()
+    {
+        beginWorkA = true;
+    }
+    );
+
+    bool jobFinishedA = false;
+    QObject::connect(jobA, &RCJob::JobFinished, this, [this, &jobFinishedA](AssetBuilderSDK::ProcessJobResponse /*result*/)
+    {
+        jobFinishedA = true;
+    }
+    );
+
+    // Setting up JobB
+    JobDetails jobdetailsB;
+    jobdetailsB.m_scanFolder = &scanFolderInfo;
+    jobdetailsA.m_assetBuilderDesc = m_assetBuilderDesc;
+    jobdetailsB.m_jobEntry.m_databaseSourceName = jobdetailsB.m_jobEntry.m_pathRelativeToWatchFolder = "fileB.txt";
+    jobdetailsB.m_jobEntry.m_platformInfo = { "pc" ,{ "desktop", "renderer" } };
+    jobdetailsB.m_jobEntry.m_watchFolderPath = scanFolderInfo.ScanPath();
+    jobdetailsB.m_jobEntry.m_jobKey = "TestJobB";
+    jobdetailsB.m_jobEntry.m_builderGuid = builderUuid;
+    
+    jobdetailsB.m_critical = true; //make jobB critical so that it will be analyzed first even though we want JobA to run first
+    
+    AssetBuilderSDK::SourceFileDependency sourceFileBDependency;
+    sourceFileBDependency.m_sourceFileDependencyPath = "fileB.txt";
+
+    AssetBuilderSDK::SourceFileDependency sourceFileADependency;
+    sourceFileADependency.m_sourceFileDependencyPath = "fileA.txt";
+
+    // Make job B has an order job dependency on Job A
+    AssetBuilderSDK::JobDependency jobDependencyA("TestJobA", "pc", AssetBuilderSDK::JobDependencyType::Order, sourceFileADependency);
+    jobdetailsB.m_jobDependencyList.push_back({ jobDependencyA });
+
+    //Setting JobB
+    MockRCJob* jobB = new MockRCJob(&m_rcController.m_RCJobListModel);
+    jobB->Init(jobdetailsB);
+    m_rcController.m_RCQueueSortModel.AddJobIdEntry(jobB);
+    m_rcController.m_RCJobListModel.addNewJob(jobB);
+
+    bool beginWorkB = false;
+    QMetaObject::Connection conn = QObject::connect(jobB, &RCJob::BeginWork, this, [this, &beginWorkB, &jobFinishedA]()
+    {
+        // JobA should finish first before JobB starts
+        UNIT_TEST_EXPECT_TRUE(jobFinishedA);
+        beginWorkB = true;
+    }
+    );
+
+    bool jobFinishedB = false;
+    QObject::connect(jobB, &RCJob::JobFinished, this, [this, &jobFinishedB](AssetBuilderSDK::ProcessJobResponse /*result*/)
+    {
+        jobFinishedB = true;
+    }
+    );
+    bool allJobsCompleted = false;
+    QObject::connect(&m_rcController, &RCController::BecameIdle, this, [&allJobsCompleted]()
+    {
+        allJobsCompleted = true;
+    }
+    );
+
+    m_rcController.SetDispatchPaused(false);
+
+    m_rcController.DispatchJobs();
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::BlockUntil(allJobsCompleted, 5000));
+    UNIT_TEST_EXPECT_TRUE(jobFinishedB); 
+
+    // Now test the use case where we have a cyclic dependency, 
+    // although the order in which these job will start is not defined but we can ensure that 
+    // all the job finishes and RCController goes Idle
+    allJobsCompleted = false;
+    Reset();
+    m_rcController.SetDispatchPaused(true);
+    QObject::disconnect(conn);
+
+    //Setting up JobC
+    JobDetails jobdetailsC;
+    jobdetailsC.m_scanFolder = &scanFolderInfo;
+    jobdetailsC.m_assetBuilderDesc = m_assetBuilderDesc;
+    jobdetailsC.m_jobEntry.m_databaseSourceName = jobdetailsC.m_jobEntry.m_pathRelativeToWatchFolder = "fileC.txt";
+    jobdetailsC.m_jobEntry.m_platformInfo = { "pc" ,{ "desktop", "renderer" } };
+    jobdetailsC.m_jobEntry.m_watchFolderPath = scanFolderInfo.ScanPath();
+    jobdetailsC.m_jobEntry.m_jobKey = "TestJobC";
+    jobdetailsC.m_jobEntry.m_builderGuid = builderUuid;
+
+    AssetBuilderSDK::SourceFileDependency sourceFileCDependency;
+    sourceFileCDependency.m_sourceFileDependencyPath = "fileC.txt";
+
+    //Setting up Job D
+    JobDetails jobdetailsD;
+    jobdetailsD.m_scanFolder = &scanFolderInfo;
+    jobdetailsD.m_assetBuilderDesc = m_assetBuilderDesc;
+    jobdetailsD.m_jobEntry.m_databaseSourceName = jobdetailsD.m_jobEntry.m_pathRelativeToWatchFolder = "fileD.txt";
+    jobdetailsD.m_jobEntry.m_platformInfo = { "pc" ,{ "desktop", "renderer" } };
+    jobdetailsD.m_jobEntry.m_watchFolderPath = scanFolderInfo.ScanPath();
+    jobdetailsD.m_jobEntry.m_jobKey = "TestJobD";
+    jobdetailsD.m_jobEntry.m_builderGuid = builderUuid;
+    AssetBuilderSDK::SourceFileDependency sourceFileDDependency;
+    sourceFileDDependency.m_sourceFileDependencyPath = "fileD.txt";
+    
+    //creating cyclic job order dependencies i.e  JobC and JobD have order job dependency on each other 
+    AssetBuilderSDK::JobDependency jobDependencyC("TestJobC", "pc", AssetBuilderSDK::JobDependencyType::Order, sourceFileCDependency);
+    AssetBuilderSDK::JobDependency jobDependencyD("TestJobD", "pc", AssetBuilderSDK::JobDependencyType::Order, sourceFileDDependency);
+    jobdetailsC.m_jobDependencyList.push_back({ jobDependencyD });
+    jobdetailsD.m_jobDependencyList.push_back({ jobDependencyC });
+
+    MockRCJob* jobD = new MockRCJob(&m_rcController.m_RCJobListModel);
+    MockRCJob* jobC = new MockRCJob(&m_rcController.m_RCJobListModel);
+
+    jobC->Init(jobdetailsC);
+    m_rcController.m_RCQueueSortModel.AddJobIdEntry(jobC);
+    m_rcController.m_RCJobListModel.addNewJob(jobC);
+
+    jobD->Init(jobdetailsD);
+    m_rcController.m_RCQueueSortModel.AddJobIdEntry(jobD);
+    m_rcController.m_RCJobListModel.addNewJob(jobD);
+
+    m_rcController.SetDispatchPaused(false);
+    m_rcController.DispatchJobs();
+    UNIT_TEST_EXPECT_TRUE(UnitTestUtils::BlockUntil(allJobsCompleted, 5000));
 
     // Test case when source file is deleted before it started processing
     {
         int prevJobCount = rcJobListModel->itemCount();
         MockRCJob rcJob;
         AssetProcessor::JobDetails jobDetailsToInitWith;
-        jobDetailsToInitWith.m_jobEntry.m_relativePathToFile = "someFile0.txt";
+        jobDetailsToInitWith.m_jobEntry.m_pathRelativeToWatchFolder = jobDetailsToInitWith.m_jobEntry.m_databaseSourceName = "someFile0.txt";
         jobDetailsToInitWith.m_jobEntry.m_platformInfo = { "pc",{ "tools", "editor" } };
         jobDetailsToInitWith.m_jobEntry.m_jobKey = "Text files";
         jobDetailsToInitWith.m_jobEntry.m_sourceFileUUID = uuidOfSource;

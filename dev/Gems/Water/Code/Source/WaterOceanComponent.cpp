@@ -17,6 +17,7 @@
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/RTTI/ReflectContext.h>
 #include <AzCore/RTTI/BehaviorContext.h>
+#include <LmbrCentral/Physics/WaterNotificationBus.h>
 
 namespace AZ
 {
@@ -49,9 +50,15 @@ namespace Water
                 ->Event("SetFogColor", &AZ::OceanEnvironmentBus::Events::SetFogColor)
                 ->VirtualProperty("FogColor", "GetFogColor", "SetFogColor")
 
-                ->Event("GetFogColorMulitplier", &AZ::OceanEnvironmentBus::Events::GetFogColorMulitplier)
-                ->Event("SetFogColorMulitplier", &AZ::OceanEnvironmentBus::Events::SetFogColorMulitplier)
-                ->VirtualProperty("FogColorMulitplier", "GetFogColorMulitplier", "SetFogColorMulitplier")
+                ->Event("GetFogColorMultiplier", &AZ::OceanEnvironmentBus::Events::GetFogColorMultiplier)
+                ->Event("SetFogColorMultiplier", &AZ::OceanEnvironmentBus::Events::SetFogColorMultiplier)
+                ->VirtualProperty("FogColorMultiplier", "GetFogColorMultiplier", "SetFogColorMultiplier")
+
+                ->Event("GetFogColorMulitplier", &AZ::OceanEnvironmentBus::Events::GetFogColorMultiplier) // Deprecated
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
+                ->Event("SetFogColorMulitplier", &AZ::OceanEnvironmentBus::Events::SetFogColorMultiplier) // Deprecated
+                    ->Attribute(AZ::Script::Attributes::Deprecated, true)
+                ->VirtualProperty("FogColorMulitplier", "GetFogColorMulitplier", "SetFogColorMulitplier") // Deprecated
 
                 ->Event("GetFogColorPremultiplied", &AZ::OceanEnvironmentBus::Events::GetFogColorPremultiplied)
 
@@ -158,13 +165,13 @@ namespace Water
     // static
     void WaterOceanComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
     {
-        provided.push_back(AZ_CRC("WaterOceanComponent", 0x321d1126));
+        provided.push_back(AZ_CRC("WaterOceanService", 0x12a06661));
     }
 
     // static
     void WaterOceanComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
     {
-        incompatible.push_back(AZ_CRC("WaterOceanComponent", 0x321d1126));
+        incompatible.push_back(AZ_CRC("WaterOceanService", 0x12a06661));
     }
 
     // static
@@ -181,17 +188,22 @@ namespace Water
         AZ::Transform worldTransform = AZ::Transform::Identity();
         EBUS_EVENT_ID_RESULT(worldTransform, GetEntityId(), AZ::TransformBus, GetWorldTM);
         m_data.SetOceanLevel(worldTransform.GetPosition().GetZ());
+
+        LmbrCentral::WaterNotificationBus::Broadcast(&LmbrCentral::WaterNotificationBus::Events::OceanHeightChanged, worldTransform.GetPosition().GetZ());
     }
 
     void WaterOceanComponent::Deactivate()
     {
         m_data.Deactivate();
         AZ::TransformNotificationBus::Handler::BusDisconnect(GetEntityId());
+
+        LmbrCentral::WaterNotificationBus::Broadcast(&LmbrCentral::WaterNotificationBus::Events::OceanHeightChanged, AZ::OceanConstants::s_HeightUnknown);
     }
 
     void WaterOceanComponent::OnTransformChanged(const AZ::Transform& /*local*/, const AZ::Transform& world)
     {
         m_data.SetOceanLevel(world.GetPosition().GetZ());
+        LmbrCentral::WaterNotificationBus::Broadcast(&LmbrCentral::WaterNotificationBus::Events::OceanHeightChanged, world.GetPosition().GetZ());
     }
 }
 

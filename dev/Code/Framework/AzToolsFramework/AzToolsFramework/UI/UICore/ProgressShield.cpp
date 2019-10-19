@@ -16,7 +16,10 @@
 #include <AzCore/std/chrono/clocks.h>
 
 #include <AzToolsFramework/UI/UICore/ProgressShield.hxx>
+
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <UI/UICore/ui_ProgressShield.h>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -41,9 +44,7 @@ namespace AzToolsFramework
             setAttribute(Qt::WA_TranslucentBackground);
             setAttribute(Qt::WA_TransparentForMouseEvents);
             setAttribute(Qt::WA_NoSystemBackground);
-            int width = parentWidget()->geometry().width();
-            int height = parentWidget()->geometry().height();
-            this->setGeometry(0, 0, width, height);
+            setGeometry(parentWidget()->geometry()); // because we're a tooltip, we work in absolute coordinates.
             pParent->installEventFilter(this);
             setProgress(0, 0, tr("Loading..."));
             UpdateGeometry();
@@ -92,9 +93,7 @@ namespace AzToolsFramework
 
     void ProgressShield::UpdateGeometry()
     {
-        int width = this->parentWidget()->geometry().width();
-        int height =  this->parentWidget()->geometry().height();
-        this->setGeometry(0, 0, width, height);
+        setGeometry(parentWidget()->geometry()); // because we're a tooltip window (not a child), we work in absolute coordinates.
     }
 
 

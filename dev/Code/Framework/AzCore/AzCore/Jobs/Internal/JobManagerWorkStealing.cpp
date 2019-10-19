@@ -9,11 +9,8 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Jobs/JobManager.h>
-
-#ifdef AZCORE_JOBS_IMPL_WORK_STEALING
 
 #include <AzCore/Jobs/Job.h>
 #include <AzCore/Jobs/Internal/JobNotify.h>
@@ -29,7 +26,7 @@
 #endif
 
 using namespace AZ;
-using namespace Internal;
+using namespace AZ::Internal;
 
 
 void WorkQueue::LocalPushBack(Job* job)
@@ -120,7 +117,10 @@ void JobManagerWorkStealing::AddPendingJob(Job* job)
         info = CrossModuleFindAndSetWorkerThreadInfo();
     }
 #endif
-    if (info && info->m_isWorker)
+
+    AZ_PROFILE_INTERVAL_START(AZ::Debug::ProfileCategory::JobManagerDetailed, job, "AzCore Job Queued Awaiting Execute");
+    const bool isThisManagersWorkerThread = info ? (info->m_owningManager == this && info->m_isWorker) : false;
+    if (isThisManagersWorkerThread)
     {
         //current thread is a worker, push to the local queue
         info->m_pendingJobs.LocalPushBack(job);
@@ -176,14 +176,6 @@ void JobManagerWorkStealing::SuspendJobUntilReady(Job* job)
     info->m_currentJob = job; //restore current job
 }
 
-void JobManagerWorkStealing::NotifySuspendedJobReady(Job* job)
-{
-    (void)job;
-    //Nothing to do here, a thread which has a suspended job waiting will not go to sleep, so we don't need to send
-    //any wake up events or anything. This means is possible for a thread to spin while waiting for a child to
-    //complete if there are no other jobs available, but this should be fairly rare.
-}
-
 void JobManagerWorkStealing::StartJobAndAssistUntilComplete(Job* job)
 {
     ThreadInfo* info = GetCurrentOrCreateThreadInfo();
@@ -232,10 +224,10 @@ void JobManagerWorkStealing::PrintStats()
 {
 #ifdef JOBMANAGER_ENABLE_STATS
     char str[256];
-    OutputDebugString("===================================================\n");
-    OutputDebugString("Job System Stats:\n");
-    OutputDebugString("Thread   Global jobs    Forks/dependents   Jobs done   Jobs stolen    Job time (ms)  Steal time (ms)  Total time (ms)\n");
-    OutputDebugString("------   -------------  -----------------  ----------  ------------   -------------  ---------------  ---------------\n");
+    printf("===================================================\n");
+    printf("Job System Stats:\n");
+    printf("Thread   Global jobs    Forks/dependents   Jobs done   Jobs stolen    Job time (ms)  Steal time (ms)  Total time (ms)\n");
+    printf("------   -------------  -----------------  ----------  ------------   -------------  ---------------  ---------------\n");
     for (unsigned int i = 0; i < m_threads.size(); ++i)
     {
         ThreadInfo* info = m_threads[i];
@@ -243,11 +235,38 @@ void JobManagerWorkStealing::PrintStats()
         double stealTime = 1000.0f * static_cast<double>(info->m_stealTime) / AZStd::GetTimeTicksPerSecond();
         azsnprintf(str, AZ_ARRAY_SIZE(str),  " %d:        %5d          %5d           %5d         %5d            %3.2f           %3.2f         %3.2f\n",
             i, info->m_globalJobs, info->m_jobsForked, info->m_jobsDone, info->m_jobsStolen, jobTime, stealTime, jobTime + stealTime);
-        OutputDebugString(str);
         printf(str);
     }
 #endif
 }
+
+
+Job* JobManagerWorkStealing::GetCurrentJob() const
+{
+    const ThreadInfo* info = m_currentThreadInfo;
+#ifndef AZ_MONOLITHIC_BUILD
+    if (!info)
+    {
+        //we could be in a different module where m_currentThreadInfo has not been set yet (on a worker or user thread assisting with jobs)
+        info = FindCurrentThreadInfo();
+    }
+#endif
+    return info ? info->m_currentJob : nullptr;
+}
+
+AZ::u32 JobManagerWorkStealing::GetWorkerThreadId() const
+{
+    const ThreadInfo* info = m_currentThreadInfo;
+#ifndef AZ_MONOLITHIC_BUILD
+    if (!info)
+    {
+        info = CrossModuleFindAndSetWorkerThreadInfo();
+    }
+#endif
+    return info ? info->m_workerId : JobManagerBase::InvalidWorkerThreadId;
+}
+
+
 
 void JobManagerWorkStealing::ProcessJobsWorker(ThreadInfo* info)
 {
@@ -322,6 +341,7 @@ void JobManagerWorkStealing::ProcessJobsInternal(ThreadInfo* info, Job* suspende
                 {
                     //no available work, so go to sleep (or we have already been signaled by another thread and will acquire the semaphore but not actually sleep)
                     info->m_waitEvent.acquire();
+                    AZ_PROFILE_INTERVAL_END(AZ::Debug::ProfileCategory::JobManagerDetailed, info);
 
                     if (m_quitRequested)
                     {
@@ -581,6 +601,7 @@ JobManagerWorkStealing::ThreadList JobManagerWorkStealing::CreateWorkerThreads(c
 
         ThreadInfo* info = aznew ThreadInfo;
         info->m_isWorker = true;
+        info->m_owningManager = this;
         info->m_workerId = iThread;
 
         AZStd::thread_desc threadDesc;
@@ -622,6 +643,8 @@ inline void JobManagerWorkStealing::ActivateWorker()
                 // decrement number of available workers
                 m_numAvailableWorkers.fetch_sub(1, AZStd::memory_order_acq_rel);
                 // resume the thread execution
+
+                AZ_PROFILE_INTERVAL_START(AZ::Debug::ProfileCategory::JobManagerDetailed, info, "AzCore WakeJobThread %d", info->m_workerId);
                 info->m_waitEvent.release();
                 return;
             }
@@ -629,6 +652,3 @@ inline void JobManagerWorkStealing::ActivateWorker()
     }
 }
 
-#endif // AZCORE_JOBS_IMPL_WORK_STEALING
-
-#endif // #ifndef AZ_UNITY_BUILD

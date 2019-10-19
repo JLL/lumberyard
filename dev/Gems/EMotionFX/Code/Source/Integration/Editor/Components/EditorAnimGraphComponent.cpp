@@ -13,25 +13,20 @@
 
 #include "EMotionFX_precompiled.h"
 
-#include <AzCore/Serialization/SerializeContext.h>
-#include <AzCore/Serialization/EditContext.h>
 #include <AzCore/Asset/AssetManager.h>
 #include <AzCore/Script/ScriptProperty.h>
-
+#include <AzCore/Serialization/EditContext.h>
+#include <AzCore/Serialization/SerializeContext.h>
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
-
-#include <Integration/Editor/Components/EditorAnimGraphComponent.h>
-#include <Integration/ActorComponentBus.h>
-
-#include <MCore/Source/Attribute.h>
-#include <MCore/Source/AttributeSettings.h>
-#include <MCore/Source/AttributeFloat.h>
-
+#include <EMotionFX/Source/Parameter/BoolParameter.h>
+#include <EMotionFX/Source/Parameter/FloatParameter.h>
 #include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/EMStudioManager.h>
 #include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/MainWindow.h>
+#include <Integration/ActorComponentBus.h>
+#include <Integration/Editor/Components/EditorAnimGraphComponent.h>
 
+#include <QApplication>
 
-//#pragma optimize("",off)
 
 namespace EMotionFX
 {
@@ -44,10 +39,11 @@ namespace EMotionFX
             if (serializeContext)
             {
                 serializeContext->Class<EditorAnimGraphComponent, AzToolsFramework::Components::EditorComponentBase>()
-                    ->Version(1)
+                    ->Version(2)
                     ->Field("AnimGraphAsset", &EditorAnimGraphComponent::m_animGraphAsset)
                     ->Field("MotionSetAsset", &EditorAnimGraphComponent::m_motionSetAsset)
                     ->Field("ActiveMotionSetName", &EditorAnimGraphComponent::m_activeMotionSetName)
+                    ->Field("DebugVisualization", &EditorAnimGraphComponent::m_visualize)
                     ->Field("ParameterDefaults", &EditorAnimGraphComponent::m_parameterDefaults)
                     ;
 
@@ -67,11 +63,12 @@ namespace EMotionFX
                         "Anim Graph", "The Anim Graph component manages a set of assets that are built in the Animation Editor, including the animation graph, default parameter settings, and assigned motion set for the associated Actor")
                         ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                             ->Attribute(AZ::Edit::Attributes::Category, "Animation")
-                            ->Attribute(AZ::Edit::Attributes::Icon, ":/EMotionFX/AnimGraphComponent.png")
-                            ->Attribute(AZ::Edit::Attributes::PrimaryAssetType, AZ::AzTypeInfo<AnimGraphAsset>::Uuid())
-                            ->Attribute(AZ::Edit::Attributes::ViewportIcon, ":/EMotionFX/AnimGraphComponent.png")
+                            ->Attribute(AZ::Edit::Attributes::Icon, ":/EMotionFX/AnimGraphComponent.svg")
+                            ->Attribute(AZ::Edit::Attributes::PrimaryAssetType, azrtti_typeid<AnimGraphAsset>())
+                            ->Attribute(AZ::Edit::Attributes::ViewportIcon, ":/EMotionFX/AnimGraphComponent.svg")
                             ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                             ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
+                            ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-animgraph.html")
                         ->DataElement(AZ::Edit::UIHandlers::Default, &EditorAnimGraphComponent::m_motionSetAsset,
                             "Motion set asset", "EMotion FX motion set asset to be loaded for this actor.")
                             ->Attribute("EditButton", "Gems/EMotionFX/Assets/Editor/Images/Icons/EMFX_icon_32x32")
@@ -80,6 +77,7 @@ namespace EMotionFX
                             ->Attribute(AZ::Edit::Attributes::ChangeNotify, &EditorAnimGraphComponent::OnMotionSetAssetSelected)
                         ->DataElement(AZ_CRC("MotionSetName", 0xcf534ea6), &EditorAnimGraphComponent::m_activeMotionSetName, "Active motion set", "Motion set to use for this anim graph instance")
                             ->Attribute(AZ_CRC("MotionSetAsset", 0xd4e88984), &EditorAnimGraphComponent::GetMotionAsset)
+                        ->DataElement(AZ::Edit::UIHandlers::Default, &EditorAnimGraphComponent::m_visualize, "Debug visualization", "Enable this to allow the anim graph to render debug visualization. Enable debug rendering on anim graph nodes first.")
                         ->DataElement(AZ::Edit::UIHandlers::Default, &EditorAnimGraphComponent::m_animGraphAsset,
                             "Anim graph", "EMotion FX anim graph to be assigned to this actor.")
                             ->Attribute(AZ::Edit::Attributes::ChangeNotify, &EditorAnimGraphComponent::OnAnimGraphAssetSelected)
@@ -136,9 +134,17 @@ namespace EMotionFX
                 EMStudio::MainWindow* mainWindow = EMStudio::GetMainWindow();
                 if (mainWindow)
                 {
+                    mainWindow->LoadCharacter(actorAssetId, m_animGraphAsset.GetId(), m_motionSetAsset.GetId());
                     mainWindow->show();
                     mainWindow->LoadLayoutAfterShow();
-                    mainWindow->LoadCharacter(actorAssetId, m_animGraphAsset.GetId(), m_motionSetAsset.GetId());
+
+                    // Force the window to be fully loaded before loading
+                    // things. Remember that QMainWindow::show() doesn't
+                    // actually show anything syncronously. All it does is put
+                    // a QShowEvent onto the event queue. This call makes the
+                    // ShowEvent process, blocking until it is done.
+                    QApplication::instance()->processEvents(QEventLoop::ExcludeUserInputEvents);
+
 
                     // After loading we want to activate based on what we have in this component (anim grah and motion set)
                     // Only activate if we have a valid anim graph and a valid motion set. An empty m_motionSetName will use
@@ -147,21 +153,22 @@ namespace EMotionFX
                     {   
                         AnimGraphAsset* animGraphAsset = m_animGraphAsset.GetAs<AnimGraphAsset>();
                         AZ_Assert(animGraphAsset, "Expected anim graph asset");
-                        EMotionFX::AnimGraph* animGraph = animGraphAsset->GetAnimGraph().get();
+                        EMotionFX::AnimGraph* animGraph = animGraphAsset->GetAnimGraph();
 
                         MotionSetAsset*  motionSetAsset = m_motionSetAsset.GetAs<MotionSetAsset>();
                         AZ_Assert(motionSetAsset, "Expected motion set asset");
-                        EMotionFX::MotionSet* rootMotionSetAsset = motionSetAsset->m_emfxMotionSet.get();
-                        EMotionFX::MotionSet* motionSet = rootMotionSetAsset;
+                        EMotionFX::MotionSet* rootMotionSet = motionSetAsset->m_emfxMotionSet.get();
+                        EMotionFX::MotionSet* motionSet = rootMotionSet;
                         if (!m_activeMotionSetName.empty())
                         {
-                            motionSet = rootMotionSetAsset->RecursiveFindMotionSetByName(m_activeMotionSetName, true);
+                            motionSet = rootMotionSet->RecursiveFindMotionSetByName(m_activeMotionSetName, true);
                             if (!motionSet)
                             {
-                                AZ_Error("EMotionFX", false, "Failed to find motion set \"%s\" in motion set file %s.",
+                                AZ_Warning("EMotionFX", false, "Failed to find motion set \"%s\" in motion set file %s.",
                                     m_activeMotionSetName.c_str(),
-                                    rootMotionSetAsset->GetName());
-                                motionSet = rootMotionSetAsset;
+                                    rootMotionSet->GetName());
+
+                                motionSet = rootMotionSet;
                             }
                         }
                         
@@ -172,7 +179,7 @@ namespace EMotionFX
         }
 
         //////////////////////////////////////////////////////////////////////////       
-        void EditorAnimGraphComponent::OnAnimGraphAssetSelected()
+        AZ::u32 EditorAnimGraphComponent::OnAnimGraphAssetSelected()
         {
             AZ::Data::AssetBus::MultiHandler::BusDisconnect();
 
@@ -185,9 +192,11 @@ namespace EMotionFX
                 AZ::Data::AssetBus::MultiHandler::BusConnect(m_animGraphAsset.GetId());
                 m_animGraphAsset.QueueLoad();
             }
+
+            return AZ::Edit::PropertyRefreshLevels::EntireTree;
         }
 
-        void EditorAnimGraphComponent::OnMotionSetAssetSelected()
+        AZ::u32 EditorAnimGraphComponent::OnMotionSetAssetSelected()
         {
             AZ::Data::AssetBus::MultiHandler::BusDisconnect();
             
@@ -200,6 +209,8 @@ namespace EMotionFX
                 AZ::Data::AssetBus::MultiHandler::BusConnect(m_motionSetAsset.GetId());
                 m_motionSetAsset.QueueLoad();
             }
+
+            return AZ::Edit::PropertyRefreshLevels::EntireTree;
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -226,19 +237,20 @@ namespace EMotionFX
 
             if (asset == m_animGraphAsset)
             {
+                m_animGraphAsset = asset;
                 AnimGraphAsset* data = m_animGraphAsset.GetAs<AnimGraphAsset>();
                 if (!data)
                 {
                     return;
                 }
 
-                EMotionFX::AnimGraph* animGraph = data->GetAnimGraph().get();
+                EMotionFX::AnimGraph* animGraph = data->GetAnimGraph();
 
                 // Remove any parameters we have values for that are no longer in the anim graph.
                 for (auto iter = m_parameterDefaults.m_parameters.begin(); iter != m_parameterDefaults.m_parameters.end(); )
                 {
-                    const char* name = (*iter)->m_name.c_str();
-                    if (animGraph->FindParameterIndex(name) == MCORE_INVALIDINDEX32)
+                
+                    if (!animGraph->FindValueParameterByName((*iter)->m_name))
                     {
                         delete *iter;
                         iter = m_parameterDefaults.m_parameters.erase(iter);
@@ -250,17 +262,16 @@ namespace EMotionFX
                 }
 
                 // Populate property array based on parameters found in the anim graph.
-                for (AZ::u32 paramIndex = 0; paramIndex < animGraph->GetNumParameters(); ++paramIndex)
+                const EMotionFX::ValueParameterVector& valueParameters = animGraph->RecursivelyGetValueParameters();
+                for (const EMotionFX::ValueParameter* param : valueParameters)
                 {
-                    MCore::AttributeSettings* param = animGraph->GetParameter(paramIndex);
-
-                    const char* paramName = param->GetName();
+                    const AZStd::string& paramName = param->GetName();
 
                     // If we already have a value for this property, skip it.
                     bool found = false;
                     for (AZ::ScriptProperty* prop : m_parameterDefaults.m_parameters)
                     {
-                        if (0 == azstricmp(paramName, prop->m_name.c_str()))
+                        if (paramName == prop->m_name)
                         {
                             found = true;
                             break;
@@ -273,48 +284,41 @@ namespace EMotionFX
                     }
 
                     // Based on the anim graph param type, create an appropriate script property for serialization and editing.
-                    MCore::Attribute* paramValue = param->GetDefaultValue();
-                    switch (paramValue->GetType())
+                    if (azrtti_istypeof<EMotionFX::FloatParameter>(param))
                     {
-                    case MCore::AttributeFloat::TYPE_ID:
-                    {
-                        MCore::AttributeFloat* paramData = static_cast<MCore::AttributeFloat*>(paramValue);
-
-                        switch (param->GetInterfaceType())
-                        {
-                        case MCore::ATTRIBUTE_INTERFACETYPE_FLOATSPINNER:
-                        case MCore::ATTRIBUTE_INTERFACETYPE_FLOATSLIDER:
-                        case MCore::ATTRIBUTE_INTERFACETYPE_INTSLIDER:
-                        case MCore::ATTRIBUTE_INTERFACETYPE_INTSPINNER:
-                        {
-                            m_parameterDefaults.m_parameters.emplace_back(aznew AZ::ScriptPropertyNumber(paramName, paramData->GetValue()));
-                        }
-                        break;
-                        case MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX:
-                        {
-                            m_parameterDefaults.m_parameters.emplace_back(aznew AZ::ScriptPropertyBoolean(paramName, paramData->GetValue() > 0.f));
-                        }
-                        break;
-                        }
+                        const EMotionFX::FloatParameter* floatParam = static_cast<const EMotionFX::FloatParameter*>(param);
+                        m_parameterDefaults.m_parameters.emplace_back(aznew AZ::ScriptPropertyNumber(paramName.c_str(), floatParam->GetDefaultValue()));
                     }
-                    break;
+                    else if (azrtti_typeid(param) == azrtti_typeid<EMotionFX::BoolParameter>())
+                    {
+                        const EMotionFX::BoolParameter* boolParam = static_cast<const EMotionFX::BoolParameter*>(param);
+                        m_parameterDefaults.m_parameters.emplace_back(aznew AZ::ScriptPropertyBoolean(paramName.c_str(), boolParam->GetDefaultValue()));
                     }
                 }
-
             }
-            else if (asset == m_motionSetAsset) 
+            else if (asset == m_motionSetAsset)
             {
-                if (m_activeMotionSetName.empty())
+                m_motionSetAsset = asset;
+                const MotionSetAsset* data = m_motionSetAsset.GetAs<MotionSetAsset>();
+                if (data)
                 {
-                    // if motion set name is empty, grab the root
-                    MotionSetAsset* data = m_motionSetAsset.GetAs<MotionSetAsset>();
-                    if (!data)
+                    const EMotionFX::MotionSet* rootMotionSet = data->m_emfxMotionSet.get();
+                    if (rootMotionSet)
                     {
-                        return;
+                        if (m_activeMotionSetName.empty())
+                        {
+                            // if motion set name is empty, grab the root
+                            m_activeMotionSetName = rootMotionSet->GetName();
+                        }
+                        else
+                        {
+                            const EMotionFX::MotionSet* motionSet = rootMotionSet->RecursiveFindMotionSetByName(m_activeMotionSetName, /*isOwnedByRuntime = */true);
+                            if (!motionSet)
+                            {
+                                m_activeMotionSetName = rootMotionSet->GetName();
+                            }
+                        }
                     }
-
-                    EMotionFX::MotionSet* motionSet = data->m_emfxMotionSet.get();
-                    m_activeMotionSetName = motionSet->GetName();
                 }
             }
 
@@ -342,6 +346,7 @@ namespace EMotionFX
             cfg.m_motionSetAsset = m_motionSetAsset;
             cfg.m_activeMotionSetName = m_activeMotionSetName;
             cfg.m_parameterDefaults = m_parameterDefaults;
+            cfg.m_visualize = m_visualize;
 
             gameEntity->AddComponent(aznew AnimGraphComponent(&cfg));
         }

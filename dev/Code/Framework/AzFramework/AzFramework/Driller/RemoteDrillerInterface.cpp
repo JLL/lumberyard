@@ -166,7 +166,7 @@ namespace AzFramework
             AZ::IO::SystemFile::SizeType bytesRemaining = m_captureFile.Length();
             AZ::IO::SystemFile::SizeType maxReadChunkSize = 1024 * 1024;
             AZStd::vector<char> readBuffer;
-            readBuffer.resize(static_cast<size_t>(maxReadChunkSize));
+            readBuffer.resize_no_construct(static_cast<size_t>(maxReadChunkSize));
             while (bytesRemaining > 0)
             {
                 AZ::IO::SystemFile::SizeType bytesToRead = bytesRemaining < maxReadChunkSize ? bytesRemaining : maxReadChunkSize;
@@ -477,7 +477,7 @@ namespace AzFramework
         {
             serializeContext->Class<DrillerNetworkAgentComponent, AZ::Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass();
+                ;
 
             if (AZ::EditContext* editContext = serializeContext->GetEditContext())
             {
@@ -629,9 +629,9 @@ namespace AzFramework
         AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
         if (serialize)
         {
-            serialize->Class<DrillerNetworkConsoleComponent>()
+            serialize->Class<DrillerNetworkConsoleComponent, AZ::Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass();
+                ;
 
             if (AZ::EditContext* editContext = serialize->GetEditContext())
             {

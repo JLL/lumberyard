@@ -103,12 +103,16 @@ typedef union UnINT64
 
 // FIXME: probably better to sort by shaders (Currently sorted by resources)
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(RenderPipeline_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/RenderPipeline_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/RenderPipeline_h_provo.inl"
+    #endif
 #endif
 struct SRendItem
 {
     uint32 SortVal;
-    CRendElementBase* pElem;
+    IRenderElement* pElem;
     union
     {
         uint32 ObjSort;
@@ -277,7 +281,13 @@ struct SVertexDeclaration
     AZ::Vertex::Format VertexFormat;
     int InstAttrMask;
     AZStd::vector<D3D11_INPUT_ELEMENT_DESC> m_Declaration;
-    ID3D11InputLayout* m_pDeclaration;
+    ID3D11InputLayout* m_pDeclaration = nullptr;
+
+    // This caching structure is only used for auto-generated vertex formats for instanced renders.
+    // The caching format was previously invalid because it cached ID3D11InputLayout based only on the
+    // vertex format declaration, rather than based on the vertex format declaration with the vertex shader input
+    // table since a different IA layout will be generated whether a vertex shader uses different inputs or not
+    void* m_vertexShader = nullptr;
 
     ~SVertexDeclaration()
     {
@@ -516,6 +526,11 @@ enum EBatchFlags
 #define RBPF_ENCODE_HDR        (1 << 29)
 #define RBPF_OBLIQUE_FRUSTUM_CLIPPING  (1 << 30)
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+#define RBPF_RENDER_SCENE_TO_TEXTURE (1 << 31)
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
+
 // m_RP.m_PersFlags1
 #define RBPF1_USESTREAM       (1 << 0)
 #define RBPF1_USESTREAM_MASK  ((1 << VSF_NUM) - 1)
@@ -670,6 +685,8 @@ struct SThreadInfo
         false
     };
 
+    PerFrameParameters m_perFrameParameters;
+
     ~SThreadInfo() {}
     SThreadInfo& operator = (const SThreadInfo& ti)
     {
@@ -689,6 +706,7 @@ struct SThreadInfo
             m_arrZonesRoundId[z] = ti.m_arrZonesRoundId[z];
         }
         m_FS = ti.m_FS;
+        m_perFrameParameters = ti.m_perFrameParameters;
         m_pIgnoreObject = ti.m_pIgnoreObject;
         memcpy(&m_pObliqueClipPlane, &ti.m_pObliqueClipPlane, sizeof(m_pObliqueClipPlane));
         m_bObliqueClipPlane = ti.m_bObliqueClipPlane;
@@ -719,7 +737,7 @@ struct SRenderPipeline
     CShader* m_pReplacementShader;
     CRenderObject* m_pCurObject;
     CRenderObject* m_pIdendityRenderObject;
-    CRendElementBase* m_pRE;
+    IRenderElement* m_pRE;
     CRendElementBase* m_pEventRE;
     int m_RendNumVerts;
     uint32 m_nBatchFilter;           // Batch flags ( FB_ )
@@ -747,8 +765,9 @@ struct SRenderPipeline
     threadID m_nProcessThreadID;
     SThreadInfo m_TI[RT_COMMAND_BUF_COUNT];
     SThreadInfo m_OldTI[MAX_RECURSION_LEVELS];
-    CThreadSafeRendererContainer<ColorF> m_fogVolumeContibutions[RT_COMMAND_BUF_COUNT];
-
+    // SFogVolumeData container will be used to accumulate the fog volume influences.
+    CThreadSafeRendererContainer<SFogVolumeData> m_fogVolumeContibutionsData[RT_COMMAND_BUF_COUNT];
+   
     uint32 m_PersFlags1;        // Persistent flags - never reset
     uint32 m_PersFlags2;          // Persistent flags - never reset
     int m_FlagsPerFlush;          // Flags which resets for each shader flush
@@ -889,8 +908,9 @@ struct SRenderPipeline
 
 
     int m_nStreamOffset[3]; // deprecated!
-    AZStd::unordered_map<AZ::u32, AZ::Vertex::Format> m_crcVertexFormatLookupTable;
-    AZStd::unordered_map<AZ::u32, SOnDemandD3DVertexDeclaration> m_D3DVertexDeclarations;
+
+    AZ::Vertex::Format m_vertexFormats[eVF_Max];
+    SOnDemandD3DVertexDeclaration m_D3DVertexDeclarations[eVF_Max];
     AZStd::unordered_map<AZ::u32, SOnDemandD3DVertexDeclarationCache> m_D3DVertexDeclarationCache[1 << VSF_NUM][2]; // [StreamMask][Morph][VertexFormatCRC]
     SOnDemandD3DStreamProperties m_D3DStreamProperties[VSF_NUM];
 
@@ -952,11 +972,11 @@ struct SRenderPipeline
 #if !defined(_RELEASE)
     //===================================================================
     // Drawcall count debug view - per Node - r_stats 6
-    std::map< struct IRenderNode*, IRenderer::SDrawCallCountInfo > m_pRNDrawCallsInfoPerNode[RT_COMMAND_BUF_COUNT];
+    IRenderer::RNDrawcallsMapNode m_pRNDrawCallsInfoPerNode[RT_COMMAND_BUF_COUNT];
 
     //===================================================================
     // Drawcall count debug view - per mesh - perf hud renderBatchStats
-    std::map< struct IRenderMesh*, IRenderer::SDrawCallCountInfo > m_pRNDrawCallsInfoPerMesh[RT_COMMAND_BUF_COUNT];
+    IRenderer::RNDrawcallsMapMesh m_pRNDrawCallsInfoPerMesh[RT_COMMAND_BUF_COUNT];
 #endif
 
     //================================================================
@@ -1028,10 +1048,15 @@ public:
             }
             pSizer->AddObject(m_SysVertexPool[i]);
             pSizer->AddObject(m_SysIndexPool[i]);
-            pSizer->AddObject(m_fogVolumeContibutions[i]);
+            pSizer->AddObject(m_fogVolumeContibutionsData[i]);
         }
         pSizer->AddObject(m_RIs);
         pSizer->AddObject(m_RTStats);
+    }
+
+    void SetRenderElement(IRenderElement* renderElement)
+    {
+        m_pRE = renderElement;
     }
 };
 
@@ -1157,12 +1182,12 @@ struct SCompareItem_Terrain
 {
     bool operator()(const SRendItem& a, const SRendItem& b) const
     {
-        CRendElementBase* pREa = a.pElem;
-        CRendElementBase* pREb = b.pElem;
+        IRenderElement* pREa = a.pElem;
+        IRenderElement* pREb = b.pElem;
 
-        if (pREa->m_CustomTexBind[0] != pREb->m_CustomTexBind[0])
+        if (pREa->GetCustomTexBind(0) != pREb->GetCustomTexBind(0))
         {
-            return pREa->m_CustomTexBind[0] < pREb->m_CustomTexBind[0];
+            return pREa->GetCustomTexBind(0) < pREb->GetCustomTexBind(0);
         }
 
         return a.ObjSort < b.ObjSort;
@@ -1177,22 +1202,22 @@ struct SCompareItem_TerrainLayers
         //if (a.ObjSort != b.ObjSort)
         //  return a.ObjSort < b.ObjSort;
 
-        float pSurfTypeA = ((float*)a.pElem->m_CustomData)[8];
-        float pSurfTypeB = ((float*)b.pElem->m_CustomData)[8];
+        float pSurfTypeA = ((float*)a.pElem->GetCustomData())[8];
+        float pSurfTypeB = ((float*)b.pElem->GetCustomData())[8];
         if (pSurfTypeA != pSurfTypeB)
         {
             return (pSurfTypeA < pSurfTypeB);
         }
 
-        pSurfTypeA = ((float*)a.pElem->m_CustomData)[9];
-        pSurfTypeB = ((float*)b.pElem->m_CustomData)[9];
+        pSurfTypeA = ((float*)a.pElem->GetCustomData())[9];
+        pSurfTypeB = ((float*)b.pElem->GetCustomData())[9];
         if (pSurfTypeA != pSurfTypeB)
         {
             return (pSurfTypeA < pSurfTypeB);
         }
 
-        pSurfTypeA = ((float*)a.pElem->m_CustomData)[11];
-        pSurfTypeB = ((float*)b.pElem->m_CustomData)[11];
+        pSurfTypeA = ((float*)a.pElem->GetCustomData())[11];
+        pSurfTypeB = ((float*)b.pElem->GetCustomData())[11];
         return (pSurfTypeA < pSurfTypeB);
     }
 };

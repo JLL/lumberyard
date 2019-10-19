@@ -244,7 +244,7 @@ namespace Audio
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     EAudioRequestStatus CAudioSystemImpl_NoSound::UpdateAudioObject(IATLAudioObjectData* const pObject)
     {
-        // wenjia-> the expected procedure here is that the audio object will only update when it really needs to update environment, 
+        // wenjia-> the expected procedure here is that the audio object will only update when it really needs to update environment,
         // currently can't find a way to simulate this. This function will fail to unit test 7_2_1
         if (!pObject)
         {
@@ -285,7 +285,7 @@ namespace Audio
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
-    EAudioRequestStatus CAudioSystemImpl_NoSound::ActivateTrigger(IATLAudioObjectData* const pAudioObject, const IATLTriggerImplData* const pTrigger, IATLEventData* const pEvent, TAudioSourceId sourceId)
+    EAudioRequestStatus CAudioSystemImpl_NoSound::ActivateTrigger(IATLAudioObjectData* const pAudioObject, const IATLTriggerImplData* const pTrigger, IATLEventData* const pEvent, const SATLSourceData* const pSourceData)
     {
         if (!pAudioObject)
         {
@@ -310,8 +310,8 @@ namespace Audio
             return eARS_FAILURE;
         }
 
-        // NOTE: by referring to wwise implementation, the pEvent is passed with a callback function 
-        // to a PostEvent function so that upon completion, the callback function will be triggered 
+        // NOTE: by referring to wwise implementation, the pEvent is passed with a callback function
+        // to a PostEvent function so that upon completion, the callback function will be triggered
         // with pEvent as an input. Not sure whether/how we should simulate this process.
 
         return eARS_SUCCESS;
@@ -337,8 +337,8 @@ namespace Audio
             return eARS_FAILURE;
         }
 
-        // NOTE: by referring to wwise implementation, the pEvent will be casted to a specific wwise event, 
-        // and based on its type variable, it will decide whether to stop the event or not.  
+        // NOTE: by referring to wwise implementation, the pEvent will be casted to a specific wwise event,
+        // and based on its type variable, it will decide whether to stop the event or not.
 
         return eARS_SUCCESS;
     }
@@ -370,6 +370,23 @@ namespace Audio
         }
 
         if (m_registeredAudioObjects.find(pAudioObject) == m_registeredAudioObjects.end())
+        {
+            g_audioImplLogger_nosound.Log(eALT_WARNING, "Called SetPosition on an audio data that has not been registered!");
+        }
+
+        return eARS_SUCCESS;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    EAudioRequestStatus CAudioSystemImpl_NoSound::SetMultiplePositions(IATLAudioObjectData* const pAudioObjectData, const MultiPositionParams& multiPositions)
+    {
+        if (!pAudioObjectData)
+        {
+            g_audioImplLogger_nosound.Log(eALT_WARNING, "Called SetPosition with nullptr audio data!");
+            return eARS_FAILURE;
+        }
+
+        if (m_registeredAudioObjects.find(pAudioObjectData) == m_registeredAudioObjects.end())
         {
             g_audioImplLogger_nosound.Log(eALT_WARNING, "Called SetPosition on an audio data that has not been registered!");
         }
@@ -587,7 +604,7 @@ namespace Audio
         // ly-todo: localized and regular sound bank folders
         //if (pFileEntryInfo)
         //{
-        //	sResult = pFileEntryInfo->bLocalized ? m_sLocalizedSoundBankFolder.c_str() : m_sRegularSoundBankFolder.c_str();
+        //  sResult = pFileEntryInfo->bLocalized ? m_sLocalizedSoundBankFolder.c_str() : m_sRegularSoundBankFolder.c_str();
         //}
 
         return sResult;
@@ -728,14 +745,14 @@ namespace Audio
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
-    IATLListenerData* CAudioSystemImpl_NoSound::NewDefaultAudioListenerObjectData()
+    IATLListenerData* CAudioSystemImpl_NoSound::NewDefaultAudioListenerObjectData(const TATLIDType nListenerID)
     {
         auto pNewObject = azcreate(IATLListenerData, (), Audio::AudioImplAllocator, "ATLListenerData-Default");
         return pNewObject;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
-    IATLListenerData* CAudioSystemImpl_NoSound::NewAudioListenerObjectData(const uint nIndex)
+    IATLListenerData* CAudioSystemImpl_NoSound::NewAudioListenerObjectData(const TATLIDType nListenerID)
     {
         auto pNewObject = azcreate(IATLListenerData, (), Audio::AudioImplAllocator, "ATLListenerData");
         return pNewObject;

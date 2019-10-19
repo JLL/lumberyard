@@ -236,7 +236,7 @@ float UiLayoutColumnComponent::GetMinHeight()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float UiLayoutColumnComponent::GetTargetWidth()
+float UiLayoutColumnComponent::GetTargetWidth(float /*maxWidth*/)
 {
     float width = 0.0f;
 
@@ -261,7 +261,7 @@ float UiLayoutColumnComponent::GetTargetWidth()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float UiLayoutColumnComponent::GetTargetHeight()
+float UiLayoutColumnComponent::GetTargetHeight(float /*maxHeight*/)
 {
     float height = 0.0f;
 
@@ -329,6 +329,7 @@ void UiLayoutColumnComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiLayoutColumnComponent>("LayoutColumn", "A layout component that arranges its children in a column");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiLayoutColumn.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiLayoutColumn.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -384,7 +385,6 @@ void UiLayoutColumnComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiLayoutColumnBus>("UiLayoutColumnBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetPadding", &UiLayoutColumnBus::Events::GetPadding)
             ->Event("SetPadding", &UiLayoutColumnBus::Events::SetPadding)
             ->Event("GetSpacing", &UiLayoutColumnBus::Events::GetSpacing)
@@ -411,7 +411,11 @@ void UiLayoutColumnComponent::Activate()
     UiLayoutCellDefaultBus::Handler::BusConnect(m_entity->GetId());
     UiTransformChangeNotificationBus::Handler::BusConnect(m_entity->GetId());
 
+    // If this is the first time the entity has been activated this has no effect since the canvas
+    // is not known. But if a LayoutColumn component has just been pasted onto an existing entity
+    // we need to invalidate the layout in case that affects things.
     InvalidateLayout();
+    InvalidateParentLayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -422,6 +426,11 @@ void UiLayoutColumnComponent::Deactivate()
     UiLayoutColumnBus::Handler::BusDisconnect();
     UiLayoutCellDefaultBus::Handler::BusDisconnect();
     UiTransformChangeNotificationBus::Handler::BusDisconnect();
+
+    // We could be about to remove this component and then reactivate the entity
+    // which could affect the layout if there is a parent layout component
+    InvalidateLayout();
+    InvalidateParentLayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

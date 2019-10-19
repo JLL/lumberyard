@@ -46,12 +46,17 @@ namespace ScriptCanvasEditor
 
     void VariableNodeDescriptorComponent::Activate()
     {
-        GraphCanvas::NodeNotificationBus::Handler::BusConnect(GetEntityId());
+        NodeDescriptorComponent::Activate();
+
+        GraphCanvas::SceneMemberNotificationBus::Handler::BusConnect(GetEntityId());
     }
 
     void VariableNodeDescriptorComponent::Deactivate()
     {
         ScriptCanvas::VariableNodeNotificationBus::Handler::BusDisconnect();
+        GraphCanvas::SceneMemberNotificationBus::Handler::BusDisconnect();
+
+        NodeDescriptorComponent::Deactivate();
     }
 
     void VariableNodeDescriptorComponent::OnVariableRenamed(AZStd::string_view variableName)
@@ -82,7 +87,7 @@ namespace ScriptCanvasEditor
         ScriptCanvas::Data::Type scriptCanvasType;
         ScriptCanvas::VariableRequestBus::EventResult(scriptCanvasType, newVariableId, &ScriptCanvas::VariableRequests::GetType);
 
-        AZStd::string_view typeName = TranslationHelper::GetSafeTypeName(scriptCanvasType);
+        const AZStd::string typeName = TranslationHelper::GetSafeTypeName(scriptCanvasType);
         GraphCanvas::NodeTitleRequestBus::Event(GetEntityId(), &GraphCanvas::NodeTitleRequests::SetSubTitle, typeName);
 
         AZ::Uuid dataType = ScriptCanvas::Data::ToAZType(scriptCanvasType);
@@ -95,21 +100,14 @@ namespace ScriptCanvasEditor
         PropertyGridRequestBus::Broadcast(&PropertyGridRequests::RebuildPropertyGrid);
     }
 
-    void VariableNodeDescriptorComponent::OnAddedToScene(const AZ::EntityId& sceneId)
+    void VariableNodeDescriptorComponent::OnAddedToGraphCanvasGraph(const AZ::EntityId& sceneId, const AZ::EntityId& scriptCanvasNodeId)
     {
         OnVariableIdChanged({}, GetVariableId());
 
-        AZStd::any* userData = nullptr;
-        GraphCanvas::NodeRequestBus::EventResult(userData, GetEntityId(), &GraphCanvas::NodeRequests::GetUserData);
-
-        AZ::EntityId* scNodeId = AZStd::any_cast<AZ::EntityId>(userData);
-        if (scNodeId)
-        {
-            ScriptCanvas::VariableNodeNotificationBus::Handler::BusConnect(*scNodeId);
-        }
+        ScriptCanvas::VariableNodeNotificationBus::Handler::BusConnect(scriptCanvasNodeId);
     }
 
-    void VariableNodeDescriptorComponent::OnNodeAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization)
+    void VariableNodeDescriptorComponent::OnSceneMemberAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization)
     {
         auto& userDataMapRef = graphSerialization.GetUserDataMapRef();
         
@@ -148,7 +146,7 @@ namespace ScriptCanvasEditor
         }
     }
 
-    void VariableNodeDescriptorComponent::OnNodeDeserialized(const AZ::EntityId& graphCanvasGraphId, const GraphCanvas::GraphSerialization& graphSerialization)
+    void VariableNodeDescriptorComponent::OnSceneMemberDeserialized(const AZ::EntityId& graphCanvasGraphId, const GraphCanvas::GraphSerialization& graphSerialization)
     {
         ScriptCanvas::VariableNameValuePair* variableData = nullptr;
         ScriptCanvas::GraphVariableManagerRequestBus::EventResult(variableData, graphCanvasGraphId, &ScriptCanvas::GraphVariableManagerRequests::FindVariableById, GetVariableId());

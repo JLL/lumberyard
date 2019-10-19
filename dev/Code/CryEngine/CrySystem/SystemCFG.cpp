@@ -19,7 +19,6 @@
 #include <time.h>
 #include "XConsole.h"
 #include "CryFile.h"
-#include <AzCore/std/any.h>
 
 #include <IScriptSystem.h>
 #include "SystemCFG.h"
@@ -55,7 +54,11 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMCFG_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(SystemCFG_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemCFG_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemCFG_cpp_provo.inl"
+    #endif
 #endif
 
 //////////////////////////////////////////////////////////////////////////
@@ -120,7 +123,7 @@ void CSystem::QueryVersionInfo()
 #ifdef AZ_MONOLITHIC_BUILD
     GetModuleFileName(NULL, moduleName, _MAX_PATH);  //retrieves the PATH for the current module
 #else // AZ_MONOLITHIC_BUILD
-    strcpy(moduleName, "CrySystem.dll"); // we want to version from the system dll
+    azstrcpy(moduleName, AZ_ARRAY_SIZE(moduleName), "CrySystem.dll"); // we want to version from the system dll
 #endif // AZ_MONOLITHIC_BUILD
 
     int verSize = GetFileVersionInfoSize(moduleName, &dwHandle);
@@ -150,7 +153,7 @@ void CSystem::QueryVersionInfo()
         VerQueryValue(ver, "\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &count);
         if (lpTranslate != NULL)
         {
-            _snprintf(path, sizeof(path), "\\StringFileInfo\\%04x%04x\\InternalName", lpTranslate[0].wLanguage, lpTranslate[0].wCodePage);
+            azsnprintf(path, sizeof(path), "\\StringFileInfo\\%04x%04x\\InternalName", lpTranslate[0].wLanguage, lpTranslate[0].wCodePage);
             VerQueryValue(ver, path, (LPVOID*)&version, &count);
             if (version)
             {
@@ -167,26 +170,39 @@ void CSystem::LogVersion()
     // Get time.
     time_t ltime;
     time(&ltime);
-    tm* today = localtime(&ltime);
 
+#ifdef AZ_COMPILER_MSVC
+    tm today;
+    localtime_s(&today, &ltime);
     char s[1024];
-
-
+    strftime(s, 128, "%d %b %y (%H %M %S)", &today);
+#else
+    char s[1024];
+    auto today = localtime(&ltime);
     strftime(s, 128, "%d %b %y (%H %M %S)", today);
+#endif
 
     const SFileVersion& ver = GetFileVersion();
 
     CryLogAlways("BackupNameAttachment=\" Build(%d) %s\"  -- used by backup system\n", ver.v[0], s);          // read by CreateBackupFile()
 
     // Use strftime to build a customized time string.
+#ifdef AZ_COMPILER_MSVC
+    strftime(s, 128, "Log Started at %c", &today);
+#else
     strftime(s, 128, "Log Started at %c", today);
+#endif
     CryLogAlways(s);
 
     CryLogAlways("Built on " __DATE__ " " __TIME__);
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMCFG_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(SystemCFG_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemCFG_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemCFG_cpp_provo.inl"
+    #endif
 #elif defined(ANDROID)
     CryLogAlways("Running 32 bit Android version API VER:%d", __ANDROID_API__);
 #elif defined(IOS)
@@ -220,7 +236,11 @@ void CSystem::LogVersion()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMCFG_CPP_SECTION_3
-#include AZ_RESTRICTED_FILE(SystemCFG_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemCFG_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemCFG_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -340,11 +360,10 @@ void CSystem::SaveConfiguration()
 //////////////////////////////////////////////////////////////////////////
 // system cfg
 //////////////////////////////////////////////////////////////////////////
-CSystemConfiguration::CSystemConfiguration(const string& strSysConfigFilePath, CSystem* pSystem, ILoadConfigurationEntrySink* pSink, AZStd::unordered_map<AZStd::string, CVarInfo>* editorMap, bool warnIfMissing)
+CSystemConfiguration::CSystemConfiguration(const string& strSysConfigFilePath, CSystem* pSystem, ILoadConfigurationEntrySink* pSink, bool warnIfMissing)
     : m_strSysConfigFilePath(strSysConfigFilePath)
     , m_bError(false)
     , m_pSink(pSink)
-    , m_editorMap(editorMap)
     , m_warnIfMissing(warnIfMissing)
 {
     assert(pSink);
@@ -356,122 +375,6 @@ CSystemConfiguration::CSystemConfiguration(const string& strSysConfigFilePath, C
 //////////////////////////////////////////////////////////////////////////
 CSystemConfiguration::~CSystemConfiguration()
 {
-}
-
-//////////////////////////////////////////////////////////////////////////
-void CSystemConfiguration::AddCVarToMap(const string& filename, const string& strKey, const string& strValue, const string& strGroup)
-{
-    AZStd::string key = strKey.c_str();
-    ICVar* cvar = gEnv->pConsole->GetCVar(strKey);
-
-    if (cvar)
-    {
-        AZStd::transform(key.begin(), key.end(), key.begin(), tolower);
-        if (azstricmp(strKey, "sys_spec_full") == 0 || strKey.find("sys_spec_") == strKey.npos)
-        {
-            int type = cvar->GetType();
-            AZStd::any val;
-            if (type == CVAR_INT)
-            {
-                val = atoi(strValue);
-            }
-            else if (type == CVAR_FLOAT)
-            {
-                val = static_cast<float>(atof(strValue));
-            }
-            else
-            {
-                val = AZStd::string(strValue.c_str());
-            }
-
-            // Platform cfg file (ex. pc_veryhigh.cfg)
-            if (strGroup.empty())
-            {
-                // New cvar loaded into map
-                if (m_editorMap->find(key) == m_editorMap->end())
-                {
-                    (*m_editorMap)[key].type = type;
-                    (*m_editorMap)[key].cvarGroup = "miscellaneous";
-                    AZStd::any empty;
-                    if (type == CVAR_INT)
-                    {
-                        empty = 0;
-                    }
-                    else if (type == CVAR_FLOAT)
-                    {
-                        empty = 0.0f;
-                    }
-                    else
-                    {
-                        empty = AZStd::string("");
-                    }
-                    (*m_editorMap)[key].fileVals.resize(NUM_SPEC_LEVELS, CVarFileStatus(empty, empty, empty));
-                }
-
-                int specIndex = 0;
-
-                // Subtracting one since index is one less than enum value
-                if (filename.find("veryhigh.cfg") != filename.npos)
-                {
-                    specIndex = CONFIG_VERYHIGH_SPEC - 1;
-                }
-                else if (filename.find("high.cfg") != filename.npos)
-                {
-                    specIndex = CONFIG_HIGH_SPEC - 1;
-                }
-                else if (filename.find("medium.cfg") != filename.npos)
-                {
-                    specIndex = CONFIG_MEDIUM_SPEC - 1;
-                }
-                else // Low spec / no spec level
-                {
-                    specIndex = CONFIG_LOW_SPEC - 1;
-                }
-
-                (*m_editorMap)[key].fileVals[specIndex].editedValue = val;
-                (*m_editorMap)[key].fileVals[specIndex].overwrittenValue = val;
-            }
-            // default group in sys_spec cfg file
-            else if (azstricmp(strGroup, "default") == 0)
-            {
-                // New cvar loaded into map
-                if (m_editorMap->find(key) == m_editorMap->end())
-                {
-                    CVarInfo* currentCVar = &(*m_editorMap)[key];
-                    currentCVar->type = cvar->GetType();
-                    CVarFileStatus defaultVal(val, val, val);
-                    currentCVar->fileVals.resize(NUM_SPEC_LEVELS, defaultVal);
-                }
-                // Overwrite miscellaneous if mentioned in platform config file
-                (*m_editorMap)[key].cvarGroup = filename;
-            }
-            // specific index in sys_spec cfg file
-            else
-            {
-                int group = 0;
-
-                if (sscanf(strGroup, "%d", &group) == 1)
-                {
-                    auto sysSpecFull = (*m_editorMap).find("sys_spec_full");
-                    if (sysSpecFull == (*m_editorMap).end())
-                    {
-                        return;
-                    }
-
-                    CVarFileStatus indexAssignment(val, val, val);
-                    for (int specLevel = 0; specLevel < NUM_SPEC_LEVELS; ++specLevel)
-                    {
-                        // Only apply cvar change to configurations with sys_spec_Full matching the index
-                        int overwrittenValue;
-                        if (AZStd::any_numeric_cast<int>(&sysSpecFull->second.fileVals[specLevel].overwrittenValue, overwrittenValue) && group == overwrittenValue)
-                        {
-                            (*m_editorMap)[key].fileVals[specLevel] = indexAssignment;
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -604,11 +507,9 @@ bool CSystemConfiguration::ParseSystemConfig()
             string stemp(strLine, 0, posEq);
             string strKey(RemoveWhiteSpaces(stemp));
 
-            //                if (!strKey.empty())
             {
                 // extract value
                 string::size_type posValueStart(strLine.find("\"", posEq + 1) + 1);
-                // string::size_type posValueEnd( strLine.find( "\"", posValueStart ) );
                 string::size_type posValueEnd(strLine.rfind('\"'));
 
                 string strValue;
@@ -627,18 +528,8 @@ bool CSystemConfiguration::ParseSystemConfig()
                     // replace '\\\\' with '\\' and '\\\"' with '\"'
                     strValue.replace("\\\\", "\\");
                     strValue.replace("\\\"", "\"");
-
-                    //                      m_pSystem->GetILog()->Log("Setting %s to %s",strKey.c_str(),strValue.c_str());
                     
-                    // Check if running Graphics Settings Dialog
-                    if (m_editorMap != nullptr)
-                    {
-                        AddCVarToMap(filename, strKey, strValue, strGroup);
-                    }
-                    else // Loading / registering cvar
-                    {
-                        m_pSink->OnLoadConfigurationEntry(strKey, strValue, strGroup);
-                    }
+                    m_pSink->OnLoadConfigurationEntry(strKey, strValue, strGroup);
                 }
             }
         }
@@ -682,7 +573,7 @@ void CSystem::LoadConfiguration(const char* sFilename, ILoadConfigurationEntrySi
             pSink = this;
         }
 
-        CSystemConfiguration tempConfig(sFilename, this, pSink, gEnv->pSystem->GetGraphicsSettingsMap(), warnIfMissing);
+        CSystemConfiguration tempConfig(sFilename, this, pSink, warnIfMissing);
     }
 }
 

@@ -15,14 +15,13 @@
 #include <zlib.h>
 #include "smartptr.h"
 #include "ZipFileFormat.h"
-#include "ZipDirStructures.h"
+#include "zipdirstructures.h"
 #include "ZipDirTree.h"
 #include "ZipDirCache.h"
 #include "ZipDirCacheRW.h"
 #include "ZipDirCacheFactory.h"
 #include "ZipDirList.h"
 
-using namespace ZipFile;
 
 static uint32 g_defaultEncryptionKey[4] = { 0xc968fb67, 0x8f9b4267, 0x85399e84, 0xf9b99dc4 };
 
@@ -52,7 +51,8 @@ ZipDir::CachePtr ZipDir::CacheFactory::New (const char* szFile, const uint32 key
     }
 
     Clear();
-    m_f = fopen (szFile, "rb");
+    m_f = nullptr;
+    azfopen(&m_f, szFile, "rb");
     if (m_f)
     {
         return MakeCache (szFile);
@@ -101,7 +101,8 @@ ZipDir::CacheRWPtr ZipDir::CacheFactory::NewRW(const char* szFileName, size_t fi
     // first, try to open the file for reading or reading/writing
     if (m_nFlags & FLAGS_READ_ONLY)
     {
-        m_f = fopen (szFileName, "rb");
+        m_f = nullptr;
+        azfopen(&m_f, szFileName, "rb");
         pCache->m_nFlags |= CacheRW::FLAGS_CDR_DIRTY | CacheRW::FLAGS_READ_ONLY;
 
         if (!m_f)
@@ -115,7 +116,8 @@ ZipDir::CacheRWPtr ZipDir::CacheFactory::NewRW(const char* szFileName, size_t fi
         m_f = NULL;
         if (!(m_nFlags & FLAGS_CREATE_NEW))
         {
-            m_f = fopen (szFileName, "r+b");
+            m_f = nullptr; 
+            azfopen(&m_f, szFileName, "r+b");
         }
 
         bool bOpenForWriting = true;
@@ -152,7 +154,9 @@ ZipDir::CacheRWPtr ZipDir::CacheFactory::NewRW(const char* szFileName, size_t fi
 
         if (bOpenForWriting)
         {
-            if ((m_f = fopen (szFileName, "w+b")) != NULL)
+            m_f = nullptr;
+            azfopen(&m_f, szFileName, "w+b");
+            if (m_f)
             {
                 // there's no such file, but we'll create one. We'll need to write out the CDR here
                 pCache->m_lCDROffset = 0;
@@ -330,7 +334,7 @@ bool ZipDir::CacheFactory::FindCDREnd()
     // this buffer will be used to find the CDR End record
     // the additional bytes are required to store the potential tail of the CDREnd structure
     // when moving the window to the next position in the file
-    char pReservedBuffer[g_nCDRSearchWindowSize + sizeof(CDREnd) - 1];
+    char pReservedBuffer[g_nCDRSearchWindowSize + sizeof(ZipFile::CDREnd) - 1];
 
     Seek (0, SEEK_END);
     unsigned long nFileSize = Tell();
@@ -345,7 +349,7 @@ bool ZipDir::CacheFactory::FindCDREnd()
     unsigned int nOldBufPos = nFileSize;
     // start scanning well before the end of the file to avoid reading beyond the end
 
-    unsigned int nScanPos = nFileSize - sizeof(CDREnd);
+    unsigned int nScanPos = nFileSize - sizeof(ZipFile::CDREnd);
 
     m_CDREnd.lSignature = 0; // invalid signature as the flag of not-found CDR End structure
     while (true)
@@ -369,12 +373,12 @@ bool ZipDir::CacheFactory::FindCDREnd()
 
         // since dealing with 32bit unsigned, check that filesize is bigger than
         // CDREnd plus comment before the following check occurs.
-        if (nFileSize > (sizeof(CDREnd) + 0xFFFF))
+        if (nFileSize > (sizeof(ZipFile::CDREnd) + 0xFFFF))
         {
             // if the new buffer pos is beyond 64k limit for the comment size
-            if (nNewBufPos < (unsigned int)(nFileSize - sizeof(CDREnd) - 0xFFFF))
+            if (nNewBufPos < (unsigned int)(nFileSize - sizeof(ZipFile::CDREnd) - 0xFFFF))
             {
-                nNewBufPos = nFileSize - sizeof(CDREnd) - 0xFFFF;
+                nNewBufPos = nFileSize - sizeof(ZipFile::CDREnd) - 0xFFFF;
             }
         }
 
@@ -391,10 +395,10 @@ bool ZipDir::CacheFactory::FindCDREnd()
 
         while (nScanPos >= nNewBufPos)
         {
-            CDREnd* pEnd = (CDREnd*)(pWindow + nScanPos - nNewBufPos);
+            ZipFile::CDREnd* pEnd = (ZipFile::CDREnd*)(pWindow + nScanPos - nNewBufPos);
             if (pEnd->lSignature == pEnd->SIGNATURE)
             {
-                if (pEnd->nCommentLength == nFileSize - nScanPos - sizeof(CDREnd))
+                if (pEnd->nCommentLength == nFileSize - nScanPos - sizeof(ZipFile::CDREnd))
                 {
                     // the comment length is exactly what we expected
                     m_CDREnd = *pEnd;
@@ -420,7 +424,7 @@ bool ZipDir::CacheFactory::FindCDREnd()
         }
 
         nOldBufPos = nNewBufPos;
-        memmove (pReservedBuffer + g_nCDRSearchWindowSize, pWindow, sizeof(CDREnd) - 1);
+        memmove (pReservedBuffer + g_nCDRSearchWindowSize, pWindow, sizeof(ZipFile::CDREnd) - 1);
     }
     THROW_ZIPDIR_ERROR (ZD_ERROR_UNEXPECTED, "The program flow may not have possibly lead here. This error is unexplainable"); // we shouldn't be here
     return false;
@@ -450,7 +454,7 @@ bool ZipDir::CacheFactory::BuildFileEntryMap()
     }
 
     // Calculate buffer size for unified filenames
-    const size_t headersSize = sizeof(CDRFileHeader) * m_CDREnd.numEntriesTotal;
+    const size_t headersSize = sizeof(ZipFile::CDRFileHeader) * m_CDREnd.numEntriesTotal;
     const size_t terminatingZeros = m_CDREnd.numEntriesTotal;
     if (headersSize > m_CDREnd.lCDRSize + terminatingZeros)
     {
@@ -472,7 +476,7 @@ bool ZipDir::CacheFactory::BuildFileEntryMap()
     ReadHeaderData(&pBuffer[0], m_CDREnd.lCDRSize);
 
     // now we've read the complete CDR - parse it.
-    CDRFileHeader* pFile = (CDRFileHeader*)(&pBuffer[0]);
+    ZipFile::CDRFileHeader* pFile = (ZipFile::CDRFileHeader*)(&pBuffer[0]);
     const char* const pEndOfData = &pBuffer[0] + m_CDREnd.lCDRSize;
     const char* const pEndOfBuffer = &pBuffer[0] + pBuffer.size();
     char* pFileName;
@@ -518,20 +522,20 @@ bool ZipDir::CacheFactory::BuildFileEntryMap()
         const char* pExtraEnd = pExtraField + pFile->nExtraFieldLength;
         while (pExtraField < pExtraEnd)
         {
-            const char* pAttrData = pExtraField + sizeof(ExtraFieldHeader);
-            ExtraFieldHeader& hdr = *(ExtraFieldHeader*)pExtraField;
+            const char* pAttrData = pExtraField + sizeof(ZipFile::ExtraFieldHeader);
+            ZipFile::ExtraFieldHeader& hdr = *(ZipFile::ExtraFieldHeader*)pExtraField;
             switch (hdr.headerID)
             {
-            case EXTRA_NTFS:
+            case ZipFile::EXTRA_NTFS:
             {
-                ExtraNTFSHeader& ntfsHdr = *(ExtraNTFSHeader*)pAttrData;
-                extra.nLastModifyTime = *(uint64*)(pAttrData + sizeof(ExtraNTFSHeader));
-                uint64 accTime = *(uint64*)(pAttrData + sizeof(ExtraNTFSHeader) + 8);
-                uint64 crtTime = *(uint64*)(pAttrData + sizeof(ExtraNTFSHeader) + 16);
+                ZipFile::ExtraNTFSHeader& ntfsHdr = *(ZipFile::ExtraNTFSHeader*)pAttrData;
+                extra.nLastModifyTime = *(uint64*)(pAttrData + sizeof(ZipFile::ExtraNTFSHeader));
+                uint64 accTime = *(uint64*)(pAttrData + sizeof(ZipFile::ExtraNTFSHeader) + 8);
+                uint64 crtTime = *(uint64*)(pAttrData + sizeof(ZipFile::ExtraNTFSHeader) + 16);
             }
             break;
             }
-            pExtraField += sizeof(ExtraFieldHeader) + hdr.dataSize;
+            pExtraField += sizeof(ZipFile::ExtraFieldHeader) + hdr.dataSize;
         }
 
         bool bDirectory = false;
@@ -565,7 +569,7 @@ bool ZipDir::CacheFactory::BuildFileEntryMap()
         }
 
         // move to the next file
-        pFile = (CDRFileHeader*)pEndOfRecord;
+        pFile = (ZipFile::CDRFileHeader*)pEndOfRecord;
     }
 
     // finished reading CDR
@@ -584,7 +588,7 @@ void ZipDir::CacheFactory::AddFileEntry (char* strFilePath, char* strUnifiedPath
         return;
     }
 
-    if (pFileHeader->nMethod == METHOD_STORE && pFileHeader->desc.lSizeUncompressed != pFileHeader->desc.lSizeCompressed)
+    if (pFileHeader->nMethod == ZipFile::METHOD_STORE && pFileHeader->desc.lSizeUncompressed != pFileHeader->desc.lSizeCompressed)
     {
         THROW_ZIPDIR_ERROR (ZD_ERROR_VALIDATION_FAILED, "File with STORE compression method declares its compressed size not matching its uncompressed size. File descriptor is inconsistent, archive content may be damaged, please try to repair the archive");
         return;
@@ -628,19 +632,19 @@ void ZipDir::CacheFactory::InitDataOffset (FileEntry& fileEntry, const ZipFile::
     if (m_bEncryptedHeaders)
     {
         // ignore local header
-        fileEntry.nFileDataOffset = pFileHeader->lLocalHeaderOffset + sizeof(LocalFileHeader) + pFileHeader->nFileNameLength + pFileHeader->nExtraFieldLength;
+        fileEntry.nFileDataOffset = pFileHeader->lLocalHeaderOffset + sizeof(ZipFile::LocalFileHeader) + pFileHeader->nFileNameLength + pFileHeader->nExtraFieldLength;
     }
     else
     {
         Seek(pFileHeader->lLocalHeaderOffset);
         // read the local file header and the name (for validation) into the buffer
         DynArray<char>pBuffer;
-        unsigned nBufferLength = sizeof(LocalFileHeader) + pFileHeader->nFileNameLength;
+        unsigned nBufferLength = sizeof(ZipFile::LocalFileHeader) + pFileHeader->nFileNameLength;
         pBuffer.resize(nBufferLength);
         Read (&pBuffer[0], nBufferLength);
 
         // validate the local file header (compare with the CDR file header - they should contain basically the same information)
-        const LocalFileHeader* pLocalFileHeader = (const LocalFileHeader*)&pBuffer[0];
+        const ZipFile::LocalFileHeader* pLocalFileHeader = (const ZipFile::LocalFileHeader*)&pBuffer[0];
         if (pFileHeader->desc != pLocalFileHeader->desc
             || pFileHeader->nMethod != pLocalFileHeader->nMethod
             || pFileHeader->nFileNameLength != pLocalFileHeader->nFileNameLength
@@ -655,14 +659,14 @@ void ZipDir::CacheFactory::InitDataOffset (FileEntry& fileEntry, const ZipFile::
         }
 
         // now compare the local file name with the one recorded in CDR: they must match.
-        if (memicmp ((const char*)&pBuffer[sizeof(LocalFileHeader)], (const char*)pFileHeader + 1, pFileHeader->nFileNameLength))
+        if (memicmp ((const char*)&pBuffer[sizeof(ZipFile::LocalFileHeader)], (const char*)pFileHeader + 1, pFileHeader->nFileNameLength))
         {
             // either file name, or the extra field do not match
             THROW_ZIPDIR_ERROR(ZD_ERROR_VALIDATION_FAILED, "The local file header contains file name which does not match the file name of the global file header. The archive content is misconsistent with its directory. Please repair the archive");
             return;
         }
 
-        fileEntry.nFileDataOffset = pFileHeader->lLocalHeaderOffset + sizeof(LocalFileHeader) + pLocalFileHeader->nFileNameLength + pLocalFileHeader->nExtraFieldLength;
+        fileEntry.nFileDataOffset = pFileHeader->lLocalHeaderOffset + sizeof(ZipFile::LocalFileHeader) + pLocalFileHeader->nFileNameLength + pLocalFileHeader->nExtraFieldLength;
     }
 
     if (fileEntry.nFileDataOffset >= m_nCDREndPos)
@@ -694,7 +698,7 @@ void ZipDir::CacheFactory::Validate(const FileEntry& fileEntry)
 
     Read(pCompressed, fileEntry.desc.lSizeCompressed);
 
-    if (fileEntry.nMethod == METHOD_DEFLATE_AND_ENCRYPT)
+    if (fileEntry.nMethod == ZipFile::METHOD_DEFLATE_AND_ENCRYPT)
     {
         ZipDir::Decrypt(pCompressed, fileEntry.desc.lSizeCompressed, m_encryptionKey);
     }

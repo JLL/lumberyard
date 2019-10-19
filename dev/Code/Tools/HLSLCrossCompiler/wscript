@@ -12,7 +12,7 @@
 def build(bld):
 
     bld.CryConsoleApplication(
-    
+
         #==============================
         # Common Settings
         #==============================
@@ -20,7 +20,8 @@ def build(bld):
         vs_filter = 'Tools',
         file_list = 'hlslcc.waf_files',
         platforms       = ['win'],
-        configurations  = ['debug', 'profile'],
+        configurations  = ['all'],
+        exclude_monolithic = True,
         disable_pch = True,
 
         includes = [bld.Path('Code/Tools/HLSLCrossCompiler/include'),
@@ -29,8 +30,10 @@ def build(bld):
                     bld.Path('Code/Tools/HLSLCrossCompiler/offline/cjson')],
 
         output_folder = 'Tools/CrySCompileServer/Compiler/PCGL/V006',
-	output_file_name = 'HLSLcc',
+        output_file_name = 'HLSLcc',
         win_defines = ['_CRT_SECURE_NO_WARNINGS', '_CONSOLE', 'WIN32'],
         win_lib = ['gdi32'],
+
+        win_x64_clang_cxxflags = ['-Wno-deprecated-register'],
     )
 

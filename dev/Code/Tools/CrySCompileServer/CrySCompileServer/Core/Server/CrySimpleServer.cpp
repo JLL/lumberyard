@@ -21,6 +21,7 @@
 #include "CrySimpleJobCompile1.hpp"
 #include "CrySimpleJobCompile2.hpp"
 #include "CrySimpleJobRequest.hpp"
+#include "CrySimpleJobGetShaderList.hpp"
 #include "CrySimpleCache.hpp"
 #include "CrySimpleErrorLog.hpp"
 #include "ShaderList.hpp"
@@ -43,7 +44,13 @@
 #include <AzCore/std/bind/bind.h>
 #include <AzCore/std/string/string.h>
 
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
+#undef AZ_RESTRICTED_SECTION
+#define CRYSIMPLESERVER_CPP_SECTION_1 1
+#endif
+
+#if defined(AZ_PLATFORM_MAC)
+#include <libproc.h>
 #include <sys/stat.h>
 #endif
 
@@ -75,11 +82,122 @@ static const int sleepTimeWhenWaiting = 10;
 
 static AtomicCountType g_ConnectionCount = 0;
 
-static SEnviropment gEnv;
+SEnviropment* SEnviropment::m_instance=nullptr;
 
-SEnviropment&   SEnviropment::Instance()
+void SEnviropment::Create()
 {
-    return gEnv;
+    if (!m_instance)
+    {
+        m_instance = new SEnviropment;
+    }
+}
+
+void SEnviropment::Destroy()
+{
+    if (m_instance)
+    {
+        delete m_instance;
+        m_instance = nullptr;
+    }
+}
+
+SEnviropment& SEnviropment::Instance()
+{
+    AZ_Assert(m_instance, "Using SEnviropment::Instance() before calling SEnviropment::Create()");
+    return *m_instance;
+}
+
+// Shader Compilers ID
+// NOTE: Values must be in sync with CShaderSrv::GetShaderCompilerName() function in the engine side.
+const char* SEnviropment::m_Orbis_DXC = "Orbis_DXC"; // ACCEPTED_USE
+const char* SEnviropment::m_Durango_FXC = "Durango_FXC"; // ACCEPTED_USE
+const char* SEnviropment::m_D3D11_FXC = "D3D11_FXC";
+const char* SEnviropment::m_GLSL_HLSLcc = "GLSL_HLSLcc";
+const char* SEnviropment::m_METAL_HLSLcc = "METAL_HLSLcc";
+const char* SEnviropment::m_GLSL_LLVM_DXC = "GLSL_LLVM_DXC";
+const char* SEnviropment::m_METAL_LLVM_DXC = "METAL_LLVM_DXC";
+
+void SEnviropment::InitializePlatformAttributes()
+{
+    // Initialize valid Plaforms
+    // NOTE: Values must be in sync with CShaderSrv::GetPlatformName() function in the engine side.
+    m_Platforms.insert("Orbis"); // ACCEPTED_USE
+    m_Platforms.insert("Durango"); // ACCEPTED_USE
+    m_Platforms.insert("PC");
+    m_Platforms.insert("Mac");
+    m_Platforms.insert("iOS");
+    m_Platforms.insert("Android");
+
+    // Initialize valid Shader Languages
+    // NOTE: Values must be in sync with GetShaderLanguageName() function in the engine side.
+    m_ShaderLanguages.insert("Orbis"); // ACCEPTED_USE
+    m_ShaderLanguages.insert("Durango"); // ACCEPTED_USE
+    m_ShaderLanguages.insert("D3D11");
+    m_ShaderLanguages.insert("METAL");
+    m_ShaderLanguages.insert("GL4");
+    m_ShaderLanguages.insert("GLES3");
+    // These are added for legacy support (GLES3_0 and GLES3_1 are combined into just GLES3)
+    m_ShaderLanguages.insert("GL4_1");
+    m_ShaderLanguages.insert("GL4_4");
+    m_ShaderLanguages.insert("GLES3_0");
+    m_ShaderLanguages.insert("GLES3_1");
+    
+    // Initialize valid Shader Compilers ID and Executables.
+    // Intentionally put a space after the executable name so that attackers can't try to change the executable name that we are going to run.
+    m_ShaderCompilersMap[m_Orbis_DXC] = "ORBIS/V030/DXOrbisShaderCompiler.exe "; // ACCEPTED_USE
+    m_ShaderCompilersMap[m_Durango_FXC] = "Durango/FXC.exe "; // ACCEPTED_USE
+    m_ShaderCompilersMap[m_D3D11_FXC] = "PCD3D11/v006/fxc.exe ";
+    m_ShaderCompilersMap[m_GLSL_HLSLcc] = "PCGL/V006/HLSLcc ";
+    m_ShaderCompilersMap[m_METAL_HLSLcc] = "PCGMETAL/HLSLcc/HLSLcc ";
+#if defined(_DEBUG)
+    m_ShaderCompilersMap[m_GLSL_LLVM_DXC] = "LLVMGL/debug/dxcGL ";
+    m_ShaderCompilersMap[m_METAL_LLVM_DXC] = "LLVMMETAL/debug/dxcMetal ";
+#else
+    m_ShaderCompilersMap[m_GLSL_LLVM_DXC] = "LLVMGL/release/dxcGL ";
+    m_ShaderCompilersMap[m_METAL_LLVM_DXC] = "LLVMMETAL/release/dxcMetal ";
+#endif
+}
+
+bool SEnviropment::IsPlatformValid( const AZStd::string& platform ) const
+{
+    return m_Platforms.find(platform) != m_Platforms.end();
+}
+
+bool SEnviropment::IsShaderLanguageValid( const AZStd::string& shaderLanguage ) const
+{
+    return m_ShaderLanguages.find(shaderLanguage) != m_ShaderLanguages.end();
+}
+
+bool SEnviropment::IsShaderCompilerValid( const AZStd::string& shaderCompilerID ) const
+{
+    bool validCompiler = (m_ShaderCompilersMap.find(shaderCompilerID) != m_ShaderCompilersMap.end());
+    
+    // Extra check for Mac: Only GL_LLVM_DXC and METAL_LLVM_DXC compilers are supported.
+    #if defined(AZ_PLATFORM_MAC)
+        if (validCompiler &&
+            shaderCompilerID != m_GLSL_LLVM_DXC &&
+            shaderCompilerID != m_METAL_LLVM_DXC)
+        {
+            printf("error: trying to use an unsupported compiler on Mac.\n");
+            return false;
+        }
+    #endif
+
+    return validCompiler;
+}
+
+bool SEnviropment::GetShaderCompilerExecutable( const AZStd::string& shaderCompilerID, AZStd::string& shaderCompilerExecutable ) const
+{
+    auto it = m_ShaderCompilersMap.find(shaderCompilerID);
+    if (it != m_ShaderCompilersMap.end())
+    {
+        shaderCompilerExecutable = it->second;
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 class CThreadData
@@ -103,14 +221,14 @@ bool CopyFileOnPlatform(const char* nameOfFileToCopy, const char* copiedFileName
 {
     if (AZ::IO::SystemFile::Exists(copiedFileName) && failIfFileExists)
     {
-        AZ_Warning(0, ("File to copy to, %s, already exists."), copiedFileName);
+        AZ_Warning("CrySimpleServer", false, ("File to copy to, %s, already exists."), copiedFileName);
         return false;
     }
 
     AZ::IO::SystemFile fileToCopy;
     if (fileToCopy.Open(nameOfFileToCopy, AZ::IO::SystemFile::SF_OPEN_READ_ONLY))
     {
-        AZ_Warning(0, ("Unable to open file: %s for copying."), nameOfFileToCopy);
+        AZ_Warning("CrySimpleServer", false, ("Unable to open file: %s for copying."), nameOfFileToCopy);
         return false;
     }
 
@@ -119,7 +237,7 @@ bool CopyFileOnPlatform(const char* nameOfFileToCopy, const char* copiedFileName
     AZ::IO::SystemFile newFile;
     if (newFile.Open(copiedFileName, AZ::IO::SystemFile::SF_OPEN_WRITE_ONLY | AZ::IO::SystemFile::SF_OPEN_CREATE))
     {
-        AZ_Warning(0, ("Unable to open new file: %s for copying."), copiedFileName);
+        AZ_Warning("CrySimpleServer", false, ("Unable to open new file: %s for copying."), copiedFileName);
         return false;
     }
 
@@ -159,6 +277,7 @@ public:
     void SetThreadData(CThreadData* threadData) { m_pThreadData.reset(threadData); }
 protected:
     void Process() override;
+    bool ValidatePlatformAttributes(EProtocolVersion Version, const TiXmlElement* pElement);
 private:
     std::unique_ptr<CThreadData> m_pThreadData;
 };
@@ -188,45 +307,27 @@ void CompileJob::Process()
                 CrySimple_ERROR("failed to extract First Element of the request");
                 return;
             }
-            const char* pVersion   = pElement->Attribute("Version");
-            const char* pPlatform  = pElement->Attribute("Platform");
 
-            if (!pPlatform)
+            const char* pPing = pElement->Attribute("Identify");
+            if (pPing)
             {
-                CrySimple_ERROR("failed to extract required platform attribute from request.");
+                const std::string& rData("ShaderCompilerServer");
+                m_pThreadData->Socket()->Send(rData);
                 return;
             }
 
-            std::string platform(pPlatform);
-
-            SEnviropment::Instance().m_Platform = "";
-
-            static std::unordered_map<std::string, std::string> dumpShadersFolders {
-                {
-                    "GL4", "Shaders\\GL4\\"
-                }, {
-                    "GLES3_0", "Shaders\\GLES3_0\\"
-                }, {
-                    "GLES3_1", "Shaders\\GLES3_1\\"
-                }, {
-                    "DX11", "Shaders\\DX11\\"
-                }, {
-                    "METAL", "Shaders\\METAL\\"
-                }
-            };
-            auto foundShaderFolder = dumpShadersFolders.find(platform);
-            if (foundShaderFolder != end(dumpShadersFolders))
-            {
-                SEnviropment::Instance().m_Platform = foundShaderFolder->first;
-                SEnviropment::Instance().m_Shader = SEnviropment::Instance().m_Root + foundShaderFolder->second;
-            }
-
-            AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_Shader.c_str());
+            const char* pVersion        = pElement->Attribute("Version");
+            const char* pPlatform       = pElement->Attribute("Platform");
+            const char* pHardwareTarget = nullptr;
 
             //new request type?
             if (pVersion)
             {
-                if (std::string(pVersion) == "2.2")
+                if (std::string(pVersion) == "2.3")
+                {
+                    Version = EPV_V0023;
+                }
+                else if (std::string(pVersion) == "2.2")
                 {
                     Version =   EPV_V0022;
                 }
@@ -239,23 +340,52 @@ void CompileJob::Process()
                     Version =   EPV_V002;
                 }
             }
+            
+
+            // If the job type is 'GetShaderList', then we dont need to perform a validation on the platform
+            // attributes, since the command doesnt use them, and the incoming request will not have 'compiler' or 'language' 
+            // attributes.
+            const char* pJobType = pElement->Attribute("JobType");
+            if ((!pJobType) || (azstricmp(pJobType,"GetShaderList")!=0))
+            {
+                if (!ValidatePlatformAttributes(Version, pElement))
+                {
+                    return;
+                }
+            }
 
             if (Version >= EPV_V002)
             {
+                const std::string JobType(pJobType);
+
+                if (Version >= EPV_V0023)
+                {
+                    pHardwareTarget = pElement->Attribute("HardwareTarget");
+                }
+
                 if (Version >= EPV_V0021)
                 {
                     m_pThreadData->Socket()->WaitForShutDownEvent(true);
                 }
 
-                const char* pJobType    =   pElement->Attribute("JobType");
+#if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
+    #if defined(TOOLS_SUPPORT_XENIA)
+        #define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_1
+        #include "Xenia/CrySimpleJobCompile_cpp_xenia.inl"
+    #endif
+    #if defined(TOOLS_SUPPORT_PROVO)
+        #define AZ_RESTRICTED_SECTION CRYSIMPLESERVER_CPP_SECTION_1
+        #include "Provo/CrySimpleJobCompile_cpp_provo.inl"
+    #endif
+#endif
+
                 if (pJobType)
                 {
-                    const std::string JobType(pJobType);
                     if (JobType == "RequestLine")
                     {
-                        Job = std::make_unique<CCrySimpleJobRequest>(m_pThreadData->Socket()->PeerIP());
+                        Job = std::make_unique<CCrySimpleJobRequest>(Version, m_pThreadData->Socket()->PeerIP());
                         Job->Execute(pElement);
-                        State   =   Job->State();
+                        State = Job->State();
                         Vec.resize(0);
                     }
                     else
@@ -264,6 +394,13 @@ void CompileJob::Process()
                         Job = std::make_unique<CCrySimpleJobCompile2>(Version, m_pThreadData->Socket()->PeerIP(), &Vec);
                         Job->Execute(pElement);
                         State   =   Job->State();
+                    }
+                    else
+                    if (JobType == "GetShaderList")
+                    {
+                        Job = std::make_unique<CCrySimpleJobGetShaderList>(m_pThreadData->Socket()->PeerIP(), &Vec);
+                        Job->Execute(pElement);
+                        State = Job->State();
                     }
                     else
                     {
@@ -333,6 +470,49 @@ void CompileJob::Process()
     InterlockedDecrement(&g_ConnectionCount);
 }
 
+
+bool CompileJob::ValidatePlatformAttributes(EProtocolVersion Version, const TiXmlElement* pElement)
+{
+    if (Version >= EPV_V0023)
+    {
+        const char* platform = pElement->Attribute("Platform"); // eg. PC, Mac...
+        const char* compiler = pElement->Attribute("Compiler"); // key to shader compiler executable
+        const char* language = pElement->Attribute("Language"); // eg. D3D11, GL4_1, GL3_1, METAL...
+
+        if (!platform || !SEnviropment::Instance().IsPlatformValid(platform))
+        {
+            CrySimple_ERROR("invalid Platform attribute from request.");
+            return false;
+        }
+        if (!compiler || !SEnviropment::Instance().IsShaderCompilerValid(compiler))
+        {
+            CrySimple_ERROR("invalid Compiler attribute from request.");
+            return false;
+        }
+        if (!language || !SEnviropment::Instance().IsShaderLanguageValid(language))
+        {
+            CrySimple_ERROR("invalid Language attribute from request.");
+            return false;
+        }
+    }
+    else
+    {
+        // In older versions the attribute Platform was used differently depending on the JobType
+        //   - JobType Compile: Platform is the shader language
+        //   - JobType RequestLine: Platform is the shader list filename
+        const char* platformLegacy = pElement->Attribute("Platform");
+
+        // The only check we can do here is if the attribute exists. Each JobType will check it has a valid value.
+        if (!platformLegacy)
+        {
+            CrySimple_ERROR("failed to extract required platform attribute from request.");
+            return false;
+        }
+    }
+
+    return true;
+}
+
 //////////////////////////////////////////////////////////////////////////
 void TickThread()
 {
@@ -348,7 +528,7 @@ void TickThread()
             t0 = t1;
             const int maxStringSize = 512;
             char str[maxStringSize] = { 0 };
-            azsnprintf(str, maxStringSize, "Amazon Remote Shader Compiler (%d compile tasks | %d open sockets | %d exceptions)",
+            azsnprintf(str, maxStringSize, "Amazon Shader Compiler Server (%ld compile tasks | %d open sockets | %d exceptions)",
                 CCrySimpleJobCompile::GlobalCompileTasks(), CCrySimpleSock::GetOpenSockets() + CSMTPMailer::GetOpenSockets(),
                 CCrySimpleServer::GetExceptionCount());
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -362,15 +542,9 @@ void TickThread()
         CCrySimpleCache::Instance().ThreadFunc_SavePendingCacheEntries();
         const AZ::u64 T2    =   AZStd::GetTimeUTCMilliSecond();
         if (T2 - T1 < 100)
-#if defined(AZ_PLATFORM_WINDOWS)
         {
             Sleep(static_cast<DWORD>(100 - T2 + T1));
         }
-#else
-        {
-            sleep(100 - T2 + T1);
-        }
-#endif
 
         CrySimple_SECURE_END
     }
@@ -379,14 +553,15 @@ void TickThread()
 //////////////////////////////////////////////////////////////////////////
 void LoadCache()
 {
-    if (CCrySimpleCache::Instance().LoadCacheFile(SEnviropment::Instance().m_Cache + "Cache.dat"))
+    const std::string& cachePath = SEnviropment::Instance().m_CachePath;
+    if (CCrySimpleCache::Instance().LoadCacheFile(cachePath + "Cache.dat"))
     {
         printf("Creating cache backup...\n");
-        AZ::IO::SystemFile::Delete((SEnviropment::Instance().m_Cache + "Cache.bak2").c_str());
-        printf("Move %s to %s\n", (SEnviropment::Instance().m_Cache + "Cache.bak").c_str(), (SEnviropment::Instance().m_Cache + "Cache.bak2").c_str());
-        AZ::IO::SystemFile::Rename((SEnviropment::Instance().m_Cache + "Cache.bak").c_str(), (SEnviropment::Instance().m_Cache + "Cache.bak2").c_str());
-        printf("Copy %s to %s\n", (SEnviropment::Instance().m_Cache + "Cache.dat").c_str(), (SEnviropment::Instance().m_Cache + "Cache.bak").c_str());
-        CopyFileOnPlatform((SEnviropment::Instance().m_Cache + "Cache.dat").c_str(), (SEnviropment::Instance().m_Cache + "Cache.bak").c_str(), FALSE);
+        AZ::IO::SystemFile::Delete((cachePath + "Cache.bak2").c_str());
+        printf("Move %s to %s\n", (cachePath + "Cache.bak").c_str(), (cachePath + "Cache.bak2").c_str());
+        AZ::IO::SystemFile::Rename((cachePath + "Cache.bak").c_str(), (cachePath + "Cache.bak2").c_str());
+        printf("Copy %s to %s\n", (cachePath + "Cache.dat").c_str(), (cachePath + "Cache.bak").c_str());
+        CopyFileOnPlatform((cachePath + "Cache.dat").c_str(), (cachePath + "Cache.bak").c_str(), FALSE);
         printf("Cache backup done.\n");
     }
     else
@@ -394,15 +569,15 @@ void LoadCache()
         // Restoring backup cache!
         printf("Cache file corrupted!!!\n");
         printf("Restoring backup cache...\n");
-        AZ::IO::SystemFile::Delete((SEnviropment::Instance().m_Cache + "Cache.dat").c_str());
-        printf("Copy %s to %s\n", (SEnviropment::Instance().m_Cache + "Cache.bak").c_str(), (SEnviropment::Instance().m_Cache + "Cache.dat").c_str());
-        CopyFileOnPlatform((SEnviropment::Instance().m_Cache + "Cache.bak").c_str(), (SEnviropment::Instance().m_Cache + "Cache.dat").c_str(), FALSE);
-        if (!CCrySimpleCache::Instance().LoadCacheFile(SEnviropment::Instance().m_Cache + "Cache.dat"))
+        AZ::IO::SystemFile::Delete((cachePath + "Cache.dat").c_str());
+        printf("Copy %s to %s\n", (cachePath + "Cache.bak").c_str(), (cachePath + "Cache.dat").c_str());
+        CopyFileOnPlatform((cachePath + "Cache.bak").c_str(), (cachePath + "Cache.dat").c_str(), FALSE);
+        if (!CCrySimpleCache::Instance().LoadCacheFile(cachePath + "Cache.dat"))
         {
             // Backup file corrupted too!
             printf("Backup file corrupted too!!!\n");
             printf("Deleting cache completely\n");
-            AZ::IO::SystemFile::Delete((SEnviropment::Instance().m_Cache + "Cache.dat").c_str());
+            AZ::IO::SystemFile::Delete((cachePath + "Cache.dat").c_str());
         }
     }
 
@@ -435,21 +610,29 @@ CCrySimpleServer::CCrySimpleServer()
     uint32_t JobCounter = 0;
     while (1)
     {
-        CThreadData* pData = new CThreadData(JobCounter++, m_pServerSocket->Accept());
-        if (pData->Socket() != nullptr)
+        // New client message, receive new client socket connection.
+        CCrySimpleSock* newClientSocket = m_pServerSocket->Accept();
+        if(!newClientSocket)
         {
-            InterlockedIncrement(&g_ConnectionCount);
-            CompileJob* compileJob = new CompileJob();
-            compileJob->SetThreadData(pData);
-            compileJob->Start();
+            continue;
         }
+        
+        // Thread Data for new job
+        CThreadData* pData = new CThreadData(JobCounter++, newClientSocket);
+
+        // Increase connection count and start new job.
+        // NOTE: CompileJob will be auto deleted when done, deleting thread data and client socket as well.
+        InterlockedIncrement(&g_ConnectionCount);
+        CompileJob* compileJob = new CompileJob();
+        compileJob->SetThreadData(pData);
+        compileJob->Start();
 
         bool printedMessage = false;
-        while (g_ConnectionCount > SEnviropment::Instance().m_MaxConnections)
+        while (g_ConnectionCount >= SEnviropment::Instance().m_MaxConnections)
         {
             if (!printedMessage)
             {
-                logmessage("Waiting for currenet requests to finish before accepting another connection...\n");
+                logmessage("Waiting for a request to finish before accepting another connection...\n");
                 printedMessage = true;
             }
 
@@ -459,20 +642,105 @@ CCrySimpleServer::CCrySimpleServer()
     CrySimple_SECURE_END
 }
 
-void GetCurrentDirectoryOnPlatform(size_t bufferSize, char* buffer)
+bool GetExecutableDirectory(AZStd::string& executableDir)
 {
+    const int maxPathSize = AZ_MAX_PATH_LEN;
+    char path[maxPathSize] = { 0 };
+    
+    int pathLen = 0;
 #if defined(AZ_PLATFORM_WINDOWS)
-    GetCurrentDirectory(DWORD(bufferSize), buffer);
+    pathLen = GetModuleFileNameA(nullptr, path, maxPathSize);
 #else
-    getcwd(buffer, bufferSize);
+    pathLen = proc_pidpath(getpid(), path, maxPathSize);
 #endif
+
+    if (pathLen <= 0 || pathLen >= maxPathSize)
+    {
+        return false;
+    }
+    
+    AZStd::replace(path, path+pathLen, '\\', '/');
+    
+    executableDir = path;
+    
+    // Executable name is part of the path, remove it.
+    size_t posLastSlash = executableDir.rfind('/');
+    if (posLastSlash == AZStd::string::npos)
+    {
+        return false;
+    }
+    executableDir = executableDir.substr(0, posLastSlash);
+    
+    NormalizePath(executableDir);
+
+    // NOTE: Not using IsPathValid() for validation because internally uses GetExecutableDirectory()
+    return executableDir.length() < AZ_MAX_PATH_LEN && AzFramework::StringFunc::Root::IsValid(executableDir.c_str());
+}
+
+bool GetBaseDirectory(AZStd::string& baseDir)
+{
+    AZStd::string executableDir;
+    if (GetExecutableDirectory(executableDir))
+    {
+        // Obtain the base directory 'CrySCompileServer', it is 2 folders up from executable directory,
+        // that's 3 separators starting from the end because it finishes with a separator.
+        // NOTE: Avoiding to add '../../', the use of relative directory is not tolerated and functions like IsASubFolderOfB() do not work properly with it.
+        const int numSeparators = 3;
+        size_t posSlash = AZStd::string::npos;
+        for (int i = 0; i < numSeparators; ++i)
+        {
+            posSlash = executableDir.rfind(AZ_CORRECT_FILESYSTEM_SEPARATOR, posSlash);
+            if (posSlash == AZStd::string::npos || posSlash == 0)
+            {
+                return false;
+            }
+            --posSlash;
+        }
+        baseDir = executableDir.substr(0, posSlash+2);
+        
+        // NOTE: Not using IsPathValid() for validation because internally uses GetBaseDirectory()
+        return baseDir.length() < AZ_MAX_PATH_LEN && AzFramework::StringFunc::Root::IsValid(baseDir.c_str());
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void NormalizePath(AZStd::string& pathToNormalize)
+{
+    AzFramework::StringFunc::Root::Normalize(pathToNormalize);
 }
 
 void NormalizePath(std::string& pathToNormalize)
 {
     AZStd::string tempString = pathToNormalize.c_str();
-    AzFramework::StringFunc::Root::Normalize(tempString);
+    NormalizePath(tempString);
     pathToNormalize = tempString.c_str();
+}
+
+bool IsPathValid(const AZStd::string& path)
+{
+    // Calculating base directory every time.
+    // It's slower than using a cached value, but safer.
+    AZStd::string baseDir;
+    if (GetBaseDirectory(baseDir))
+    {
+        return (path.length() < AZ_MAX_PATH_LEN) &&
+            (path.find("..") == AZStd::string::npos) && // The use of relative directory won't be tolerated
+            AzFramework::StringFunc::Root::IsValid(path.c_str()) &&
+            AzFramework::StringFunc::Path::IsASubFolderOfB(path.c_str(), baseDir.c_str(), false, false); // Case sensitive and not ignoring starting path
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool IsPathValid(const std::string& path)
+{
+    const AZStd::string tempString = path.c_str();
+    return IsPathValid(tempString);
 }
 
 void CCrySimpleServer::Init()
@@ -481,39 +749,41 @@ void CCrySimpleServer::Init()
     AZ::IO::SystemFile::CreateDir("Error");
     AZ::IO::SystemFile::CreateDir("Cache");
 
-    char CurrentDir[1024] = { 0 };
-    GetCurrentDirectoryOnPlatform(sizeof(CurrentDir), CurrentDir);
-    SEnviropment::Instance().m_Root         =   CurrentDir;
-    SEnviropment::Instance().m_Root         +=  "\\";
+    AZStd::string executableDir;
+    GetExecutableDirectory(executableDir);
+    SEnviropment::Instance().m_Root = executableDir.c_str();
 
-    SEnviropment::Instance().m_Compiler =   SEnviropment::Instance().m_Root + "../../Compiler/";
+    AZStd::string baseDir;
+    GetBaseDirectory(baseDir);
+    SEnviropment::Instance().m_CompilerPath  = baseDir.c_str();
+    SEnviropment::Instance().m_CompilerPath += "Compiler/";
 
-    SEnviropment::Instance().m_Cache        =   SEnviropment::Instance().m_Root + "Cache/";
-    if (SEnviropment::Instance().m_Temp.empty())
+    SEnviropment::Instance().m_CachePath = SEnviropment::Instance().m_Root + "Cache/";
+    
+    if (SEnviropment::Instance().m_TempPath.empty())
     {
-        SEnviropment::Instance().m_Temp         =   SEnviropment::Instance().m_Root + "Temp/";
+        SEnviropment::Instance().m_TempPath = SEnviropment::Instance().m_Root + "Temp/";
     }
-    if (SEnviropment::Instance().m_Error.empty())
+    if (SEnviropment::Instance().m_ErrorPath.empty())
     {
-        SEnviropment::Instance().m_Error            =   SEnviropment::Instance().m_Root + "Error/";
+        SEnviropment::Instance().m_ErrorPath = SEnviropment::Instance().m_Root + "Error/";
     }
-    if (SEnviropment::Instance().m_Shader.empty())
+    if (SEnviropment::Instance().m_ShaderPath.empty())
     {
-        SEnviropment::Instance().m_Shader = SEnviropment::Instance().m_Root + "Shaders/";
+        SEnviropment::Instance().m_ShaderPath = SEnviropment::Instance().m_Root + "Shaders/";
     }
 
     NormalizePath(SEnviropment::Instance().m_Root);
-    NormalizePath(SEnviropment::Instance().m_Compiler);
-    NormalizePath(SEnviropment::Instance().m_Cache);
-    NormalizePath(SEnviropment::Instance().m_Error);
-    NormalizePath(SEnviropment::Instance().m_Temp);
-    NormalizePath(SEnviropment::Instance().m_Shader);
+    NormalizePath(SEnviropment::Instance().m_CompilerPath);
+    NormalizePath(SEnviropment::Instance().m_CachePath);
+    NormalizePath(SEnviropment::Instance().m_ErrorPath);
+    NormalizePath(SEnviropment::Instance().m_TempPath);
+    NormalizePath(SEnviropment::Instance().m_ShaderPath);
 
-    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_Error.c_str());
-    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_Temp.c_str());
-    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_Cache.c_str());
-    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_Shader.c_str());
-
+    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_ErrorPath.c_str());
+    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_TempPath.c_str());
+    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_CachePath.c_str());
+    AZ::IO::SystemFile::CreateDir(SEnviropment::Instance().m_ShaderPath.c_str());
 
     if (SEnviropment::Instance().m_Caching)
     {

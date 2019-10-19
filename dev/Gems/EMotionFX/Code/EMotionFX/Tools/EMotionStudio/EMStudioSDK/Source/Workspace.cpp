@@ -27,7 +27,6 @@
 #include <EMotionFX/CommandSystem/Source/CommandManager.h>
 #include <EMotionFX/CommandSystem/Source/MotionSetCommands.h>
 #include <EMotionFX/Source/ActorManager.h>
-#include "PreferencesWindow.h"
 #include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/MetricsEventSender.h>
 
 #include <QApplication>
@@ -124,16 +123,17 @@ namespace EMStudio
                     continue;
                 }
 
-                const AZ::Vector3&          pos     = actorInstance->GetLocalPosition();
-                const AZ::Vector3&          scale   = actorInstance->GetLocalScale();
-                const MCore::Quaternion&    rot     = actorInstance->GetLocalRotation();
+                const EMotionFX::Transform& transform = actorInstance->GetLocalSpaceTransform();
+                const AZ::Vector3&          pos     = transform.mPosition;
+                const AZ::Vector3&          scale   = transform.mScale;
+                const MCore::Quaternion&    rot     = transform.mRotation;
 
                 // We need to add it here because if we dont do the last result will be the id of the actor instance and then it won't work anymore.
                 AddFile(&commands, "ImportActor", actor->GetFileName());
                 ++commandIndex;
                 commandString = AZStd::string::format("CreateActorInstance -actorID %%LASTRESULT%% -xPos %f -yPos %f -zPos %f -xScale %f -yScale %f -zScale %f -rot %s\n",
-                    static_cast<float>(pos.GetX()), static_cast<float>(pos.GetY()), static_cast<float>(pos.GetZ()), static_cast<float>(scale.GetX()), static_cast<float>(scale.GetY()), static_cast<float>(scale.GetZ()), 
-                    AZStd::to_string(AZ::Vector4(rot.x, rot.y, rot.z, rot.w)).c_str());
+                        static_cast<float>(pos.GetX()), static_cast<float>(pos.GetY()), static_cast<float>(pos.GetZ()), static_cast<float>(scale.GetX()), static_cast<float>(scale.GetY()), static_cast<float>(scale.GetZ()),
+                        AZStd::to_string(AZ::Vector4(rot.x, rot.y, rot.z, rot.w)).c_str());
                 commands += commandString;
 
                 activationIndicesByActorInstance[actorInstance].m_actorInstanceCommandIndex = commandIndex;
@@ -211,7 +211,7 @@ namespace EMStudio
 
             motionSet->RecursiveGetMotions(motionsInMotionSets);
         }
-        
+
         // motions that are not in the above motion sets
         const uint32 numMotions = EMotionFX::GetMotionManager().GetNumMotions();
         for (uint32 i = 0; i < numMotions; ++i)
@@ -232,6 +232,9 @@ namespace EMStudio
         }
 
         // anim graphs
+        // We need to avoid storing two times the same anim graph. This could happen if the anim graph was loaded from a reference
+        // node. We need to integrate the asset system into the AnimGraphManager
+        AZStd::unordered_set<AZStd::string> animGraphFilenames;
         const uint32 numAnimGraphs = EMotionFX::GetAnimGraphManager().GetNumAnimGraphs();
         for (uint32 i = 0; i < numAnimGraphs; ++i)
         {
@@ -242,7 +245,12 @@ namespace EMStudio
                 continue;
             }
 
-            AddFile(&commands, "LoadAnimGraph", animGraph->GetFileName());
+            bool fileAdded = false;
+            if (animGraphFilenames.emplace(animGraph->GetFileNameString()).second)
+            {
+                AddFile(&commands, "LoadAnimGraph", animGraph->GetFileName());
+                fileAdded = true;
+            }
 
             for (ActivationIndicesByActorInstance::value_type& indicesByActorInstance : activationIndicesByActorInstance)
             {
@@ -253,14 +261,17 @@ namespace EMStudio
                 }
 
                 EMotionFX::AnimGraph* currentActiveAnimGraph = animGraphInstance->GetAnimGraph();
-                if (currentActiveAnimGraph == animGraph)
+                if (currentActiveAnimGraph->GetFileNameString() == animGraph->GetFileNameString())
                 {
                     indicesByActorInstance.second.m_animGraphCommandIndex = commandIndex;
                     break;
                 }
             }
 
-            ++commandIndex;
+            if (fileAdded)
+            {
+                ++commandIndex;
+            }
         }
 
         // activate anim graph for each actor instance
@@ -284,14 +295,15 @@ namespace EMStudio
                 continue;
             }
 
+            // only activate the saved anim graph
             if (itActivationIndices->second.m_animGraphCommandIndex != -1
                 && itActivationIndices->second.m_motionSetCommandIndex != -1)
             {
-                commandString = AZStd::string::format("ActivateAnimGraph -actorInstanceID %%LASTRESULT%d%% -animGraphID %%LASTRESULT%d%% -motionSetID %%LASTRESULT%d%% -visualizeScale %f\n", 
-                    (commandIndex - itActivationIndices->second.m_actorInstanceCommandIndex), 
-                    (commandIndex - itActivationIndices->second.m_animGraphCommandIndex),
-                    (commandIndex - itActivationIndices->second.m_motionSetCommandIndex),
-                    animGraphInstance->GetVisualizeScale());
+                commandString = AZStd::string::format("ActivateAnimGraph -actorInstanceID %%LASTRESULT%d%% -animGraphID %%LASTRESULT%d%% -motionSetID %%LASTRESULT%d%% -visualizeScale %f\n",
+                        (commandIndex - itActivationIndices->second.m_actorInstanceCommandIndex),
+                        (commandIndex - itActivationIndices->second.m_animGraphCommandIndex),
+                        (commandIndex - itActivationIndices->second.m_motionSetCommandIndex),
+                        animGraphInstance->GetVisualizeScale());
                 commands += commandString;
                 ++commandIndex;
             }
@@ -387,6 +399,15 @@ namespace EMStudio
         GetCommandManager()->SetWorkspaceDirtyFlag(false);
         mDirtyFlag = false;
         return true;
+    }
+
+
+    void Workspace::Reset()
+    {
+        mFilename.clear();
+
+        GetCommandManager()->SetWorkspaceDirtyFlag(false);
+        mDirtyFlag = false;
     }
 
 

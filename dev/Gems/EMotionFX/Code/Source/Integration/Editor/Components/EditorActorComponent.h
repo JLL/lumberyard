@@ -24,6 +24,10 @@
 
 #include <Integration/Components/ActorComponent.h>
 
+#include <LmbrCentral/Rendering/RenderBoundsBus.h>
+
+#include <LmbrCentral/Rendering/MaterialOwnerBus.h>
+
 namespace AZ
 {
     class ScriptProperty;
@@ -42,8 +46,11 @@ namespace EMotionFX
             , private AZ::TickBus::Handler
             , private LmbrCentral::MeshComponentRequestBus::Handler
             , private LmbrCentral::RenderNodeRequestBus::Handler
+            , private LmbrCentral::RenderBoundsRequestBus::Handler
+            , private LmbrCentral::MaterialOwnerRequestBus::Handler
             , private ActorComponentRequestBus::Handler
             , private EditorActorComponentRequestBus::Handler
+            , private LmbrCentral::AttachmentComponentNotificationBus::Handler
             , private AzToolsFramework::EditorComponentSelectionRequestsBus::Handler
             , private AzToolsFramework::EditorVisibilityNotificationBus::Handler
         {
@@ -60,7 +67,9 @@ namespace EMotionFX
             void Deactivate() override;
 
             // ActorComponentRequestBus::Handler
-            EMotionFX::ActorInstance* GetActorInstance() override { return m_actorInstance.get(); }
+            EMotionFX::ActorInstance* GetActorInstance() override { return m_actorInstance ? m_actorInstance.get() : nullptr; }
+            bool GetRenderCharacter() const override;
+            void SetRenderCharacter(bool enable) override;
 
             // EditorActorComponentRequestBus::Handler
             const AZ::Data::AssetId& GetActorAssetId() override;
@@ -69,18 +78,27 @@ namespace EMotionFX
             // EditorVisibilityNotificationBus::Handler
             void OnEntityVisibilityChanged(bool visibility) override;
 
-            // LmbrCentral::MeshComponentRequestBus::Handler
+            //////////////////////////////////////////////////////////////////////////
+            // RenderBoundsRequestBus interface implementation
             AZ::Aabb GetWorldBounds() override;
             AZ::Aabb GetLocalBounds() override;
+
+            //////////////////////////////////////////////////////////////////////////
+            // LmbrCentral::MeshComponentRequestBus::Handler
             bool GetVisibility() override;
             void SetVisibility(bool isVisible) override;
             void SetMeshAsset(const AZ::Data::AssetId& id) override { (void)id; }
             AZ::Data::Asset<AZ::Data::AssetData> GetMeshAsset() override { return m_actorAsset; }
 
             // EditorComponentSelectionRequestsBus::Handler
-            AZ::Aabb GetEditorSelectionBounds() override;
+            AZ::Aabb GetEditorSelectionBoundsViewport(
+                const AzFramework::ViewportInfo& viewportInfo) override;
+            bool EditorSelectionIntersectRayViewport(
+                const AzFramework::ViewportInfo& viewportInfo,
+                const AZ::Vector3& src, const AZ::Vector3& dir, AZ::VectorFloat& distance) override;
+            bool SupportsEditorRayIntersect() override { return true; }
 
-            // ActorComponentNotificationBus::Handler
+            // RenderNodeRequestBus::Handler
             IRenderNode* GetRenderNode() override;
             float GetRenderNodeRequestBusOrder() const override;
             static const float s_renderNodeRequestBusOrder;
@@ -115,6 +133,8 @@ namespace EMotionFX
             // Property callbacks.
             AZ::Crc32 OnAssetSelected();
             void OnMaterialChanged();
+            void OnMaterialPerActorChanged();
+            void OnLODLevelChanged();
             void OnDebugDrawFlagChanged();
             void OnSkinningMethodChanged();
             AZ::Crc32 OnAttachmentTypeChanged();
@@ -123,13 +143,14 @@ namespace EMotionFX
             bool AttachmentTargetVisibility();
             bool AttachmentTargetJointVisibility();
             AZStd::string AttachmentJointButtonText();
-            void InitializeMaterialSlots(ActorAsset& actorAsset);
+            void InitializeMaterial(ActorAsset& actorAsset);
 
             void LaunchAnimationEditor(const AZ::Data::AssetId& assetId, const AZ::Data::AssetType&);
 
             // AZ::Data::AssetBus::Handler
             void OnAssetReady(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
             void OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
+            void OnAssetError(AZ::Data::Asset<AZ::Data::AssetData> asset) override;
 
             // AZ::TransformNotificationBus::Handler
             void OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world) override;
@@ -140,6 +161,14 @@ namespace EMotionFX
             // AZ::TickBus::Handler
             void OnTick(float deltaTime, AZ::ScriptTimePoint time) override;
 
+            // LmbrCentral::AttachmentComponentNotificationBus::Handler
+            void OnAttached(AZ::EntityId targetId) override;
+            void OnDetached(AZ::EntityId targetId) override;
+
+            // AZ::LmbrCentral::MaterialOwnerRequestBus::Handler
+            void SetMaterial(_smart_ptr<IMaterial>) override;
+            _smart_ptr<IMaterial> GetMaterial() override;
+
             void BuildGameEntity(AZ::Entity* gameEntity) override;
 
             void CreateActorInstance();
@@ -148,16 +177,24 @@ namespace EMotionFX
             bool IsValidAttachment(const AZ::EntityId& attachment, const AZ::EntityId& attachTo) const;
  
             AZ::Data::Asset<ActorAsset>         m_actorAsset;               ///< Assigned actor asset.
-            ActorAsset::MaterialList            m_materialPerLOD;           ///< Material assignment for each LOD level.
+            AZStd::vector<AZ::EntityId>         m_attachments;              ///< A list of entities that are attached to this entity.
             bool                                m_renderSkeleton;           ///< Toggles rendering of character skeleton.
             bool                                m_renderCharacter;          ///< Toggles rendering of character model.
+            bool                                m_renderBounds;             ///< Toggles rendering of the world bounding box.
             bool                                m_entityVisible;            ///< Entity visible from the EditorVisibilityNotificationBus
             SkinningMethod                      m_skinningMethod;           ///< The skinning method for this actor
             AttachmentType                      m_attachmentType;           ///< Attachment type.
             AZ::EntityId                        m_attachmentTarget;         ///< Target entity to attach to, if any.
             AZStd::string                       m_attachmentJointName;      ///< Joint name on target to which to attach (if ActorAttachment).
             AZ::u32                             m_attachmentJointIndex;
+            AZ::u32                             m_lodLevel;
             // \todo attachmentTarget node nr
+
+            // Note: LOD work in progress. For now we use one material instead of a list of material, because we don't have the support for LOD with multiple FBXs.
+            // We purposely kept a materialList in actorComponent and actorRenderNode for the flexibility in future.
+            // At the moment, the materialList stores duplicates of the same material.
+            AzFramework::SimpleAssetReference<LmbrCentral::MaterialAsset>   m_materialPerActor;
+            ActorAsset::MaterialList            m_materialPerLOD;           ///< Material assignment for each LOD level.
 
             ActorAsset::ActorInstancePtr        m_actorInstance;            ///< Live actor instance.
             AZStd::unique_ptr<ActorRenderNode>  m_renderNode;               ///< Actor render node.

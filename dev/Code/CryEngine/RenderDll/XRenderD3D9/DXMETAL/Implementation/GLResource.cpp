@@ -17,7 +17,8 @@
 #include <StdAfx.h>
 #include "GLResource.hpp"
 #include "METALContext.hpp"
-#include "METALDevice.hpp"
+#include "MetalDevice.hpp"
+#include <DriverD3D.h>
 
 namespace NCryMetal
 {
@@ -29,7 +30,7 @@ namespace NCryMetal
     MemRingBufferStorage GetMemAllocModeBasedOnSize(const size_t size)
     {
         MemRingBufferStorage memAllocMode = MEM_SHARED_RINGBUFFER;
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         if (size > FASTBUFFER_SIZE_THRESHHOLD)
         {
             memAllocMode = MEM_MANAGED_RINGBUFFER;
@@ -45,7 +46,7 @@ namespace NCryMetal
             return NULL;
         }
         id<MTLBuffer> buffer = pBuffer->m_BufferShared;
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         if (pBuffer->m_BufferManaged && GetMemAllocModeBasedOnSize(pBuffer->m_uMapSize) == MEM_MANAGED_RINGBUFFER)
         {
             buffer = pBuffer->m_BufferManaged;
@@ -195,7 +196,7 @@ namespace NCryMetal
             if (isDepthStencilBuffer)
             {
                 bHasStecnilAttachment = true;
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
                 //The OSX_GPUFamily1_v1 feature set does not support separate depth and stencil render targets.
                 //If these render targets are needed, use the following newly introduced depth/stencil pixel formats
                 //to set the same texture as both the depth and stencil render target
@@ -250,7 +251,7 @@ namespace NCryMetal
                     //Depth stencil buffer gets written into and sampled from.
                     Desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
 
-#if defined AZ_PLATFORM_APPLE_OSX
+#if defined(AZ_PLATFORM_MAC)
                     //On osx the depth/stencil texture is merged. You need to create a different
                     //texture view to access stencil data. Hence we need this flag.
                     Desc.usage |= MTLTextureUsagePixelFormatView;
@@ -258,9 +259,21 @@ namespace NCryMetal
                 }
                 else if(CTexture::IsDeviceFormatTypeless(pFormat->m_eDXGIFormat))
                 {
-                    Desc.usage |= MTLTextureUsagePixelFormatView;
+                    //Apple recommendation -> For sRGB variant views, you don’t need the PFV flag when: - running on
+                    //iOS/tvOS 12.0 or newer - running on macOS 10.15 or newer
+                    //However, on older OSs (and in macOS case, older GPUs) you are still required to set the flag.
+#if defined(AZ_COMPILER_CLANG) && AZ_COMPILER_CLANG >= 9    //@available was added in Xcode 9
+                    if (@available(macOS 10.15, iOS 12.0, *))
+                    {
+                        //No need to do anything but if we want to add non sRGB view related flags it would go here.
+                    }
+                    else
+                    {
+                        Desc.usage |= MTLTextureUsagePixelFormatView;
+                    }
+#endif
                 }
-                
+
                 pTexture->m_Texture = [mtlDevice newTextureWithDescriptor:Desc];
 
                 if (!pTexture->m_Texture)
@@ -269,7 +282,7 @@ namespace NCryMetal
                 }
                 else if (isDepthStencilBuffer)
                 {
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
                     pTexture->m_StencilTexture = pTexture->m_Texture;
 #else
                     Desc.pixelFormat = MTLPixelFormatStencil8;
@@ -457,7 +470,7 @@ namespace NCryMetal
             assert(kBox.m_kSize.y < 2);
 
             //MTLPixelFormatPVRTC_RGB_2BPP/MTLPixelFormatPVRTC_RGBA_4BPP_sRGB not supported on OSX GPUs
-#if !defined AZ_PLATFORM_APPLE_OSX
+#if !defined AZ_PLATFORM_MAC
             //  Igor: Metal requires these to be 0 for PVR formats
             if (pTexFormat->m_eMetalFormat >= MTLPixelFormatPVRTC_RGB_2BPP && pTexFormat->m_eMetalFormat <= MTLPixelFormatPVRTC_RGBA_4BPP_sRGB)
             {
@@ -489,7 +502,7 @@ namespace NCryMetal
             assert(kBox.m_kSize.z < 2);
 
             //MTLPixelFormatPVRTC_RGB_2BPP/MTLPixelFormatPVRTC_RGBA_4BPP_sRGB not supported on OSX GPUs
-#if !defined AZ_PLATFORM_APPLE_OSX
+#if !defined AZ_PLATFORM_MAC
             //  Igor: Metal requires these to be 0 for PVR formats
             if (pTexFormat->m_eMetalFormat >= MTLPixelFormatPVRTC_RGB_2BPP && pTexFormat->m_eMetalFormat <= MTLPixelFormatPVRTC_RGBA_4BPP_sRGB)
             {
@@ -520,7 +533,7 @@ namespace NCryMetal
             assert(slice == 0);
 
             //MTLPixelFormatPVRTC_RGB_2BPP/MTLPixelFormatPVRTC_RGBA_4BPP_sRGB not supported on OSX GPUs
-#if !defined AZ_PLATFORM_APPLE_OSX
+#if !defined AZ_PLATFORM_MAC
             //  Igor: Metal requires these to be 0 for PVR formats
             if (pTexFormat->m_eMetalFormat >= MTLPixelFormatPVRTC_RGB_2BPP && pTexFormat->m_eMetalFormat <= MTLPixelFormatPVRTC_RGBA_4BPP_sRGB)
             {
@@ -670,14 +683,12 @@ namespace NCryMetal
     {
         static void InitializeStorage(STexture* pTexture, uint32 uCPUAccess, const SGIFormatInfo* pFormat, CDevice* pDevice, const uint32 uBindFlags)
         {
-            //  Confetti BEGIN: Igor Lobanchikov
             Interface::TexStorage(pTexture, GetMipSize(pTexture, 0, pFormat, false), pTexture->m_uNumMipLevels, pFormat, pDevice->GetMetalDevice(), uBindFlags);
             {
                 STexSubresourceID kEndID = {pTexture->m_uNumMipLevels, pTexture->m_uNumElements};
                 uint32 uMappedSize(GetSystemMemoryTextureOffset<Interface>(pTexture, pFormat, kEndID));
                 pTexture->m_pMapMemoryCopy = static_cast<uint8*>(Memalign(uMappedSize, MIN_MAPPED_RESOURCE_ALIGNMENT));
             }
-            //  Confetti End: Igor Lobanchikov
         }
 
         static void UploadImage(STexture* pTexture, STexSubresourceID kSubID, STexBox kBox, const void* pSrcData, uint32 uSrcRowPitch, uint32 uSrcDepthPitch, CContext* pContext, const SGIFormatInfo* pFormat)
@@ -696,21 +707,28 @@ namespace NCryMetal
             SPackedLayout kPackedLayout;
             Interface::GetPackedLayout(kSubSize, pFormat, &kPackedLayout);
 
-            //  Confetti BEGIN: Igor Lobanchikov
             kMappedSubTex.m_pBuffer = pTexture->m_pMapMemoryCopy + GetSystemMemoryTextureOffset<Interface>(pTexture, pFormat, kSubID);
             if (bDownload)
             {
+                static ICVar* isScreenshot = gEnv->pConsole->GetCVar("e_ScreenShot");
+                static ICVar* isCaptureFrame = gEnv->pConsole->GetCVar("capture_frames");
+                if (isScreenshot->GetIVal() || isCaptureFrame->GetIVal())
+                {
+                    //This will stall the GPU so be very careful when using it. Only use it when you absolutely need the
+                    //work encoded by the current comman buffer.
+                    pContext->FlushBlitEncoderAndWait();
+                }
+                
                 MTLRegion region = {
                     {0, 0, 0}, {pTexture->m_Texture.width, pTexture->m_Texture.height, pTexture->m_Texture.depth}
                 };
                 [pTexture->m_Texture getBytes: kMappedSubTex.m_pBuffer
-bytesPerRow: kPackedLayout.m_uRowPitch
-bytesPerImage: kPackedLayout.m_uImagePitch
-fromRegion: region
-mipmapLevel: kSubID.m_iMipLevel
-slice: kSubID.m_uElement];
+                                  bytesPerRow: kPackedLayout.m_uRowPitch
+                                bytesPerImage: kPackedLayout.m_uImagePitch
+                                   fromRegion: region
+                                  mipmapLevel: kSubID.m_iMipLevel
+                                        slice: kSubID.m_uElement];
             }
-            //  Confetti End: Igor Lobanchikov
 
             kMappedSubTex.m_uRowPitch = kPackedLayout.m_uRowPitch;
             kMappedSubTex.m_uImagePitch = kPackedLayout.m_uImagePitch;
@@ -719,20 +737,18 @@ slice: kSubID.m_uElement];
 
         static void Unmap(STexture* pTexture, STexSubresourceID kSubID, const SMappedSubTexture& kMappedSubTex, CContext*, const SGIFormatInfo*)
         {
-            //  Confetti BEGIN: Igor Lobanchikov
             if (kMappedSubTex.m_bUpload)
             {
                 MTLRegion region = {
                     {0, 0, 0}, {pTexture->m_Texture.width, pTexture->m_Texture.height, pTexture->m_Texture.depth}
                 };
                 [pTexture->m_Texture replaceRegion: region
-mipmapLevel: kSubID.m_iMipLevel
-slice: kSubID.m_uElement
-withBytes: kMappedSubTex.m_pBuffer
-bytesPerRow: kMappedSubTex.m_uRowPitch
-bytesPerImage: kMappedSubTex.m_uImagePitch];
+                                       mipmapLevel: kSubID.m_iMipLevel
+                                             slice: kSubID.m_uElement
+                                         withBytes: kMappedSubTex.m_pBuffer
+                                       bytesPerRow: kMappedSubTex.m_uRowPitch
+                                     bytesPerImage: kMappedSubTex.m_uImagePitch];
             }
-            //  Confetti End: Igor Lobanchikov
         }
     };
 
@@ -767,7 +783,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
     bool MapTexSubresource(SResource* pResource, uint32 uSubresource, D3D11_MAP eMapType, uint32 uMapFlags, D3D11_MAPPED_SUBRESOURCE* pMappedResource, CContext* pContext)
     {
         DXGL_SCOPED_PROFILE("MapTexSubresource")
-
+        
         STexture * pTexture(static_cast<STexture*>(pResource));
 
         const SGIFormatInfo* pFormatInfo(GetGIFormatInfo(pTexture->m_eFormat));
@@ -786,7 +802,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
             return false;
         }
 
-        bool bDownload(eMapType == D3D11_MAP_READ || eMapType == D3D11_MAP_WRITE || eMapType == D3D11_MAP_READ_WRITE);
+        bool bDownload = (eMapType == D3D11_MAP_READ || eMapType == D3D11_MAP_READ_WRITE);
         Impl::Map(pTexture, GetTexSubresourceID(pTexture, uSubresource), bDownload, kMappedSubTexture, pContext, pFormatInfo);
         kMappedSubTexture.m_bUpload = (eMapType != D3D11_MAP_READ);
 
@@ -1122,7 +1138,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
             case eGIFC_DEPTH_TO_RED:
                 break;
             case eGIFC_STENCIL_TO_RED:
-#if defined AZ_PLATFORM_APPLE_OSX
+#if defined AZ_PLATFORM_MAC
                 //Need a new texture view to access the stencil data. x32_stencil8 or x24_stencil8
                 bFormatRequiresUniqueView = true;
 #else
@@ -1268,7 +1284,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
     {
         switch (format)
         {
-#if !defined AZ_PLATFORM_APPLE_OSX
+#if !defined AZ_PLATFORM_MAC
         case MTLPixelFormatB5G6R5Unorm:
         case MTLPixelFormatR8Unorm_sRGB:
         case MTLPixelFormatRG8Unorm_sRGB:
@@ -1326,7 +1342,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
         bool isMetalDepthRenderable = formatInfo.m_pTexture->m_eMetalFormat == MTLPixelFormatDepth32Float ||
             formatInfo.m_eTypelessFormat == eGIF_R32G8X24_TYPELESS || formatInfo.m_eTypelessFormat == eGIF_R16_TYPELESS ;
 
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         isMetalDepthRenderable = isMetalDepthRenderable ||
             formatInfo.m_pTexture->m_eMetalFormat == MTLPixelFormatDepth32Float_Stencil8 ||
             formatInfo.m_pTexture->m_eMetalFormat == MTLPixelFormatDepth24Unorm_Stencil8;
@@ -1447,7 +1463,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
         , m_bMapped(false)
         //  Confetti BEGIN: Igor Lobanchikov
         , m_BufferShared(0)
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         , m_BufferManaged(0)
 #endif
         , m_pMappedData(0)
@@ -1470,7 +1486,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
         {
             [m_BufferShared release];
         }
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         if (m_BufferManaged)
         {
             [m_BufferManaged release];
@@ -2050,7 +2066,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
             pBuffer->m_uMapOffset = 0;
             pBuffer->m_uMapSize = 0;
         }
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         else
         {
             //If this buffer was using the faster ring buffer synchronize with the GPU
@@ -2122,7 +2138,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
                     pBuffer->m_BufferShared = pContext->GetRingBuffer(MEM_SHARED_RINGBUFFER);
                     [pBuffer->m_BufferShared retain];
                 }
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
                 if (!pBuffer->m_BufferManaged)
                 {
                     pBuffer->m_BufferManaged = pContext->GetRingBuffer(MEM_MANAGED_RINGBUFFER);
@@ -2290,7 +2306,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
                 pBuffer->m_BufferShared = pContext->GetRingBuffer(MEM_SHARED_RINGBUFFER);
                 [pBuffer->m_BufferShared retain];
             }
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
             if (!pBuffer->m_BufferManaged)
             {
                 pBuffer->m_BufferManaged = pContext->GetRingBuffer(MEM_MANAGED_RINGBUFFER);
@@ -2332,7 +2348,7 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
             SBuffer * pBuffer(static_cast<SBuffer*>(pResource));
 
             assert(pBuffer->m_eUsage == eBU_MapInRingBufferTTLOnce);
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
             //If this buffer was using the faster ring buffer synchronize with the GPU
             MemRingBufferStorage memAllocMode = GetMemAllocModeBasedOnSize(pBuffer->m_uMapSize);
             if (memAllocMode == MEM_MANAGED_RINGBUFFER)
@@ -2693,11 +2709,13 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
     template <typename Impl>
     typename Impl::TViewPtr GetTexture1DView(STexture* pTexture, const typename Impl::TViewDesc& kViewDesc, CDevice* pDevice)
     {
+        using ViewDimensionType = decltype(kViewDesc.ViewDimension);
+
         switch (kViewDesc.ViewDimension)
         {
-        case Impl::DIMENSION_TEXTURE1D:
+        case static_cast<ViewDimensionType>(Impl::DIMENSION_TEXTURE1D):
             return Impl::GetViewMip(pTexture,       kViewDesc.Texture1D,      kViewDesc.Format, MTLTextureType1D,       0, 1, pDevice);
-        case Impl::DIMENSION_TEXTURE1DARRAY:
+        case static_cast<ViewDimensionType>(Impl::DIMENSION_TEXTURE1DARRAY):
             return Impl::GetViewMipLayers(pTexture, kViewDesc.Texture1DArray, kViewDesc.Format, MTLTextureType1DArray,       pDevice);
         }
         return NULL;
@@ -2706,14 +2724,16 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
     template <typename Impl>
     typename Impl::TViewPtr GetTexture2DView(STexture* pTexture, const typename Impl::TViewDesc& kViewDesc, CDevice* pDevice)
     {
+        using ViewDimensionType = decltype(kViewDesc.ViewDimension);
+
         switch (kViewDesc.ViewDimension)
         {
-        case Impl::DIMENSION_TEXTURE2D:
+        case static_cast<ViewDimensionType>(Impl::DIMENSION_TEXTURE2D):
             return Impl::GetViewMip(pTexture,       kViewDesc.Texture2D,        kViewDesc.Format, MTLTextureType2D,                   0, 1,       pDevice);
-        case Impl::DIMENSION_TEXTURE2DARRAY:
+        case static_cast<ViewDimensionType>(Impl::DIMENSION_TEXTURE2DARRAY):
             return Impl::GetViewMipLayers(pTexture, kViewDesc.Texture2DArray,   kViewDesc.Format, MTLTextureType2DArray,                         pDevice);
 #if DXGL_SUPPORT_MULTISAMPLED_TEXTURES
-        case Impl::DIMENSION_TEXTURE2DMS:
+        case static_cast<ViewDimensionType>(Impl::DIMENSION_TEXTURE2DMS):
             return Impl::GetView(pTexture,                                      kViewDesc.Format, GL_TEXTURE_2D_MULTISAMPLE,       0, 1, 0, 1, pDevice);
 #endif //DXGL_SUPPORT_MULTISAMPLED_TEXTURES
         }
@@ -2723,9 +2743,11 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
     template <typename Impl>
     typename Impl::TViewPtr GetTextureCubeView(STexture* pTexture, const typename Impl::TViewDesc& kViewDesc, CDevice* pDevice)
     {
+        using ViewDimensionType = decltype(kViewDesc.ViewDimension);
+
         switch (kViewDesc.ViewDimension)
         {
-        case D3D11_SRV_DIMENSION_TEXTURECUBE:
+        case static_cast<ViewDimensionType>(D3D11_SRV_DIMENSION_TEXTURECUBE):
             DXGL_TODO("Check if 6 is correct");
             return Impl::GetViewMip(pTexture, kViewDesc.TextureCube, kViewDesc.Format, MTLTextureTypeCube, 0, 6, pDevice);
         }
@@ -2929,7 +2951,6 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
         pSrcTexture->m_pfUnmapSubresource(pSrcTexture, uSrcSubresource, pContext);
     }
 
-    //  Confetti BEGIN: Igor Lobanchikov
     void CopyTextureWithBlitCommandEncoder(
         STexture* pDstTexture, STexPos kDstPos, STexSubresourceID kDstSubID,
         STexture* pSrcTexture, STexPos kSrcPos, STexSubresourceID kSrcSubID,
@@ -2941,17 +2962,27 @@ bytesPerImage: kMappedSubTex.m_uImagePitch];
 
         id<MTLBlitCommandEncoder> blitCommandEncoder = pContext->GetBlitCommandEncoder();
         [blitCommandEncoder copyFromTexture: pSrcTexture->m_Texture
-sourceSlice: kSrcSubID.m_uElement
-sourceLevel: kSrcSubID.m_iMipLevel
-sourceOrigin: sourceOrigin
-sourceSize: sourceSize
-toTexture: pDstTexture->m_Texture
-destinationSlice: kDstSubID.m_uElement
-destinationLevel: kDstSubID.m_uElement
-destinationOrigin: destinationOrigin];
+                                sourceSlice: kSrcSubID.m_uElement
+                                sourceLevel: kSrcSubID.m_iMipLevel
+                               sourceOrigin: sourceOrigin
+                                 sourceSize: sourceSize
+                                  toTexture: pDstTexture->m_Texture
+                           destinationSlice: kDstSubID.m_uElement
+                           destinationLevel: kDstSubID.m_iMipLevel
+                          destinationOrigin: destinationOrigin];
+        
+#if defined AZ_PLATFORM_MAC
+        if (pDstTexture->m_Texture.storageMode == MTLStorageModeManaged)
+        {
+            // Need to synchronize the CPU/GPU versions of the texture if it is
+            // in manged storage mode otherwise the CPU may not see any of the
+            // writes the GPU does to the texture
+            [blitCommandEncoder synchronizeTexture: pDstTexture->m_Texture
+                                             slice: kDstSubID.m_uElement
+                                             level: kDstSubID.m_iMipLevel];
+        }
+#endif
     }
-    //  Confetti End: Igor Lobanchikov
-
 
     template <CopyTextureBoxFunc pfCopyTextureBox>
     void CopyTextureImpl(STexture* pDstTexture, STexture* pSrcTexture, CContext* pContext)
@@ -3026,14 +3057,13 @@ destinationOrigin: destinationOrigin];
         assert(pDstTexture->m_Texture);
         assert(pSrcTexture->m_Texture);
 
-        if (pContext->TrySlowCopySubresource(pDstTexture, uDstSubresource, uDstX, uDstY, uDstZ,
-                pSrcTexture, uSrcSubresource, pSrcBox))
+        if (pDstTexture->m_eFormat != pSrcTexture->m_eFormat)
         {
+            pContext->TrySlowCopySubresource(pDstTexture, uDstSubresource, uDstX, uDstY, uDstZ, pSrcTexture, uSrcSubresource, pSrcBox);
             return;
         }
 
         CopySubTextureImpl<CopyTextureWithBlitCommandEncoder>(pDstTexture, uDstSubresource, uDstX, uDstY, uDstZ, pSrcTexture, uSrcSubresource, pSrcBox, pContext);
-        //  Confetti End: Igor Lobanchikov
     }
 
     void CopySubBufferInternal(SBuffer* pDstBuffer, SBuffer* pSrcBuffer, uint32 uDstOffset, uint32 uSrcOffset, uint32 uSize, CContext* pContext)

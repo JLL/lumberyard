@@ -15,6 +15,7 @@
 #include "LookAtComponent.h"
 
 #include <AzCore/Serialization/EditContext.h>
+#include <AzCore/Math/Transform.h>
 
 namespace LmbrCentral
 {
@@ -38,17 +39,18 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/LookAt.png")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/LookAt.png")
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
+                        ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
 
                     ->DataElement(AZ::Edit::UIHandlers::Default, &EditorLookAtComponent::m_targetId, "Target", "The entity to look at")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &EditorLookAtComponent::OnTargetChanged)
 
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &EditorLookAtComponent::m_forwardAxis, "Forward Axis", "The local axis that should point at the target")
-                        ->EnumAttribute(AzFramework::Axis::YPositive, "Y+")
-                        ->EnumAttribute(AzFramework::Axis::YNegative, "Y-")
-                        ->EnumAttribute(AzFramework::Axis::XPositive, "X+")
-                        ->EnumAttribute(AzFramework::Axis::XNegative, "X-")
-                        ->EnumAttribute(AzFramework::Axis::ZPositive, "Z+")
-                        ->EnumAttribute(AzFramework::Axis::ZNegative, "Z-")
+                        ->EnumAttribute(AZ::Transform::Axis::YPositive, "Y+")
+                        ->EnumAttribute(AZ::Transform::Axis::YNegative, "Y-")
+                        ->EnumAttribute(AZ::Transform::Axis::XPositive, "X+")
+                        ->EnumAttribute(AZ::Transform::Axis::XNegative, "X-")
+                        ->EnumAttribute(AZ::Transform::Axis::ZPositive, "Z+")
+                        ->EnumAttribute(AZ::Transform::Axis::ZNegative, "Z-")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &EditorLookAtComponent::RecalculateTransform)
                     ;
             }
@@ -173,7 +175,7 @@ namespace LmbrCentral
                 AZ::Transform targetTM = AZ::Transform::CreateIdentity();
                 EBUS_EVENT_ID_RESULT(targetTM, m_targetId, AZ::TransformBus, GetWorldTM);
 
-                AZ::Transform lookAtTransform = AzFramework::CreateLookAt(
+                AZ::Transform lookAtTransform = AZ::Transform::CreateLookAt(
                     currentTM.GetPosition(),
                     targetTM.GetPosition(),
                     m_forwardAxis

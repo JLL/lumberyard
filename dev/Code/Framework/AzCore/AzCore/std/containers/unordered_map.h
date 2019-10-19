@@ -12,6 +12,7 @@
 #ifndef AZSTD_UNORDERED_MAP_H
 #define AZSTD_UNORDERED_MAP_H 1
 
+#include <AzCore/std/containers/node_handle.h>
 #include <AzCore/std/hash_table.h>
 
 namespace AZStd
@@ -104,8 +105,13 @@ namespace AZStd
 
         typedef typename base_type::pair_iter_bool              pair_iter_bool;
 
+        using node_type = map_node_handle<map_node_traits<key_type, mapped_type, allocator_type, typename base_type::list_node_type, typename base_type::node_deleter>>;
+        using insert_return_type = insert_return_type<iterator, node_type>;
+
         AZ_FORCE_INLINE unordered_map()
             : base_type(hasher(), key_eq(), allocator_type()) {}
+        explicit unordered_map(const allocator_type& alloc)
+            : base_type(hasher(), key_eq(), alloc) {}
         AZ_FORCE_INLINE unordered_map(const unordered_map& rhs)
             : base_type(rhs) {}
         /// This constructor is AZStd extension (so we don't rehash/allocate memory)
@@ -177,7 +183,6 @@ namespace AZStd
         }
 #endif // #if defined(AZ_HAS_INITIALIZERS_LIST)
 
-#ifdef AZ_HAS_RVALUE_REFS
         AZ_FORCE_INLINE unordered_map(this_type&& rhs)
             : base_type(AZStd::move(rhs))
         {
@@ -188,7 +193,6 @@ namespace AZStd
             base_type::operator=(AZStd::move(rhs));
             return *this;
         }
-#endif // AZ_HAS_RVALUE_REFS
 
         AZ_FORCE_INLINE this_type& operator=(const this_type& rhs)
         {
@@ -218,6 +222,29 @@ namespace AZStd
             const_iterator iter = base_type::find(key);
             AZSTD_CONTAINER_ASSERT(iter != base_type::end(), "Element with key is not present");
             return iter->second;
+        }
+
+        using base_type::insert;
+        insert_return_type insert(node_type&& nodeHandle)
+        {
+            AZSTD_CONTAINER_ASSERT(nodeHandle.empty() || nodeHandle.get_allocator() == base_type::get_allocator(),
+                "node_type with incompatible allocator passed to unordered_map::insert(node_type&& nodeHandle)");
+            return base_type::template node_handle_insert<insert_return_type>(AZStd::move(nodeHandle));
+        }
+        iterator insert(const_iterator hint, node_type&& nodeHandle)
+        {
+            AZSTD_CONTAINER_ASSERT(nodeHandle.empty() || nodeHandle.get_allocator() == base_type::get_allocator(),
+                "node_type with incompatible allocator passed to unordered_map::insert(const_iterator hint, node_type&& nodeHandle)");
+            return base_type::node_handle_insert(hint, AZStd::move(nodeHandle));
+        }
+
+        node_type extract(const key_type& key)
+        {
+            return base_type::template node_handle_extract<node_type>(key);
+        }
+        node_type extract(const_iterator it)
+        {
+            return base_type::template node_handle_extract<node_type>(it);
         }
 
         /**
@@ -303,8 +330,12 @@ namespace AZStd
 
         typedef typename base_type::pair_iter_bool              pair_iter_bool;
 
+        using node_type = map_node_handle<map_node_traits<key_type, mapped_type, allocator_type, typename base_type::list_node_type, typename base_type::node_deleter>>;
+
         AZ_FORCE_INLINE unordered_multimap()
             : base_type(hasher(), key_eq(), allocator_type()) {}
+        explicit unordered_multimap(const allocator_type& alloc)
+            : base_type(hasher(), key_eq(), alloc){}
         AZ_FORCE_INLINE unordered_multimap(const unordered_multimap& rhs)
             : base_type(rhs) {}
         /// This constructor is AZStd extension (so we don't rehash/allocate memory)
@@ -376,7 +407,6 @@ namespace AZStd
         }
 #endif // #if defined(AZ_HAS_INITIALIZERS_LIST)
 
-#ifdef AZ_HAS_RVALUE_REFS
         AZ_FORCE_INLINE unordered_multimap(this_type&& rhs)
             : base_type(AZStd::move(rhs))
         {
@@ -387,7 +417,6 @@ namespace AZStd
             base_type::operator=(AZStd::move(rhs));
             return *this;
         }
-#endif // AZ_HAS_RVALUE_REFS
 
         AZ_FORCE_INLINE this_type& operator=(const this_type& rhs)
         {
@@ -398,6 +427,29 @@ namespace AZStd
         AZ_FORCE_INLINE iterator insert(const value_type& value)
         {
             return base_type::insert_impl(value).first;
+        }
+
+        iterator insert(node_type&& nodeHandle)
+        {
+            AZSTD_CONTAINER_ASSERT(nodeHandle.empty() || nodeHandle.get_allocator() == base_type::get_allocator(),
+                "node_type with incompatible allocator passed to unordered_multimap::insert(node_type&& nodeHandle)");
+            using insert_return_type = insert_return_type<iterator, node_type>;
+            return base_type::template node_handle_insert<insert_return_type>(AZStd::move(nodeHandle)).position;
+        }
+        iterator insert(const_iterator hint, node_type&& nodeHandle)
+        {
+            AZSTD_CONTAINER_ASSERT(nodeHandle.empty() || nodeHandle.get_allocator() == base_type::get_allocator(),
+                "node_type with incompatible allocator passed to unordered_multimap::insert(const_iterator hint, node_type nodeHandle)");
+            return base_type::node_handle_insert(hint, AZStd::move(nodeHandle));
+        }
+
+        node_type extract(const key_type& key)
+        {
+            return base_type::template node_handle_extract<node_type>(key);
+        }
+        node_type extract(const_iterator it)
+        {
+            return base_type::template node_handle_extract<node_type>(it);
         }
 
         /**

@@ -16,6 +16,7 @@
 #include <ScriptCanvas/Core/Endpoint.h>
 #include <ScriptCanvas/Core/GraphBus.h>
 #include <ScriptCanvas/Core/Node.h>
+#include <ScriptCanvas/Core/SlotMetadata.h>
 #include <ScriptCanvas/Core/SlotNames.h>
 #include <ScriptCanvas/Data/PropertyTraits.h>
 
@@ -29,35 +30,27 @@ namespace ScriptCanvas
         {
             class ExtractProperty
                 : public Node
-                , public EndpointNotificationBus::Handler
             {
             public:
                 ScriptCanvas_Node(ExtractProperty,
                     ScriptCanvas_Node::Name("Extract Properties", "Extracts property values from connected input")
                     ScriptCanvas_Node::Uuid("{D4C9DA8E-838B-41C6-B870-C75294C323DC}")
                     ScriptCanvas_Node::Icon("Editor/Icons/ScriptCanvas/Placeholder.png")
+                    ScriptCanvas_Node::Category("Utilities")
                     ScriptCanvas_Node::Version(0)
                 );
 
                 Data::Type GetSourceSlotDataType() const;
                 AZStd::vector<AZStd::pair<AZStd::string_view, SlotId>> GetPropertyFields() const;
 
-                struct SlotMetadata
-                {
-                    AZ_TYPE_INFO(SlotMetadata, "{315C9851-1747-4D68-9A4A-B699FA9FC754}");
-                    AZ_CLASS_ALLOCATOR(SlotMetadata, AZ::SystemAllocator, 0);
-                    static void Reflect(AZ::ReflectContext* reflectContext);
-                    SlotId m_slotId;
-                    Data::Type m_dataType;
-                };
-
             protected:
                 void OnInit() override;
-                void OnInputSignal(const SlotId&) override;
-                bool SlotAcceptsType(const SlotId&, const Data::Type&) const override;
 
+                void OnInputSignal(const SlotId&) override;
+
+                // NodeNotificationBus
                 void OnEndpointConnected(const Endpoint& targetEndpoint) override;
-                void OnEndpointDisconnected(const Endpoint& targetEndpoint) override;
+                ////
 
                 void AddPropertySlots(const Data::Type& type);
                 void ClearPropertySlots();

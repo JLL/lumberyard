@@ -19,16 +19,13 @@ def build(bld):
 
         # Settings
         target             = 'CryCommon',
-        vs_filter          = 'Common',
+        vs_filter          = 'CryEngine',
         copyright_org      = 'Amazon-CryTek',
         file_list          = 'crycommon.waf_files',
         platforms          = ['all'],
         configurations     = ['all'],
-        defines            = ['ENGINE_EXPORTS'],
         use                = [ 'AzCore'],
         win_test_file_list = "crycommon_testing.waf_files",
         win_cxxflags       = [ '/wd4355' ],
         win_features       = ['crcfix'],
-       
-       
 )

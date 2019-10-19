@@ -10,9 +10,9 @@
 *
 */
 
-#include "stdafx.h"
+#include "StdAfx.h"
 
-#ifdef AZ_PLATFORM_APPLE
+#if AZ_TRAIT_OS_PLATFORM_APPLE
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <AzToolsFramework/Process/ProcessCommunicator.h>
@@ -244,4 +244,4 @@ namespace AzToolsFramework
     }
 } // namespace AzToolsFramework
 
-#endif // AZ_PLATFORM_APPLE
+#endif // AZ_TRAIT_OS_PLATFORM_APPLE

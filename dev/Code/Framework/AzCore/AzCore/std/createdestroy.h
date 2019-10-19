@@ -163,8 +163,8 @@ namespace AZStd
             AZStd::size_t numElements = last - first;
             if (numElements > 0)
             {
-                AZ_Assert((&*result < &*first) || (&*result >= (&*first + numElements)), "AZStd::copy memory overlaps use AZStd::move_backward!");
-                AZ_Assert(((&*result + numElements) <= &*first) || ((&*result + numElements) > (&*first + numElements)), "AZStd::copy memory overlaps use AZStd::move_backward!");
+                AZ_Assert((static_cast<const void*>(&*result) < static_cast<const void*>(&*first)) || (static_cast<const void*>(&*result) >= static_cast<const void*>(&*first + numElements)), "AZStd::copy memory overlaps use AZStd::move_backward!");
+                AZ_Assert((static_cast<const void*>(&*result + numElements) <= static_cast<const void*>(&*first)) || (static_cast<const void*>(&*result + numElements) > static_cast<const void*>(&*first + numElements)), "AZStd::copy memory overlaps use AZStd::move_backward!");
                 /*AZSTD_STL::*/ memcpy(&*result, &*first, numElements * sizeof(typename iterator_traits<InputIterator>::value_type));
             }
             return result + numElements;
@@ -199,6 +199,18 @@ namespace AZStd
             }
             return result;
         }
+
+        template <class BidirectionalIterator1, class ForwardIterator>
+        inline ForwardIterator reverse_copy(const BidirectionalIterator1& first, const BidirectionalIterator1& last, ForwardIterator dest)
+        {
+            BidirectionalIterator1 iter(last);
+            while (iter != first)
+            {
+                *(dest++) = *(--iter);
+            }
+
+            return dest;
+        }
         //////////////////////////////////////////////////////////////////////////
 
         //////////////////////////////////////////////////////////////////////////
@@ -207,17 +219,10 @@ namespace AZStd
         inline ForwardIterator move(const InputIterator& first, const InputIterator& last, ForwardIterator result, const false_type& /* is_fast_copy<InputIterator,ForwardIterator>() */)
         {
             InputIterator iter(first);
-#ifdef AZ_HAS_RVALUE_REFS
             for (; iter != last; ++result, ++iter)
             {
                 *result = AZStd::move(*iter);
             }
-#else
-            for (; iter != last; ++result, ++iter)
-            {
-                *result = *iter;
-            }
-#endif
             return result;
         }
 
@@ -240,17 +245,10 @@ namespace AZStd
         inline BidirectionalIterator2 move_backward(const BidirectionalIterator1& first, const BidirectionalIterator1& last, BidirectionalIterator2 result, const false_type& /* is_fast_copy<BidirectionalIterator1,BidirectionalIterator2>() */)
         {
             BidirectionalIterator1 iter(last);
-#ifdef AZ_HAS_RVALUE_REFS
             while (first != iter)
             {
                 *--result = AZStd::move(*--iter);
             }
-#else
-            while (first != iter)
-            {
-                *--result = *--iter;
-            }
-#endif
             return result;
         }
 
@@ -439,17 +437,10 @@ namespace AZStd
     {
         InputIterator iter(first);
 
-#ifdef AZ_HAS_RVALUE_REFS
         for (; iter != last; ++result, ++iter)
         {
             ::new (static_cast<void*>(&*result)) typename iterator_traits<ForwardIterator>::value_type(AZStd::move(*iter));
         }
-#else
-        for (; iter != last; ++result, ++iter)
-        {
-            ::new (static_cast<void*>(&*result)) typename iterator_traits<ForwardIterator>::value_type(*iter);
-        }
-#endif
         return result;
     }
     // Specialized copy for continuous iterators and trivial move type. (since the object is POD we will just perform a copy)
@@ -491,6 +482,12 @@ namespace AZStd
         }
         return result;
     }*/
+
+    template <class BidirectionalIterator, class OutputIterator>
+    OutputIterator reverse_copy(BidirectionalIterator first, BidirectionalIterator last, OutputIterator dest)
+    {
+        return AZStd::Internal::reverse_copy(first, last, dest);
+    }
 
     template<class BidirectionalIterator1, class BidirectionalIterator2>
     BidirectionalIterator2  copy_backward(BidirectionalIterator1 first, BidirectionalIterator1 last, BidirectionalIterator2 result)

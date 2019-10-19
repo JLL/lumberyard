@@ -68,9 +68,12 @@ public:
     void SetTimeScale(float fScale) { m_fTimeScale = fScale; }
 
     /** Set active editing sequence.
-        @param seq New active sequence.
-    */
-    void SetSequence(CTrackViewSequence* pSequence, bool bForce, bool bNoNotify);
+        @param sequence New active sequence.
+        @param force Set to true to always run all of the new active sequence code including listeners even if the sequences is already selected.
+        @param noNotify Set to true to skip over notifying listeners when a new sequences is selected.
+        @param user Set to true if the new sequence is being selected by the user, false if set by internal system code.
+        */
+    void SetSequence(CTrackViewSequence* sequence, bool force, bool noNotify, bool user = false);
 
     /** Get currently edited sequence.
     */
@@ -230,13 +233,15 @@ private:
     //! Currently active animation sequence.
     CTrackViewSequence* m_pSequence;
 
-    //! Id of lastest valid sequence that was selected. Useful for restoring the selected
+    //! Id of latest valid sequence that was selected. Useful for restoring the selected
     //! sequence after undo has destroyed and recreated it.
     AZ::EntityId m_mostRecentSequenceId;
 
+    //! The current time of the most recent selected sequence. It's very useful to restore this after an undo.
+    float m_mostRecentSequenceTime;
+
     //! Id of active sequence to restore (for switching back from game mode and saving)
     AZ::EntityId m_sequenceToRestore;
-
 
     //! Time of active sequence (for switching back from game mode and saving)
     float m_sequenceRestoreTime;

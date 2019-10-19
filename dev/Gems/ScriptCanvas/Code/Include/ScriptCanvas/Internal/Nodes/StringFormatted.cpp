@@ -10,7 +10,6 @@
 *
 */
 
-#include "precompiled.h"
 #include "StringFormatted.h"
 
 #include <AzCore/std/string/regex.h>
@@ -25,6 +24,8 @@ namespace ScriptCanvas
         {
             AZStd::string StringFormatted::ProcessFormat()
             {
+                AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::ScriptCanvas, "ScriptCanvas::StringFormatted::ProcessFormat");
+
                 AZStd::string text;
 
                 if (!m_format.empty())
@@ -40,7 +41,11 @@ namespace ScriptCanvas
                             AZStd::string result;
                             if (datum)
                             {
-                                if (datum->GetType().IsValid() && datum->ToString(result))
+                                if (datum->GetType().IsValid() && datum->IS_A(Data::Type::Number()))
+                                {
+                                    m_unresolvedString[binding.first] = AZStd::string::format("%.*lf", m_numericPrecision, (*datum->GetAs<Data::NumberType>()));
+                                }
+                                else if (datum->GetType().IsValid() && datum->ToString(result))
                                 {
                                     m_unresolvedString[binding.first] = result;
                                 }
@@ -85,8 +90,17 @@ namespace ScriptCanvas
                     AZStd::string tooltip = AZStd::string::format("Value which replaces instances of {%s} in the resulting string.", match[1].str().c_str());
 
                     // If the slot has never existed, create it
-                    auto pair = m_formatSlotMap.emplace(AZStd::make_pair(name, AddInputDatumOverloadedSlot(name, tooltip)));
+                    DynamicDataSlotConfiguration dataSlotConfiguration;
 
+                    dataSlotConfiguration.m_name = name;
+                    dataSlotConfiguration.m_toolTip = tooltip;
+
+                    dataSlotConfiguration.SetConnectionType(ConnectionType::Input);
+                    dataSlotConfiguration.m_dynamicDataType = DynamicDataType::Any;
+
+                    dataSlotConfiguration.m_addUniqueSlotByNameAndType = true;
+
+                    auto pair = m_formatSlotMap.emplace(AZStd::make_pair(name, AddSlot(dataSlotConfiguration)));
                     const auto& slotId = pair.first->second;
 
                     m_arrayBindingMap.emplace(AZStd::make_pair(m_unresolvedString.size(), slotId));
@@ -139,6 +153,18 @@ namespace ScriptCanvas
             {
                 // Parse the serialized format to make sure the utility containers are properly configured for lookup at runtime.
                 ParseFormat();
+
+                // DYNAMIC_SLOT_VERSION_CONVERTER
+                for (auto slotPair : m_formatSlotMap)
+                {
+                    Slot* slot = GetSlot(slotPair.second);
+
+                    if (slot && !slot->IsDynamicSlot())
+                    {
+                        slot->SetDynamicDataType(DynamicDataType::Any);
+                    }
+                }
+                ////
             }
         }
     }

@@ -85,7 +85,7 @@ EEfResTextures MaterialHelpers::FindTexSlot(const char* texName) const
 {
     for (int i = 0; s_TexSlotSemantics[i].name; i++)
     {
-        if (stricmp(s_TexSlotSemantics[i].name, texName) == 0)
+        if (azstricmp(s_TexSlotSemantics[i].name, texName) == 0)
         {
             return s_TexSlotSemantics[i].slot;
         }
@@ -143,20 +143,20 @@ bool MaterialHelpers::SetGetMaterialParamFloat(IRenderShaderResources& pShaderRe
 {
     EEfResTextures texSlot = EFTT_UNKNOWN;
 
-    if (!stricmp("emissive_intensity", sParamName))
+    if (!azstricmp("emissive_intensity", sParamName))
     {
         texSlot = EFTT_EMITTANCE;
     }
-    else if (!stricmp("shininess", sParamName))
+    else if (!azstricmp("shininess", sParamName))
     {
         texSlot = EFTT_SMOOTHNESS;
     }
-    else if (!stricmp("opacity", sParamName))
+    else if (!azstricmp("opacity", sParamName))
     {
         texSlot = EFTT_OPACITY;
     }
 
-    if (!stricmp("alpha", sParamName))
+    if (!azstricmp("alpha", sParamName))
     {
         if (bGet)
         {
@@ -191,15 +191,15 @@ bool MaterialHelpers::SetGetMaterialParamVec3(IRenderShaderResources& pShaderRes
 {
     EEfResTextures texSlot = EFTT_UNKNOWN;
 
-    if (!stricmp("diffuse", sParamName))
+    if (!azstricmp("diffuse", sParamName))
     {
         texSlot = EFTT_DIFFUSE;
     }
-    else if (!stricmp("specular", sParamName))
+    else if (!azstricmp("specular", sParamName))
     {
         texSlot = EFTT_SPECULAR;
     }
-    else if (!stricmp("emissive_color", sParamName))
+    else if (!azstricmp("emissive_color", sParamName))
     {
         texSlot = EFTT_EMITTANCE;
     }
@@ -459,7 +459,7 @@ void MaterialHelpers::SetTexturesFromXml(SInputShaderResources& pShaderResources
             // legacy.  Some textures used to be referenced using "engine\\" or "engine/" - this is no longer valid
             if (
                 (strlen(fileName) > 7) &&
-                (strnicmp(fileName, "engine", 6) == 0) &&
+                (azstrnicmp(fileName, "engine", 6) == 0) &&
                 ((fileName[6] == '\\') || (fileName[6] == '/'))
                 )
             {
@@ -508,14 +508,13 @@ void MaterialHelpers::SetXmlFromTextures( SInputShaderResources& pShaderResource
 
     for (auto& iter : *(pShaderResources.GetTexturesResourceMap()) )
     {
-        uint16                  texId = iter.first;
-        const SEfResTexture*    pTextureRes = &(iter.second);
-        if (!pTextureRes->m_Name.empty())
+        EEfResTextures texId = static_cast<EEfResTextures>(iter.first);
+        const SEfResTexture* pTextureRes = &(iter.second);
+        if (pTextureRes && !pTextureRes->m_Name.empty() && IsAdjustableTexSlot(texId))
         {
             XmlNodeRef texNode = texturesNode->newChild("Texture");
 
-            //    texNode->setAttr("TexID",texId);
-            texNode->setAttr("Map", MaterialHelpers::LookupTexName( (EEfResTextures) texId));
+            texNode->setAttr("Map", MaterialHelpers::LookupTexName(texId));
             texNode->setAttr("File", pTextureRes->m_Name.c_str());
 
             if (pTextureRes->m_Filter != defaultTextureResource.m_Filter)
@@ -564,9 +563,6 @@ void MaterialHelpers::SetVertexDeformFromXml(SInputShaderResources& pShaderResou
         deformNode->getAttr("Type", deform_type);
         pShaderResources.m_DeformInfo.m_eType = (EDeformType)deform_type;
         deformNode->getAttr("DividerX", pShaderResources.m_DeformInfo.m_fDividerX);
-        deformNode->getAttr("DividerY", pShaderResources.m_DeformInfo.m_fDividerY);
-        deformNode->getAttr("DividerZ", pShaderResources.m_DeformInfo.m_fDividerZ);
-        deformNode->getAttr("DividerW", pShaderResources.m_DeformInfo.m_fDividerW);
         deformNode->getAttr("NoiseScale", pShaderResources.m_DeformInfo.m_vNoiseScale);
 
         XmlNodeRef waveX = deformNode->findChild("WaveX");
@@ -579,42 +575,6 @@ void MaterialHelpers::SetVertexDeformFromXml(SInputShaderResources& pShaderResou
             waveX->getAttr("Level", pShaderResources.m_DeformInfo.m_WaveX.m_Level);
             waveX->getAttr("Phase", pShaderResources.m_DeformInfo.m_WaveX.m_Phase);
             waveX->getAttr("Freq", pShaderResources.m_DeformInfo.m_WaveX.m_Freq);
-        }
-
-        XmlNodeRef waveY = deformNode->findChild("WaveY");
-        if (waveY)
-        {
-            int type = eWF_None;
-            waveY->getAttr("Type", type);
-            pShaderResources.m_DeformInfo.m_WaveY.m_eWFType = (EWaveForm)type;
-            waveY->getAttr("Amp", pShaderResources.m_DeformInfo.m_WaveY.m_Amp);
-            waveY->getAttr("Level", pShaderResources.m_DeformInfo.m_WaveY.m_Level);
-            waveY->getAttr("Phase", pShaderResources.m_DeformInfo.m_WaveY.m_Phase);
-            waveY->getAttr("Freq", pShaderResources.m_DeformInfo.m_WaveY.m_Freq);
-        }
-
-        XmlNodeRef waveZ = deformNode->findChild("WaveZ");
-        if (waveZ)
-        {
-            int type = eWF_None;
-            waveZ->getAttr("Type", type);
-            pShaderResources.m_DeformInfo.m_WaveZ.m_eWFType = (EWaveForm)type;
-            waveZ->getAttr("Amp", pShaderResources.m_DeformInfo.m_WaveZ.m_Amp);
-            waveZ->getAttr("Level", pShaderResources.m_DeformInfo.m_WaveZ.m_Level);
-            waveZ->getAttr("Phase", pShaderResources.m_DeformInfo.m_WaveZ.m_Phase);
-            waveZ->getAttr("Freq", pShaderResources.m_DeformInfo.m_WaveZ.m_Freq);
-        }
-
-        XmlNodeRef waveW = deformNode->findChild("WaveW");
-        if (waveW)
-        {
-            int type = eWF_None;
-            waveW->getAttr("Type", type);
-            pShaderResources.m_DeformInfo.m_WaveW.m_eWFType = (EWaveForm)type;
-            waveW->getAttr("Amp", pShaderResources.m_DeformInfo.m_WaveW.m_Amp);
-            waveW->getAttr("Level", pShaderResources.m_DeformInfo.m_WaveW.m_Level);
-            waveW->getAttr("Phase", pShaderResources.m_DeformInfo.m_WaveW.m_Phase);
-            waveW->getAttr("Freq", pShaderResources.m_DeformInfo.m_WaveW.m_Freq);
         }
     }
 }
@@ -631,28 +591,15 @@ void MaterialHelpers::SetXmlFromVertexDeform(const SInputShaderResources& pShade
 
         deformNode->setAttr("Type", pShaderResources.m_DeformInfo.m_eType);
         deformNode->setAttr("DividerX", pShaderResources.m_DeformInfo.m_fDividerX);
-        deformNode->setAttr("DividerY", pShaderResources.m_DeformInfo.m_fDividerY);
         deformNode->setAttr("NoiseScale", pShaderResources.m_DeformInfo.m_vNoiseScale);
 
-        if (pShaderResources.m_DeformInfo.m_WaveX.m_eWFType != eWF_None)
-        {
-            XmlNodeRef waveX = deformNode->newChild("WaveX");
-            waveX->setAttr("Type", pShaderResources.m_DeformInfo.m_WaveX.m_eWFType);
-            waveX->setAttr("Amp", pShaderResources.m_DeformInfo.m_WaveX.m_Amp);
-            waveX->setAttr("Level", pShaderResources.m_DeformInfo.m_WaveX.m_Level);
-            waveX->setAttr("Phase", pShaderResources.m_DeformInfo.m_WaveX.m_Phase);
-            waveX->setAttr("Freq", pShaderResources.m_DeformInfo.m_WaveX.m_Freq);
-        }
+        XmlNodeRef waveX = deformNode->newChild("WaveX");
+        waveX->setAttr("Type", pShaderResources.m_DeformInfo.m_WaveX.m_eWFType);
+        waveX->setAttr("Amp", pShaderResources.m_DeformInfo.m_WaveX.m_Amp);
+        waveX->setAttr("Level", pShaderResources.m_DeformInfo.m_WaveX.m_Level);
+        waveX->setAttr("Phase", pShaderResources.m_DeformInfo.m_WaveX.m_Phase);
+        waveX->setAttr("Freq", pShaderResources.m_DeformInfo.m_WaveX.m_Freq);
 
-        if (pShaderResources.m_DeformInfo.m_WaveY.m_eWFType != eWF_None)
-        {
-            XmlNodeRef waveY = deformNode->newChild("WaveY");
-            waveY->setAttr("Type", pShaderResources.m_DeformInfo.m_WaveY.m_eWFType);
-            waveY->setAttr("Amp", pShaderResources.m_DeformInfo.m_WaveY.m_Amp);
-            waveY->setAttr("Level", pShaderResources.m_DeformInfo.m_WaveY.m_Level);
-            waveY->setAttr("Phase", pShaderResources.m_DeformInfo.m_WaveY.m_Phase);
-            waveY->setAttr("Freq", pShaderResources.m_DeformInfo.m_WaveY.m_Freq);
-        }
     }
 }
 
@@ -761,7 +708,7 @@ void MaterialHelpers::SetShaderParamsFromXml(SInputShaderResources& pShaderResou
         {
             SShaderParam* pParam = &pShaderResources.m_ShaderParams[j];
 
-            if (strcmp(pParam->m_Name, key) == 0)
+            if (pParam->m_Name == key)
             {
                 bFound = true;
 
@@ -824,10 +771,10 @@ void MaterialHelpers::SetShaderParamsFromXml(SInputShaderResources& pShaderResou
             assert(val && key);
 
             SShaderParam Param;
-            cry_strcpy(Param.m_Name, key);
+            Param.m_Name = key;
             Param.m_Value.m_Color[0] = Param.m_Value.m_Color[1] = Param.m_Value.m_Color[2] = Param.m_Value.m_Color[3] = 0;
 
-            int res = sscanf(val, "%f,%f,%f,%f", &Param.m_Value.m_Color[0], &Param.m_Value.m_Color[1], &Param.m_Value.m_Color[2], &Param.m_Value.m_Color[3]);
+            int res = azsscanf(val, "%f,%f,%f,%f", &Param.m_Value.m_Color[0], &Param.m_Value.m_Color[1], &Param.m_Value.m_Color[2], &Param.m_Value.m_Color[3]);
             assert(res);
 
             pShaderResources.m_ShaderParams.push_back(Param);
@@ -844,22 +791,22 @@ void MaterialHelpers::SetXmlFromShaderParams(const SInputShaderResources& pShade
         switch (pParam->m_Type)
         {
         case eType_BYTE:
-            node->setAttr(pParam->m_Name, (int)pParam->m_Value.m_Byte);
+            node->setAttr(pParam->m_Name.c_str(), (int)pParam->m_Value.m_Byte);
             break;
         case eType_SHORT:
-            node->setAttr(pParam->m_Name, (int)pParam->m_Value.m_Short);
+            node->setAttr(pParam->m_Name.c_str(), (int)pParam->m_Value.m_Short);
             break;
         case eType_INT:
-            node->setAttr(pParam->m_Name, (int)pParam->m_Value.m_Int);
+            node->setAttr(pParam->m_Name.c_str(), (int)pParam->m_Value.m_Int);
             break;
         case eType_FLOAT:
-            node->setAttr(pParam->m_Name, (float)pParam->m_Value.m_Float);
+            node->setAttr(pParam->m_Name.c_str(), (float)pParam->m_Value.m_Float);
             break;
         case eType_FCOLOR:
-            node->setAttr(pParam->m_Name, Vec3(pParam->m_Value.m_Color[0], pParam->m_Value.m_Color[1], pParam->m_Value.m_Color[2]));
+            node->setAttr(pParam->m_Name.c_str(), Vec3(pParam->m_Value.m_Color[0], pParam->m_Value.m_Color[1], pParam->m_Value.m_Color[2]));
             break;
         case eType_VECTOR:
-            node->setAttr(pParam->m_Name, Vec3(pParam->m_Value.m_Vector[0], pParam->m_Value.m_Vector[1], pParam->m_Value.m_Vector[2]));
+            node->setAttr(pParam->m_Name.c_str(), Vec3(pParam->m_Value.m_Vector[0], pParam->m_Value.m_Vector[1], pParam->m_Value.m_Vector[2]));
             break;
         default:
             break;

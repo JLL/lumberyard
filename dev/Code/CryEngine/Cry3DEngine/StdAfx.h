@@ -25,18 +25,13 @@
 #pragma warning( disable : 6239 ) // (<non-zero constant> && <expression>) always evaluates to the result of <expression>
 #pragma warning( disable : 6240 ) // (<expression> && <non-zero constant>) always evaluates to the result of <expression>
 
-#define RWI_NAME_TAG "RayWorldIntersection(3dEngine)"
-#define PWI_NAME_TAG "PrimitiveWorldIntersection(3dEngine)"
-
-#define CRY3DENGINE_EXPORTS
-
 const int nThreadsNum = 3;
+
+#include <platform.h>
 
 #include <vector>
 //#define DEFINE_MODULE_NAME "Cry3DEngine"
 //#define FORCE_STANDARD_ASSERT // fix edit and continue
-
-#include <platform.h>
 
 #if defined(WIN64)
 #define CRY_INTEGRATE_DX12
@@ -104,7 +99,7 @@ const int nThreadsNum = 3;
 #ifdef _MSC_VER
 inline int vsnprintf(char* buf, int size, const char* format, va_list& args)
 {
-    int res = _vsnprintf(buf, size, format, args);
+    int res = _vsnprintf_s(buf, size, size, format, args);
     assert(res >= 0 && res < size); // just to know if there was problems in past
     buf[size - 1] = 0;
     return res;

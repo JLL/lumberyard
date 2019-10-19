@@ -1218,7 +1218,7 @@ int CPhysicalEntity::SetParams(const pe_params* _params, int bThreadSafe)
         {
             m_pStructure->pJoints[i].bBroken = 0;
         }
-        MEMSTAT_USAGE(m_pStructure->pJoints, sizeof(m_pStructure->pJoints[0]) * m_pStructure->nJoints);
+        
         return 1;
     }
 
@@ -1423,15 +1423,28 @@ int CPhysicalEntity::GetParams(pe_params* _params) const
 
     if (_params->type == pe_params_ground_plane::type_id)
     {
-        pe_params_ground_plane* params = (pe_params_ground_plane*)_params;
-        SIZEOF_ARRAY_OK
-        if ((unsigned int)params->iPlane >= (unsigned int)(sizeof(m_ground) / sizeof(m_ground[0])))
-        {
-            return 0;
-        }
-        params->ground.origin = m_ground[params->iPlane].origin;
-        params->ground.n = m_ground[params->iPlane].n;
-        return 1;
+        /* Previous Code was performing a sizeof(m_ground) which is a primitives::plane* which results in a value of 8 and sizeof(m_ground[0]) which is a primitives::plane which results in a value of 24.
+         * Therefore the if block in the previous code was always true as if((unsigned int)params->iPlane >= (unsigned int)(8/24))
+         * Since both sides of the condition were type cast to unsigned int the left side is always >=0, while the right side is always 0
+         * The previous code resulted in an warning when building on clang that sizeof a pointer was being performed
+         * error: 'sizeof (this->m_ground)' will return the size of the pointer, not the array itself [-Werror,-Wsizeof-pointer-div]
+         *  if ((unsigned int)params->iPlane >= (unsigned int)(sizeof(m_ground) / sizeof(m_ground[0])))
+         *
+         * The previous code is below
+         * pe_params_ground_plane* params = (pe_params_ground_plane*)_params;
+         * SIZEOF_ARRAY_OK
+         * if ((unsigned int)params->iPlane >= (unsigned int)(sizeof(m_ground) / sizeof(m_ground[0])))
+         * {
+         *     return 0;
+         * }
+         * params->ground.origin = m_ground[params->iPlane].origin;
+         * params->ground.n = m_ground[params->iPlane].n;
+         * return 1;
+         * The code below keeps the same incorrect logic by only the returning 0
+         * The actual correct logic for this code is to check the m_nGroundPlanes variable against the params->iPlane parameter
+         * and remove the SIZEOF_ARRAY_OK macro
+         */
+        return 0;
     }
 
     if (_params->type == pe_params_structural_joint::type_id)
@@ -2235,10 +2248,6 @@ int CPhysicalEntity::AddGeometry(phys_geometry* pgeom, pe_geomparams* params, in
         {
             m_pWorld->FreeEntityParts(pparts, nPartsAlloc);
         }
-        if (m_nPartsAlloc != 1)
-        {
-            MEMSTAT_USAGE(m_parts, sizeof(geom) * m_nParts);
-        }
     }
     {
         WriteLock lock(m_lockPartIdx);
@@ -2367,12 +2376,7 @@ int CPhysicalEntity::AddGeometry(phys_geometry* pgeom, pe_geomparams* params, in
         WriteLock lock(m_lockUpdate);
         m_nParts++;
     }
-
-    if (m_nPartsAlloc != 1)
-    {
-        MEMSTAT_USAGE(m_parts, sizeof(geom) * m_nParts);
-    }
-
+    
     m_Extents.Clear();
 
     return id;
@@ -2476,10 +2480,6 @@ void CPhysicalEntity::RemoveGeometry(int id, int bThreadSafe)
                     }
                 }
                 m_nParts--;
-                if (m_nPartsAlloc != 1)
-                {
-                    MEMSTAT_USAGE(m_parts, sizeof(geom) * m_nParts);
-                }
                 ComputeBBox(m_BBox);
                 for (m_iLastIdx = i = 0; i < m_nParts; i++)
                 {
@@ -3123,11 +3123,6 @@ int CPhysicalEntity::UpdateStructure(float time_interval, pe_explosion* pexpl, i
             {
                 flags |= m_parts[i].flags & geom_structure_changes;
             }
-        }
-
-        if (m_nPartsAlloc != 1)
-        {
-            MEMSTAT_USAGE(m_parts, sizeof(m_parts[0]) * m_nParts);
         }
 
         PHYS_ENTITY_PROFILER

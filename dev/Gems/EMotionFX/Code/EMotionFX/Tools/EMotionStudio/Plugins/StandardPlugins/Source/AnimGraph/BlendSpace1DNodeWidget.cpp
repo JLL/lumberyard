@@ -96,7 +96,7 @@ namespace EMStudio
 
         if (node)
         {
-            if (node->GetType() == EMotionFX::BlendSpace1DNode::TYPE_ID)
+            if (azrtti_typeid(node) == azrtti_typeid<EMotionFX::BlendSpace1DNode>())
             {
                 m_currentNode = static_cast<EMotionFX::BlendSpace1DNode*>(node);
                 m_currentNode->SetInteractiveMode(true);
@@ -142,7 +142,7 @@ namespace EMStudio
         painter.setRenderHint(QPainter::HighQualityAntialiasing);
         painter.setRenderHint(QPainter::TextAntialiasing);
 
-        const EMotionFX::AnimGraphInstance* animGraphInstance = GetAnimGraphInstance();
+        const EMotionFX::AnimGraphInstance* animGraphInstance = m_modelIndex.data(AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
         if (!animGraphInstance)
         {
             painter.drawText(rect(), Qt::AlignCenter, "No anim graph active.");
@@ -566,7 +566,7 @@ namespace EMStudio
 
     void BlendSpace1DNodeWidget::SetCurrentSamplePosition(int windowX, int windowY)
     {
-        EMotionFX::AnimGraphInstance* animGraphInstance = GetAnimGraphInstance();
+        EMotionFX::AnimGraphInstance* animGraphInstance = m_modelIndex.data(AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
         EMotionFX::BlendSpace1DNode::UniqueData* uniqueData = GetUniqueData();
         if (!uniqueData || !animGraphInstance)
         {
@@ -665,14 +665,14 @@ namespace EMStudio
             return nullptr;
         }
 
-        const EMotionFX::AnimGraphInstance* animGraphInstance = GetAnimGraphInstance();
+        const EMotionFX::AnimGraphInstance* animGraphInstance = m_modelIndex.data(AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
         if (!animGraphInstance)
         {
             return nullptr;
         }
         
         // Check that we are looking at the correct animgrah instance
-        const EMotionFX::AnimGraphNode* thisNode = animGraphInstance->GetAnimGraph()->RecursiveFindNodeByID(blendSpaceNode->GetID());
+        const EMotionFX::AnimGraphNode* thisNode = animGraphInstance->GetAnimGraph()->RecursiveFindNodeById(blendSpaceNode->GetId());
         if (thisNode != blendSpaceNode)
         {
             return nullptr;

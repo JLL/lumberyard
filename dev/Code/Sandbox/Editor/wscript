@@ -41,8 +41,10 @@ def build(bld):
         vs_filter               = 'Sandbox',
         pch                     = 'StdAfx.cpp',
         file_list               = 'editor_core.waf_files',
-        platforms               = ['win','darwin'],
-        configurations          = ['debug', 'debug_test', 'profile', 'profile_test'],
+        platforms               = ['win', 'darwin'],
+        configurations          = ['all'],
+        exclude_monolithic      = True,
+        client_only             = True,
         use                     = ['AzToolsFramework', 'AzQtComponents'],
         uselib                  = ['QT5CORE',
                                    'QT5GUI',
@@ -58,11 +60,15 @@ def build(bld):
                                    bld.Path('Code/CryEngine/CryAction'),
                                    bld.Path('Code/Tools')],
 
-        darwin_includes         = additional_qt_includes,
-        darwin_cxxflags         = ['-Wno-array-bounds'], # Squish includes have this code like this that triggers this warning: sets >= 2? array[sets - 2] : NULL
-        darwin_enable_rtti      = True,
+        # Compiler Specific
+        msvc_cxxflags           = ['/wd4355'],
+        clang_cxxflags          = ['-Wno-array-bounds', # Squish includes have this code like this that triggers this warning: sets >= 2? array[sets - 2] : NULL
+                                   '-Wno-format',
+                                   '-Wno-macro-redefined',],
 
-        win_cxxflags            = ['/wd4355'],
+        # Platform Specific
+        darwin_includes         = additional_qt_includes,
+        darwin_enable_rtti      = True,
 
         win_features            = ['crcfix'],
 
@@ -70,7 +76,7 @@ def build(bld):
         test_all_file_list  = ['editor_core_test.waf_files'],
     )
 
-    bld.CryEditorLib(
+    kw = dict(
         # Settings
         target                              = 'EditorLib',
         vs_filter                           = 'Sandbox',
@@ -78,10 +84,11 @@ def build(bld):
         pch                                 = 'StdAfx.cpp',
         file_list                           = 'editor_lib.waf_files',
         darwin_file_list                    = 'editor_lib_darwin.waf_files',
-        win_file_list                       = [
-                                              ],
+        win_file_list                       = [ ],
         platforms                           = ['win', 'darwin'],
-        configurations                      = ['debug', 'debug_test', 'profile', 'profile_test'],
+        configurations                      = ['all'],
+        exclude_monolithic                  = True,
+        client_only                         = True,
         includes                            = ['.',
                                                '..',
                                                'Include',
@@ -89,7 +96,7 @@ def build(bld):
                                                bld.Path('Code/CryEngine'),
                                                bld.Path('Code/CryEngine/CryAction'),
                                                bld.Path('Code/CryEngine/CrySystem'),
-                                               bld.Path('Gems/LmbrCentral/Code/Include'),
+                                               bld.Path('Gems/LmbrCentral/Code/include'),
                                                bld.Path('Code/Tools/'),
                                                bld.Path('Code/Tools/News'),
                                                bld.Path('Code/Tools/GemRegistry/include'),
@@ -98,7 +105,8 @@ def build(bld):
                                                bld.Path('Code/Lyzard/Modules/Projects/include'),
                                                bld.Path('Code/Lyzard/Modules/Engines/include')],
 
-        defines                             = ['DONT_BAN_STD_STRING',
+        defines                             = ['LY_BUILD={}'.format(bld.get_lumberyard_build()),
+                                               'DONT_BAN_STD_STRING',
                                                'USE_MEM_ALLOCATOR',
                                                'IS_NEW_AUDIO_BRANCH' ] + additionalDefines,
 
@@ -125,6 +133,7 @@ def build(bld):
                                                'AWS_CPP_SDK_STS',
                                                'AWS_CPP_SDK_CORE',
                                                'AWS_CPP_SDK_COGNITO_IDENTITY',
+                                               'AWS_CPP_SDK_DEVICEFARM',
                                                'AWS_CPP_SDK_MOBILEANALYTICS',
                                                'AWS_CPP_SDK_IDENTITY_MANAGEMENT',
                                                'AWS_CPP_SDK_IDENTITY_LAMBDA',
@@ -141,31 +150,44 @@ def build(bld):
         win_linkflags                       = ['/SUBSYSTEM:WINDOWS'],
         win_debug_all_linkflags             = '/NODEFAULTLIB:LIBCMTD.lib',
         win_ndebug_linkflags                = '/NODEFAULTLIB:LIBCMT.lib',
-        win_cxxflags                        = [ '/Zm200', '/wd4355', '/wd4018', '/wd4267' ],
+        msvc_cxxflags                       = [ '/Zm200', '/wd4355', '/wd4018', '/wd4267' ],
 
         # Platform Specific
         win_features                        = [ 'crcfix' ],
         winres_defines                      = ['NDEBUG' ],
         win_lib                             = ['version'],
 
-
-        darwin_cxxflags                     = ['-Wno-sometimes-uninitialized', # required for squish library to compile
+        clang_cxxflags                      = ['-Wno-sometimes-uninitialized', # required for squish library to compile
                                                '-Wno-shift-negative-value', # required for squish library to compile
                                                '-Wno-null-dereference', # required for squish library to compile
                                                '-Wno-deprecated-declarations', # using Gesalt macOS calls that are deprecated.
-                                               '-Wno-unused-local-typedef', # required for Boost Python 
+                                               '-Wno-unused-local-typedef', #BOOSTPYTHON
+                                               '-Wno-inconsistent-dllimport', #BOOSTPYTHON
+                                               '-Wno-deprecated-register', #BOOSTPYTHON
+                                               '-Wno-writable-strings',
+                                               '-Wno-return-type',
+                                               '-Wno-enum-compare-switch',
+                                               '-Wno-microsoft-include', #SQUISH
+                                               '-fexceptions', #BOOSTPYTHON
                                               ],
         darwin_x64_lib                      = ['python2.7'],
-        darwin_lib                          = ['curl'],
+        darwin_lib                          = ['curl', 'bsm'],
         darwin_includes                     = [bld.Path('Code/Sandbox/Editor/HyperGraph'),
                                                bld.Path('Code/Sandbox/Editor/Mannequin/Controls'),
                                                bld.Path('Code/Sandbox/Editor/AssetBrowser'),
                                                bld.Path('Code/Sandbox/Editor/Controls'),
                                                bld.Path('Code/Sandbox/Editor/AI')] + additional_qt_includes,
+        darwin_x64_framework                = ['Security'],
+
 
         # Testing
         test_all_file_list  = ['editor_lib_test.waf_files'],
     )
+    
+    for p0, p1, p2, p3 in bld.env['RESTRICTED_PLATFORMS']:
+        kw['win_file_list'].append('{0}/editor_lib_{1}.waf_files'.format(p0, p1))
+
+    bld.CryEditorLib(**kw)
 
     tsk_gen = bld.CryEditor(
         # Settings
@@ -173,15 +195,17 @@ def build(bld):
         vs_filter                           = 'Sandbox',
         copyright_org                       = 'Amazon-CryTek',
         file_list                           = 'editor.waf_files',
-        platforms                           = ['win'],
-        configurations                      = ['debug', 'debug_test', 'profile', 'profile_test'],
+        platforms                           = ['win', 'darwin'],
+        configurations                      = ['all'],
+        exclude_monolithic                  = True,
+        client_only                         = True,
         includes                            = ['.',
                                                '..',
                                                'Include',
                                                bld.Path('Code/CryEngine'),
                                                bld.Path('Code/CryEngine/CryAction'),
                                                bld.Path('Code/CryEngine/CrySystem'),
-                                               bld.Path('Gems/LmbrCentral/Code/Include'),
+                                               bld.Path('Gems/LmbrCentral/Code/include'),
                                                bld.Path('Code/Tools/'),
                                                bld.ThirdPartyPath('squish'),
                                                bld.Path('Code/Tools/News'),
@@ -221,9 +245,14 @@ def build(bld):
                                                'AWS_CPP_SDK_IDENTITY_MANAGEMENT',
                                                'BOOSTPYTHON',
                                                'TIFF',
-                                               'ZLIB'
+                                               'ZLIB',
+                                               'D3D_COMPILER',
+                                               'OPENSSL',
+                                               'MSVC90',
+                                               'LUA_COMPILER',
+                                               'FFMPEG_EXE'
                                                ],
-        
+
         use_required_gems                   = True,
 
         features                            = ['qt5',
@@ -232,23 +261,11 @@ def build(bld):
 
         langname                            = 'en-us',
 
-        win_copy_dependent_files            = [ 'Bin64/d3dx11_43.dll',
-                                                'Bin64/D3DCompiler_43.dll',
-                                                'Bin64/d3dcompiler_46.dll',
-                                                'Bin64/d3dcompiler_47.dll',
-                                                'Bin64/libeay32.dll',
-                                                'Bin64/LuaCompiler.exe',
-                                                'Bin64/ffmpeg.exe',
-                                                'Bin64/ssleay32.dll',
-                                                'Bin64/xinput1_3.dll',
-                                                'Bin64/Microsoft.VC90.CRT.manifest',  # modules inside python27.dll load VC90 CRT directly, so we need this and the msv*90.dll files
-                                                'Bin64/msvcr90.dll'],
-
         win_file_list                       = ['editor_win.waf_files'],
         win_linkflags                       = ['/SUBSYSTEM:WINDOWS'],
         win_debug_all_linkflags             = '/NODEFAULTLIB:LIBCMTD.lib',
         win_ndebug_linkflags                = '/NODEFAULTLIB:LIBCMT.lib',
-        win_cxxflags                        = [ '/Zm200', '/wd4355', '/wd4018', '/wd4267' ],
+        msvc_cxxflags                        = [ '/Zm200', '/wd4355', '/wd4018', '/wd4267' ],
 
         # Platform Specific
         win_features                        = [ 'crcfix' ],
@@ -259,16 +276,18 @@ def build(bld):
 
         darwin_file_list                    = ['editor_darwin.waf_files'],
         darwin_enable_rtti                  = True,
-        darwin_cxxflags                     = ['-Wno-error', '-Wno-unused-local-typedef'],
+        clang_cxxflags                      = ['-Wno-error', '-Wno-unused-local-typedef'],
         darwin_x64_lib                      = ['python2.7'],
-        darwin_lib                          = 'curl',
-        darwin_rpath                        = ['@executable_path/', '@executable_path/qtlibs/lib', '@executable_path/rc', '@executable_path/EditorPlugins'],
+        darwin_lib                          = ['curl', 'bsm'],
+        darwin_rpath                        = ['@executable_path/', '@executable_path/qtlibs/lib', '@executable_path/rc', '@executable_path/EditorPlugins', '@executable_path/../Frameworks'],
         darwin_use                          = bld.make_aws_library_task_list(['LyMetricsProducer', 'LyIdentity']),
         darwin_includes                     = [bld.Path('Code/Sandbox/Editor/HyperGraph'),
                                                bld.Path('Code/Sandbox/Editor/Mannequin/Controls'),
                                                bld.Path('Code/Sandbox/Editor/AssetBrowser'),
                                                bld.Path('Code/Sandbox/Editor/Controls'),
                                                bld.Path('Code/Sandbox/Editor/AI')] + additional_qt_includes,
+        darwin_x64_framework                = ['Security'],
+
         darwin_xcassets                     = 'Code/Sandbox/Editor/res/Images.xcassets',
     )
 
@@ -276,3 +295,13 @@ def build(bld):
         # Copy Resource.h for Ribbon UI
         tsk_gen.create_task('copy_outputs', tsk_gen.path.make_node('Resource.h'), bld.srcnode.make_node('Editor/UI/Resource.h') )
 
+
+def package(pkg):
+    build(pkg) # Need to call this to generate our task_generator
+    pkg.package_tool(
+        target           = 'Editor',
+        platforms        = ['darwin'],
+        configurations   = ['debug', 'profile'],
+        include_all_libs = True,
+        dir_resources    = ['qtlibs', 'EditorPlugins'],
+    )

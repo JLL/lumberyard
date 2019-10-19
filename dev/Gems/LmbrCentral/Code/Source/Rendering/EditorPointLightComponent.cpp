@@ -35,12 +35,14 @@ namespace LmbrCentral
                     "Point Light", "The Point Light component allows an entity to create a point of light")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Rendering")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/PointLight.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/PointLight.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/PointLight.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                         ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-point-light.html")
+                        ->Attribute(AZ::Edit::Attributes::ExportIfAllPlatformTags, AZStd::vector<AZ::Crc32>{AZ_CRC("renderer", 0xf199a19c)}) // Only export on platforms that render
+                        ->Attribute(AZ::Edit::Attributes::RuntimeExportCallback, &EditorLightComponent::ExportLightComponent)
                     ;
             }
         }

@@ -12,17 +12,13 @@
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
 #include "StdAfx.h"
-#include <IPlatformOS.h>
+#include <AzCore/NativeUI/NativeUIRequests.h>
 #include "UnalignedBlit.h"
 
 #include "DeviceManager/Enums.h"
+#include "PoundPoundParser.h"
 
 static FOURCC FOURCC_SHADERBIN = MAKEFOURCC('F', 'X', 'B', '0');
-
-namespace
-{
-    static std::vector<SFXParam> s_tempFXParams;
-}
 
 SShaderBin SShaderBin::s_Root;
 uint32 SShaderBin::s_nCache = 0;
@@ -99,7 +95,7 @@ uint32 SShaderBin::ComputeCRC()
             uint32 nTokName = m_Tokens[nCur];
             const char* szNameInc = CParserBin::GetString(nTokName, m_TokenTable);
             SShaderBin* pBinIncl = gRenDev->m_cEF.m_Bin.GetBinShader(szNameInc, true, 0);
-            CRY_ASSERT(pBinIncl);
+            AZ_Assert(pBinIncl, "Error loading shader '%s' while trying to compute the shader CRC.", szNameInc);
             if (pBinIncl)
             {
                 CRC32 += pBinIncl->ComputeCRC();
@@ -118,8 +114,7 @@ SShaderBin* CShaderManBin::SaveBinShader(
 
     CParserBin Parser(pBin);
 
-    gEnv->pCryPak->FSeek(srcFileHandle, 0, SEEK_END);
-    int nSize = gEnv->pCryPak->FTell(srcFileHandle);
+    int nSize = gEnv->pCryPak->FGetSize(srcFileHandle);
     char* buf = new char [nSize + 1];
     char* pBuf = buf;
     buf[nSize] = 0;
@@ -129,163 +124,183 @@ SShaderBin* CShaderManBin::SaveBinShader(
     RemoveCR(buf);
     const char* whiteSpace = " ";
 
-    while (buf && buf[0])
     {
-        SkipCharacters (&buf, whiteSpace);
-        SkipComments (&buf, true);
-        if (!buf || !buf[0])
-        {
-            break;
-        }
+        // Hold the parsing context used to get rid of the ## directives. The constructor will
+        // take care of setting AZ_RESTRICTED_PLATFORM appropriately
+        PoundPoundContext poundPoundContext(m_pCEF->m_ShadersFilter);
 
-        char com[1024];
-        bool bKey = false;
-        uint32 dwToken = CParserBin::NextToken(buf, com, bKey);
-        dwToken = Parser.NewUserToken(dwToken, com, false);
-        pBin->m_Tokens.push_back(dwToken);
-
-        SkipCharacters (&buf, whiteSpace);
-        SkipComments (&buf, true);
-        if (dwToken >= eT_float && dwToken <= eT_int)
+        // Keep parsing until we hit the real EOB.
+        bool layerSwitch;
+        while (!poundPoundContext.IsEndOfBuffer(&buf, &layerSwitch))
         {
-        }
-        if (dwToken == eT_fetchinst)
-        {
-            int nnn = 0;
-        }
-        else
-        if (dwToken == eT_include)
-        {
-            CRY_ASSERT(bKey);
-            SkipCharacters(&buf, whiteSpace);
-            CRY_ASSERT(*buf == '"' || *buf == '<');
-            char brak = *buf;
-            ++buf;
-            int n = 0;
-            while (*buf != brak)
+            // This loop handles stripping the input text of comments, whitespace, and the
+            // ## include directives
+            do 
             {
-                if (*buf <= 0x20)
+                SkipCharacters(&buf, whiteSpace);
+                SkipComments(&buf, true);
+
+                // If we find the ## characters, preprocess the token lines, allowing it to consume
+                // any disabled text between ## directives and then whitespace and comments again
+                while (buf[0] == '#' && buf[1] == '#')
                 {
-                    CRY_ASSERT(0);
-                    break;
+                    poundPoundContext.PreprocessLines(&buf);
+                    SkipCharacters(&buf, whiteSpace);
+                    SkipComments(&buf, true);
                 }
-                com[n++] = *buf;
-                ++buf;
-            }
-            if (*buf == brak)
+
+                // We need to be able to catch the case where a ##include file has hit end of buffer,
+                // but not the parent buffer, in which case we have to keep skipping whitespace and
+                // comments again
+                layerSwitch = false;
+            } while (!poundPoundContext.IsEndOfBuffer(&buf, &layerSwitch) && layerSwitch);
+
+            // Quit parsing if we have hit the real EOB.
+            if (poundPoundContext.IsEndOfBuffer(&buf, &layerSwitch))
             {
-                ++buf;
+                break;
             }
-            com[n] = 0;
 
-            fpStripExtension(com, com);
-
-            SShaderBin* pBIncl = GetBinShader(com, true, 0);
-            //
-            //CRY_ASSERT(pBIncl);
-
-            dwToken = CParserBin::fxToken(com, NULL);
+            char com[1024];
+            bool bKey = false;
+            uint32 dwToken = CParserBin::NextToken(buf, com, bKey);
+            // If the token is not a key token, find/create a user token for it.
             dwToken = Parser.NewUserToken(dwToken, com, false);
             pBin->m_Tokens.push_back(dwToken);
-        }
-        else
-        if (dwToken == eT_if || dwToken == eT_ifdef || dwToken == eT_ifndef)
-        {
-            bool bFirst = fxIsFirstPass(buf);
-            if (!bFirst)
-            {
-                if (dwToken == eT_if)
-                {
-                    dwToken = eT_if_2;
-                }
-                else
-                if (dwToken == eT_ifdef)
-                {
-                    dwToken = eT_ifdef_2;
-                }
-                else
-                {
-                    dwToken = eT_ifndef_2;
-                }
-                pBin->m_Tokens[pBin->m_Tokens.size() - 1] = dwToken;
-            }
-        }
-        else
-        if (dwToken == eT_define)
-        {
-            shFill(&buf, com);
-            if (com[0] == '%')
-            {
-                pBin->m_Tokens[pBin->m_Tokens.size() - 1] = eT_define_2;
-            }
-            dwToken = Parser.NewUserToken(eT_unknown, com, false);
-            pBin->m_Tokens.push_back(dwToken);
 
-            TArray<char> macro;
-            while (*buf == 0x20 || *buf == 0x9)
+            SkipCharacters (&buf, whiteSpace);
+            SkipComments (&buf, true);
+            if (dwToken == eT_include)
             {
-                buf++;
-            }
-            while (*buf != 0xa)
-            {
-                if (*buf == '\\')
+                // Skip whitespace to get to the < or " bracket for the include
+                SkipCharacters(&buf, whiteSpace);
+                AZ_Assert(*buf == '"' || *buf == '<', "Error saving shader %s. Include should be followed by \" or <.", szName);
+                char brak = *buf;
+                ++buf;
+                int n = 0;
+
+                // Get the value in-between the include brackets
+                while (*buf != brak)
                 {
-                    macro.AddElem('\n');
-                    while (*buf != '\n')
+                    if (*buf <= 0x20)
                     {
-                        buf++;
+                        AZ_Assert(false, "Error saving shader %s. Invalid special character found between include brackets.", szName);
+                        break;
                     }
-                    buf++;
-                    continue;
+                    com[n++] = *buf;
+                    ++buf;
                 }
-                macro.AddElem(*buf);
-                buf++;
-            }
-            macro.AddElem(0);
-            int n = macro.Num() - 2;
-            while (n >= 0 && macro[n] <= 0x20)
-            {
-                macro[n] = 0;
-                n--;
-            }
-            char* b = &macro[0];
-            while (*b)
-            {
-                SkipCharacters (&b, whiteSpace);
-                SkipComments (&b, true);
-                if (!b || !b[0])
+                if (*buf == brak)
                 {
-                    break;
+                    ++buf;
                 }
-                bKey = false;
-                dwToken = CParserBin::NextToken(b, com, bKey);
+                com[n] = 0;
+
+                fpStripExtension(com, com);
+
+                // Get or load the included shader
+                SShaderBin* pBIncl = GetBinShader(com, true, 0);
+
+                dwToken = CParserBin::fxToken(com, NULL);
                 dwToken = Parser.NewUserToken(dwToken, com, false);
-                if (dwToken == eT_if || dwToken == eT_ifdef || dwToken == eT_ifndef)
-                {
-                    bool bFirst = fxIsFirstPass(b);
-                    if (!bFirst)
-                    {
-                        if (dwToken == eT_if)
-                        {
-                            dwToken = eT_if_2;
-                        }
-                        else
-                        if (dwToken == eT_ifdef)
-                        {
-                            dwToken = eT_ifdef_2;
-                        }
-                        else
-                        {
-                            dwToken = eT_ifndef_2;
-                        }
-                    }
-                }
                 pBin->m_Tokens.push_back(dwToken);
             }
-            pBin->m_Tokens.push_back(0);
+            else if (dwToken == eT_if || dwToken == eT_ifdef || dwToken == eT_ifndef)
+            {
+                bool bFirst = fxIsFirstPass(buf);
+                if (!bFirst)
+                {
+                    if (dwToken == eT_if)
+                    {
+                        dwToken = eT_if_2;
+                    }
+                    else if (dwToken == eT_ifdef)
+                    {
+                        dwToken = eT_ifdef_2;
+                    }
+                    else
+                    {
+                        dwToken = eT_ifndef_2;
+                    }
+                    pBin->m_Tokens[pBin->m_Tokens.size() - 1] = dwToken;
+                }
+            }
+            else if (dwToken == eT_define)
+            {
+                shFill(&buf, com);
+                if (com[0] == '%')
+                {
+                    pBin->m_Tokens[pBin->m_Tokens.size() - 1] = eT_define_2;
+                }
+                dwToken = Parser.NewUserToken(eT_unknown, com, false);
+                pBin->m_Tokens.push_back(dwToken);
+
+                TArray<char> macro;
+                while (*buf == 0x20 || *buf == 0x9)
+                {
+                    buf++;
+                }
+                while (*buf != 0xa)
+                {
+                    if (*buf == '\\')
+                    {
+                        macro.AddElem('\n');
+                        while (*buf != '\n')
+                        {
+                            buf++;
+                        }
+                        buf++;
+                        continue;
+                    }
+                    macro.AddElem(*buf);
+                    buf++;
+                }
+                macro.AddElem(0);
+                int n = macro.Num() - 2;
+                while (n >= 0 && macro[n] <= 0x20)
+                {
+                    macro[n] = 0;
+                    n--;
+                }
+                char* b = &macro[0];
+                while (*b)
+                {
+                    SkipCharacters (&b, whiteSpace);
+                    SkipComments (&b, true);
+                    if (!b || !b[0])
+                    {
+                        break;
+                    }
+                    bKey = false;
+                    dwToken = CParserBin::NextToken(b, com, bKey);
+                    dwToken = Parser.NewUserToken(dwToken, com, false);
+                    if (dwToken == eT_if || dwToken == eT_ifdef || dwToken == eT_ifndef)
+                    {
+                        bool bFirst = fxIsFirstPass(b);
+                        if (!bFirst)
+                        {
+                            if (dwToken == eT_if)
+                            {
+                                dwToken = eT_if_2;
+                            }
+                            else
+                            if (dwToken == eT_ifdef)
+                            {
+                                dwToken = eT_ifdef_2;
+                            }
+                            else
+                            {
+                                dwToken = eT_ifndef_2;
+                            }
+                        }
+                    }
+                    pBin->m_Tokens.push_back(dwToken);
+                }
+                pBin->m_Tokens.push_back(0);
+            }
         }
     }
-    if (!pBin->m_Tokens[0])
+    if (pBin->m_Tokens.size() == 0 || !pBin->m_Tokens[0])
     {
         pBin->m_Tokens.push_back(eT_skip);
     }
@@ -296,7 +311,7 @@ SShaderBin* CShaderManBin::SaveBinShader(
     //pBin->CryptTable();
 
     char nameFile[256];
-    sprintf_s(nameFile, "%s%s.%s", m_pCEF->m_ShadersCache, szName, bInclude ? "cfib" : "cfxb");
+    sprintf_s(nameFile, "%s%s.%s", m_pCEF->m_ShadersCache.c_str(), szName, bInclude ? "cfib" : "cfxb");
     stack_string szDst = stack_string(m_pCEF->m_szCachePath.c_str()) + stack_string(nameFile);
     const char* szFileName = szDst;
 
@@ -307,7 +322,7 @@ SShaderBin* CShaderManBin::SaveBinShader(
         Header.m_nTokens = pBin->m_Tokens.size();
         Header.m_Magic = FOURCC_SHADERBIN;
         Header.m_CRC32 = pBin->m_CRC32;
-        float fVersion = (float)FX_CACHE_VER;
+        float fVersion = FX_CACHE_VER;
         Header.m_VersionLow = (uint16)(((float)fVersion - (float)(int)fVersion) * 10.1f);
         Header.m_VersionHigh = (uint16)fVersion;
         Header.m_nOffsetStringTable = pBin->m_Tokens.size() * sizeof(DWORD) + sizeof(Header);
@@ -358,7 +373,7 @@ SShaderBin* CShaderManBin::SaveBinShader(
     }
     else
     {
-        iLog->LogWarning("CShaderManBin::SaveBinShader: Cannot write shader to file '%s'.", nameFile);
+        iLog->LogWarning("WARN: CShaderManBin::SaveBinShader: Cannot write shader to file '%s'.", nameFile);
         pBin->m_bReadOnly = true;
     }
 
@@ -626,7 +641,7 @@ void CShaderManBin::mfGeneratePublicFXParams(CShader* pSH, CParserBin& Parser)
             for (j = 0; j < FXP.m_PublicParams.size(); j++)
             {
                 SShaderParam* p = &FXP.m_PublicParams[j];
-                if (!_stricmp(p->m_Name, szName))
+                if (azstricmp(p->m_Name.c_str(), szName) == 0)
                 {
                     break;
                 }
@@ -634,7 +649,7 @@ void CShaderManBin::mfGeneratePublicFXParams(CShader* pSH, CParserBin& Parser)
             if (j == FXP.m_PublicParams.size())
             {
                 SShaderParam sp;
-                cry_strcpy(sp.m_Name, szName);
+                sp.m_Name = szName;
                 EParamType eType;
                 string szWidget = pr->GetValueForName("UIWidget", eType);
                 const char* szVal = pr->m_Values.c_str();
@@ -645,7 +660,7 @@ void CShaderManBin::mfGeneratePublicFXParams(CShader* pSH, CParserBin& Parser)
                     {
                         szVal++;
                     }
-                    int n = sscanf(szVal, "%f, %f, %f, %f", &sp.m_Value.m_Color[0], &sp.m_Value.m_Color[1], &sp.m_Value.m_Color[2], &sp.m_Value.m_Color[3]);
+                    int n = azsscanf(szVal, "%f, %f, %f, %f", &sp.m_Value.m_Color[0], &sp.m_Value.m_Color[1], &sp.m_Value.m_Color[2], &sp.m_Value.m_Color[3]);
                     AZ_Warning("Shaders", n == 4, "color value only has %d components", n);
                 }
                 else if (szWidget == "colora")
@@ -655,7 +670,7 @@ void CShaderManBin::mfGeneratePublicFXParams(CShader* pSH, CParserBin& Parser)
                     {
                         szVal++;
                     }
-                    int n = sscanf(szVal, "%f, %f, %f, %f", &sp.m_Value.m_Color[0], &sp.m_Value.m_Color[1], &sp.m_Value.m_Color[2], &sp.m_Value.m_Color[3]);
+                    int n = azsscanf(szVal, "%f, %f, %f, %f", &sp.m_Value.m_Color[0], &sp.m_Value.m_Color[1], &sp.m_Value.m_Color[2], &sp.m_Value.m_Color[3]);
                     AZ_Warning("Shaders", n == 4, "color value only has %d components", n);
                 }
                 else
@@ -705,13 +720,13 @@ void CShaderManBin::mfGeneratePublicFXParams(CShader* pSH, CParserBin& Parser)
     }
 }
 
-SParamCacheInfo* CShaderManBin::GetParamInfo(SShaderBin* pBin, uint32 dwName, uint64 nMaskGenFX)
+SParamCacheInfo* CShaderManBin::GetParamInfo(SShaderBin* pBin, uint32 dwName, uint64 nMaskGenFX, uint64 maskGenStatic)
 {
     const int n = pBin->m_ParamsCache.size();
     for (int i = 0; i < n; i++)
     {
         SParamCacheInfo* pInf = &pBin->m_ParamsCache[i];
-        if (pInf->m_dwName == dwName && pInf->m_nMaskGenFX == nMaskGenFX)
+        if (pInf->m_dwName == dwName && pInf->m_nMaskGenFX == nMaskGenFX && pInf->m_maskGenStatic == maskGenStatic)
         {
             pBin->m_nCurParamsID = i;
             return pInf;
@@ -721,13 +736,13 @@ SParamCacheInfo* CShaderManBin::GetParamInfo(SShaderBin* pBin, uint32 dwName, ui
     return NULL;
 }
 
-bool CShaderManBin::SaveBinShaderLocalInfo(SShaderBin* pBin, uint32 dwName, uint64 nMaskGenFX, TArray<int32>& Funcs, std::vector<SFXParam>& Params, std::vector<SFXSampler>& Samplers, std::vector<SFXTexture>& Textures)
+bool CShaderManBin::SaveBinShaderLocalInfo(SShaderBin* pBin, uint32 dwName, uint64 nMaskGenFX, uint64 maskGenStatic, TArray<int32>& Funcs, std::vector<SFXParam>& Params, std::vector<SFXSampler>& Samplers, std::vector<SFXTexture>& Textures)
 {
-    if (GetParamInfo(pBin, dwName, nMaskGenFX))
+    if (GetParamInfo(pBin, dwName, nMaskGenFX, maskGenStatic))
     {
         return true;
     }
-    //return false;
+
     if (pBin->IsReadOnly() && !gEnv->IsEditor()) // if in the editor, allow params to be added in-memory, but not saved to disk
     {
         return false;
@@ -767,6 +782,7 @@ bool CShaderManBin::SaveBinShaderLocalInfo(SShaderBin* pBin, uint32 dwName, uint
     pBin->m_ParamsCache.push_back(SParamCacheInfo());
     SParamCacheInfo& pr = pBin->m_ParamsCache.back();
     pr.m_nMaskGenFX = nMaskGenFX;
+    pr.m_maskGenStatic = maskGenStatic;
     pr.m_dwName = dwName;
     pr.m_AffectedFuncs.assign(Funcs.begin(), Funcs.end());
     pr.m_AffectedParams.assign(EParams.begin(), EParams.end());
@@ -795,6 +811,7 @@ bool CShaderManBin::SaveBinShaderLocalInfo(SShaderBin* pBin, uint32 dwName, uint
     int32* pSamplers = ESamplers.size() ? &ESamplers[0] : NULL;
     int32* pTextures = ETextures.size() ? &ETextures[0] : NULL;
     sd.nMask = nMaskGenFX;
+    sd.nstaticMask = maskGenStatic;
     sd.nName = dwName;
     sd.nFuncs = Funcs.size();
     sd.nParams = EParams.size();
@@ -856,7 +873,7 @@ SShaderBin* CShaderManBin::LoadBinShader(AZ::IO::HandleType fpBin, const char* s
     {
         SwapEndian(Header, eBigEndian);
     }
-    float fVersion = (float)FX_CACHE_VER;
+    float fVersion = FX_CACHE_VER;
     uint16 MinorVer = (uint16)(((float)fVersion - (float)(int)fVersion) * 10.1f);
     uint16 MajorVer = (uint16)fVersion;
     bool bCheckValid = CRenderer::CV_r_shadersAllowCompilation != 0;
@@ -893,45 +910,48 @@ SShaderBin* CShaderManBin::LoadBinShader(AZ::IO::HandleType fpBin, const char* s
     {
         return NULL;
     }
-    char* bufTable = new char[nSizeTable];
-    char* bufT = bufTable;
-    sizeRead = gEnv->pCryPak->FReadRaw(bufTable, 1, nSizeTable, fpBin);
-    if (sizeRead != nSizeTable)
+    else if (nSizeTable > 0)
     {
-        CryWarning(VALIDATOR_MODULE_RENDERER, VALIDATOR_ERROR, "Failed to read bufTable for %s in CShaderManBin::LoadBinShader. Expected %d, got %" PRISIZE_T "", szName, nSizeTable, sizeRead);
-        return NULL;
-    }
-    char* bufEnd = &bufTable[nSizeTable];
-
-    // First pass to count the tokens
-    uint32 nTokens(0);
-    while (bufTable < bufEnd)
-    {
-        STokenD TD;
-        LoadUnaligned(bufTable, TD.Token);
-        int nIncr = 4 + strlen(&bufTable[4]) + 1;
-        bufTable += nIncr;
-        ++nTokens;
-    }
-
-    pBin->m_TokenTable.reserve(nTokens);
-    bufTable = bufT;
-    while (bufTable < bufEnd)
-    {
-        STokenD TD;
-        LoadUnaligned(bufTable, TD.Token);
-        if (CParserBin::m_bEndians)
+        char* bufTable = new char[nSizeTable];
+        char* bufT = bufTable;
+        sizeRead = gEnv->pCryPak->FReadRaw(bufTable, 1, nSizeTable, fpBin);
+        if (sizeRead != nSizeTable)
         {
-            SwapEndian(TD.Token, eBigEndian);
+            CryWarning(VALIDATOR_MODULE_RENDERER, VALIDATOR_ERROR, "Failed to read bufTable for %s in CShaderManBin::LoadBinShader. Expected %d, got %" PRISIZE_T "", szName, nSizeTable, sizeRead);
+            return NULL;
         }
-        FXShaderTokenItor itor = std::lower_bound(pBin->m_TokenTable.begin(), pBin->m_TokenTable.end(), TD.Token, SortByToken());
-        assert (itor == pBin->m_TokenTable.end() || (*itor).Token != TD.Token);
-        TD.SToken = &bufTable[4];
-        pBin->m_TokenTable.insert(itor, TD);
-        int nIncr = 4 + strlen(&bufTable[4]) + 1;
-        bufTable += nIncr;
+        char* bufEnd = &bufTable[nSizeTable];
+
+        // First pass to count the tokens
+        uint32 nTokens(0);
+        while (bufTable < bufEnd)
+        {
+            STokenD TD;
+            LoadUnaligned(bufTable, TD.Token);
+            int nIncr = 4 + strlen(&bufTable[4]) + 1;
+            bufTable += nIncr;
+            ++nTokens;
+        }
+
+        pBin->m_TokenTable.reserve(nTokens);
+        bufTable = bufT;
+        while (bufTable < bufEnd)
+        {
+            STokenD TD;
+            LoadUnaligned(bufTable, TD.Token);
+            if (CParserBin::m_bEndians)
+            {
+                SwapEndian(TD.Token, eBigEndian);
+            }
+            FXShaderTokenItor itor = std::lower_bound(pBin->m_TokenTable.begin(), pBin->m_TokenTable.end(), TD.Token, SortByToken());
+            assert (itor == pBin->m_TokenTable.end() || (*itor).Token != TD.Token);
+            TD.SToken = &bufTable[4];
+            pBin->m_TokenTable.insert(itor, TD);
+            int nIncr = 4 + strlen(&bufTable[4]) + 1;
+            bufTable += nIncr;
+        }
+        SAFE_DELETE_ARRAY(bufT);
     }
-    SAFE_DELETE_ARRAY(bufT);
 
     //if (CRenderer::CV_r_shadersnocompile)
     //  bReadParams = false;
@@ -951,12 +971,20 @@ SShaderBin* CShaderManBin::LoadBinShader(AZ::IO::HandleType fpBin, const char* s
             {
                 SwapEndian(sd, eBigEndian);
             }
+
+            if (sd.nParams < 0 || sd.nSamplers < 0 || sd.nTextures < 0 || sd.nFuncs < 0)
+            {
+                AZ_Assert(false, "Error attempting to read shader binary %s. You may need to delete and re-compile this shader binary from your cache folder.", szNameBin);
+                return nullptr;
+            }
+
             SParamCacheInfo pr;
             int n = pBin->m_ParamsCache.size();
             pBin->m_ParamsCache.push_back(pr);
             SParamCacheInfo& prc = pBin->m_ParamsCache[n];
             prc.m_dwName = sd.nName;
             prc.m_nMaskGenFX = sd.nMask;
+            prc.m_maskGenStatic = sd.nstaticMask;
             prc.m_AffectedParams.resize(sd.nParams);
             prc.m_AffectedSamplers.resize(sd.nSamplers);
             prc.m_AffectedTextures.resize(sd.nTextures);
@@ -1020,7 +1048,7 @@ SShaderBin* CShaderManBin::LoadBinShader(AZ::IO::HandleType fpBin, const char* s
 
     char nameLwr[256];
     cry_strcpy(nameLwr, szName);
-    strlwr(nameLwr);
+    azstrlwr(nameLwr, AZ_ARRAY_SIZE(nameLwr));
     pBin->SetName(szNameBin);
     pBin->m_dwName = CParserBin::GetCRC32(nameLwr);
 
@@ -1031,7 +1059,7 @@ SShaderBin* CShaderManBin::SearchInCache(const char* szName, bool bInclude)
 {
     char nameFile[256], nameLwr[256];
     cry_strcpy(nameLwr, szName);
-    strlwr(nameLwr);
+    azstrlwr(nameLwr, AZ_ARRAY_SIZE(nameLwr));
     sprintf_s(nameFile, "%s.%s", nameLwr, bInclude ? "cfi" : "cfx");
     uint32 dwName = CParserBin::GetCRC32(nameFile);
 
@@ -1098,9 +1126,15 @@ void CShaderManBin::InvalidateCache(bool bIncludesOnly)
     }
     SShaderBin::s_nMaxFXBinCache = MAX_FXBIN_CACHE;
     m_bBinaryShadersLoaded = false;
-    stl::free_container(s_tempFXParams);
 
     g_shaderBucketAllocator.cleanup();
+    
+#if defined(SHADERS_SERIALIZING)
+    // Clear our .fxb cache if we are deleting our shader binary cache.
+    // We end up initializing part of the shader system with D3D11 as the platform
+    // and then switch to the real platform soon after, so make sure this cache is clean.
+    gRenDev->m_cEF.ClearSResourceCache();
+#endif    
 }
 
 #define SEC5_FILETIME 10*1000*1000*5
@@ -1130,7 +1164,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
     char nameFile[256], nameBin[256];
     AZ::IO::HandleType srcFileHandle = AZ::IO::InvalidHandle;
     uint32 nSourceCRC32 = 0;
-    sprintf_s(nameFile, "%sCryFX/%s.%s", gRenDev->m_cEF.m_ShadersPath, szName, bInclude ? "cfi" : "cfx");
+    sprintf_s(nameFile, "%sCryFX/%s.%s", gRenDev->m_cEF.m_ShadersPath.c_str(), szName, bInclude ? "cfi" : "cfx");
 #if !defined(_RELEASE)
     {
         srcFileHandle = gEnv->pCryPak->FOpen(nameFile, "rb");
@@ -1139,7 +1173,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
 #endif
     //char szPath[1024];
     //getcwd(szPath, 1024);
-    sprintf_s(nameBin, "%s%s.%s", m_pCEF->m_ShadersCache, szName, bInclude ? "cfib" : "cfxb");
+    sprintf_s(nameBin, "%s%s.%s", m_pCEF->m_ShadersCache.c_str(), szName, bInclude ? "cfib" : "cfxb");
     AZ::IO::HandleType dstFileHandle = AZ::IO::InvalidHandle;
     int i = 0, n = 2;
 
@@ -1149,9 +1183,9 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
         i = 1;
     }
 
-    string szDst = m_pCEF->m_szCachePath + nameBin;
+    AZStd::string szDst = m_pCEF->m_szCachePath + nameBin;
     byte bValid = 0;
-    float fVersion = (float)FX_CACHE_VER;
+    float fVersion = FX_CACHE_VER;
     for (; i < n; i++)
     {
         if (dstFileHandle != AZ::IO::InvalidHandle)
@@ -1164,7 +1198,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
             {
                 char nameLwr[256];
                 sprintf_s(nameLwr, "%s.%s", szName, bInclude ? "cfi" : "cfx");
-                strlwr(nameLwr);
+                azstrlwr(nameLwr, AZ_ARRAY_SIZE(nameLwr));
                 uint32 dwName = CParserBin::GetCRC32(nameLwr);
                 FXShaderBinValidCRCItor itor = m_BinValidCRCs.find(dwName);
                 if (itor != m_BinValidCRCs.end())
@@ -1270,7 +1304,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
                         CRenderer::CV_r_shadersAllowCompilation = 1;
                         CRenderer::CV_r_shadersasyncactivation = 0;
 
-                        gEnv->pLog->LogError("ERROR LOADING BIN SHADER - REACTIVATING SHADER COMPILATION !");
+                        gEnv->pLog->LogError("ERROR: LOADING BIN SHADER - REACTIVATING SHADER COMPILATION !");
                     }
                     else
                     {
@@ -1278,22 +1312,16 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
 
                         if (bShowMessageBox)
                         {
-                            IPlatformOS::EMsgBoxResult result;
-
-                            IPlatformOS* pOS = gEnv->pSystem->GetPlatformOS();
-                            if (pOS)
+                            AZStd::string result;
+                            EBUS_EVENT_RESULT(result, AZ::NativeUI::NativeUIRequestBus, DisplayOkDialog, "Invalid ShaderCache", acTemp, true);
+                            if (result == "Cancel")
                             {
-                                result = pOS->DebugMessageBox(acTemp, "Invalid ShaderCache");
-
-                                if (result == IPlatformOS::eMsgBox_Cancel)
-                                {
-                                    DebugBreak();
-                                }
-                                else
-                                {
-                                    bShowMessageBox = false;
-                                    Sleep(33);
-                                }
+                                DebugBreak();
+                            }
+                            else if (!result.empty())
+                            {
+                                bShowMessageBox = false;
+                                Sleep(33);
                             }
                             else
                             {
@@ -1348,7 +1376,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
         pSHB = LoadBinShader(dstFileHandle, nameFile, i == 0 ? nameBin : szDst.c_str(), !bInclude);
         gEnv->pCryPak->FClose(dstFileHandle);
         dstFileHandle = AZ::IO::InvalidHandle;
-        CRY_ASSERT(pSHB);
+        AZ_Assert(pSHB, "Error loading binary shader '%s'.", nameFile);
     }
 
     if (pSHB)
@@ -1367,16 +1395,16 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
         {
             char nm[128];
             nm[0] = '$';
-            strcpy(&nm[1], szName);
+            azstrcpy(&nm[1], AZ_ARRAY_SIZE(nm) - 1, szName);
             CCryNameTSCRC NM = CParserBin::GetPlatformSpecName(nm);
             FXShaderBinPathItor it = m_BinPaths.find(NM);
             if (it == m_BinPaths.end())
             {
-                m_BinPaths.insert(FXShaderBinPath::value_type(NM, i == 0 ? string(nameBin) : szDst));
+                m_BinPaths.insert(FXShaderBinPath::value_type(NM, i == 0 ? nameBin : szDst.c_str()));
             }
             else
             {
-                it->second = (i == 0) ? string(nameBin) : szDst;
+                it->second = (i == 0) ? nameBin : szDst.c_str();
             }
         }
     }
@@ -1394,7 +1422,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
             {
                 matName = m_pCEF->m_pCurInputResources->m_szMaterialName;
             }
-            LogWarningEngineOnly("Error: Shader \"%s\" doesn't exist (used in material \"%s\")", nameFile, matName != 0 ? matName : "$unknown$");
+            iLog->LogWarning("WARN: Shader \"%s\" doesn't exist (used in material \"%s\")", nameFile, matName != 0 ? matName : "$unknown$");
         }
     }
 
@@ -1411,7 +1439,7 @@ SShaderBin* CShaderManBin::GetBinShader(const char* szName, bool bInclude, uint3
     return pSHB;
 }
 
-void CShaderManBin::AddGenMacroses(SShaderGen* shG, CParserBin& Parser, uint64 nMaskGen)
+void CShaderManBin::AddGenMacroses(SShaderGen* shG, CParserBin& Parser, uint64 nMaskGen, bool ignoreShaderGenMask /*=false*/)
 {
     if (!nMaskGen || !shG)
     {
@@ -1423,7 +1451,7 @@ void CShaderManBin::AddGenMacroses(SShaderGen* shG, CParserBin& Parser, uint64 n
     {
         if (shG->m_BitMask[i]->m_Mask & nMaskGen)
         {
-            Parser.AddMacro(shG->m_BitMask[i]->m_dwToken, &dwMacro, 1, shG->m_BitMask[i]->m_Mask, Parser.m_Macros[1]);
+            Parser.AddMacro(shG->m_BitMask[i]->m_dwToken, &dwMacro, 1, ignoreShaderGenMask ? 0 : shG->m_BitMask[i]->m_Mask, Parser.m_Macros[1]);
         }
     }
 }
@@ -2033,9 +2061,9 @@ void STexSamplerFX::PostLoad()
     {
         if (pRt->m_nIDInPool >= 0)
         {
-            if ((int)CTexture::s_CustomRT_2D.Num() <= pRt->m_nIDInPool)
+            if ((int)CTexture::s_CustomRT_2D->Num() <= pRt->m_nIDInPool)
             {
-                CTexture::s_CustomRT_2D.Expand(pRt->m_nIDInPool + 1);
+                CTexture::s_CustomRT_2D->Expand(pRt->m_nIDInPool + 1);
             }
         }
         pRt->m_pTarget[0] = CTexture::s_ptexRT_2D;
@@ -3529,7 +3557,7 @@ void CShaderManBin::AddSamplerToScript(CParserBin& Parser, SFXSampler* pr, PodAr
         SHData.push_back(eT_colon);
         SHData.push_back(eT_register);
         SHData.push_back(eT_br_rnd_1);
-        sprintf(str, "s%d", nReg);
+        azsprintf(str, "s%d", nReg);
         SHData.push_back(Parser.NewUserToken(eT_unknown, str, true));
         SHData.push_back(eT_br_rnd_2);
     }
@@ -3588,7 +3616,7 @@ void CShaderManBin::AddTextureToScript(CParserBin& Parser, SFXTexture* pr, PodAr
         SHData.push_back(eT_colon);
         SHData.push_back(eT_register);
         SHData.push_back(eT_br_rnd_1);
-        sprintf(str, "t%d", nReg);
+        azsprintf(str, "t%d", nReg);
         SHData.push_back(Parser.NewUserToken(eT_unknown, str, true));
         SHData.push_back(eT_br_rnd_2);
     }
@@ -3630,7 +3658,7 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_GenerateShaderData(CParserBin& Par
 
     SCodeFragment* pFunc = &Parser.m_CodeFragments[nNum];
     SShaderBin* pBin = Parser.m_pCurBinShader;
-    SParamCacheInfo* pCache = GetParamInfo(pBin, pFunc->m_dwName, Parser.m_pCurShader->m_nMaskGenFX);
+    SParamCacheInfo* pCache = GetParamInfo(pBin, pFunc->m_dwName, Parser.m_pCurShader->m_nMaskGenFX, Parser.m_pCurShader->m_maskGenStatic);
     if (pCache)
     {
         AffectedFragments.SetUse(0);
@@ -3788,7 +3816,7 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_GenerateShaderData(CParserBin& Par
             }
             if (CRenderer::CV_r_shadersAllowCompilation)
             {
-                SaveBinShaderLocalInfo(pBin, pFunc->m_dwName, Parser.m_pCurShader->m_nMaskGenFX, AffectedFragments, AffectedParams, AffectedSamplers, AffectedTextures);
+                SaveBinShaderLocalInfo(pBin, pFunc->m_dwName, Parser.m_pCurShader->m_nMaskGenFX, Parser.m_pCurShader->m_maskGenStatic, AffectedFragments, AffectedParams, AffectedSamplers, AffectedTextures);
             }
         }
         else
@@ -4016,7 +4044,6 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_LoadShader(CParserBin& Parser, FXM
 
     uint64 nGenMask = 0;
     PodArray<uint32> SHDataBuffer(SHDATA_BUFFER_SIZE);
-    const char* szName = Parser.GetString(dwSHName);
     bRes &= ParseBinFX_Technique_Pass_GenerateShaderData(Parser, Macros, FXParams, dwSHName, eSHClass, nGenMask, dwSHType, SHDataBuffer, pShTech);
 #if !defined(_RELEASE)
     if (SHDataBuffer.size() > SHDATA_BUFFER_SIZE)
@@ -4035,6 +4062,7 @@ bool CShaderManBin::ParseBinFX_Technique_Pass_LoadShader(CParserBin& Parser, FXM
     CRY_ASSERT(gRenDev->m_RP.m_pShader != 0);
     if (bRes && (!CParserBin::m_bParseFX || !SHData.empty()))
     {
+        const char* szName = Parser.GetString(dwSHName);
         char str[1024];
         sprintf_s(str, "%s@%s", Parser.m_pCurShader->m_NameShader.c_str(), szName);
         pSH = CHWShader::mfForName(str, Parser.m_pCurShader->m_NameFile, Parser.m_pCurShader->m_CRC32, szName, eSHClass, SHData, &Parser.m_TokenTable, dwSHType, Parser.m_pCurShader, nGenMask, Parser.m_pCurShader->m_nMaskGenFX);
@@ -4433,9 +4461,9 @@ bool CShaderManBin::ParseBinFX_LightStyle_Val(CParserBin& Parser, SParserFrame& 
         }
         if (pstr2 - pstr1 - 1 > 0)
         {
-            strncpy(str, pstr1 + 1, pstr2 - pstr1 - 1);
+            azstrncpy(str, AZ_ARRAY_SIZE(str), pstr1 + 1, pstr2 - pstr1 - 1);
             str[pstr2 - pstr1 - 1] = 0;
-            i = sscanf(str, "%f %f %f %f %f %f %f", &pKeyFrame.cColor.r, &pKeyFrame.cColor.g, &pKeyFrame.cColor.b, &pKeyFrame.cColor.a,
+            i = azsscanf(str, "%f %f %f %f %f %f %f", &pKeyFrame.cColor.r, &pKeyFrame.cColor.g, &pKeyFrame.cColor.b, &pKeyFrame.cColor.a,
                     &pKeyFrame.vPosOffset.x, &pKeyFrame.vPosOffset.y, &pKeyFrame.vPosOffset.z);
             switch (i)
             {
@@ -4884,6 +4912,12 @@ bool CShaderManBin::ParseBinFX(SShaderBin* pBin, CShader* ef, uint64 nMaskGen)
         AddGenMacroses(efGen->m_ShaderGenParams, Parser, nMaskGen);
     }
 
+    if (ef->m_ShaderGenStaticParams)
+    {
+        // Just add the defines and not the masks because they could clash with the gen params masks.
+        AddGenMacroses(ef->m_ShaderGenStaticParams, Parser, ef->m_maskGenStatic, true);
+    }
+
     pBin->Lock();
     Parser.Preprocess(0, pBin->m_Tokens, &pBin->m_TokenTable);
     ef->m_CRC32 = pBin->m_CRC32;
@@ -4892,7 +4926,7 @@ bool CShaderManBin::ParseBinFX(SShaderBin* pBin, CShader* ef, uint64 nMaskGen)
 #endif
 
 #if defined(SHADER_NO_SOURCES)
-    iLog->Log("ERROR: Couldn't find binary shader '%s' (0x%x)", ef->GetName(), ef->m_nMaskGenFX);
+    iLog->LogError("ERROR: Couldn't find binary shader '%s' (0x%x)", ef->GetName(), ef->m_nMaskGenFX);
     return false;
 #else
     SParserFrame Frame(0, (Parser.m_Tokens.size() > 0 ? Parser.m_Tokens.size() - 1 : 0));
@@ -4949,6 +4983,7 @@ bool CShaderManBin::ParseBinFX(SShaderBin* pBin, CShader* ef, uint64 nMaskGen)
     CCryNameR techStart[2];
 
     // From MemReplay analysis of shader params, 200 should be more than enough space
+    static decltype(SShaderFXParams::m_FXParams) s_tempFXParams;
     s_tempFXParams.reserve(200);
     s_tempFXParams.clear();
 
@@ -5080,9 +5115,9 @@ bool CShaderManBin::ParseBinFX(SShaderBin* pBin, CShader* ef, uint64 nMaskGen)
             bRes &= ParseBinFX_Texture(Parser, Parser.m_Annotations, Pr);
 
             // Texture2D something = TS_identifiersearch;
-            if (!strnicmp(Pr.m_Values.c_str(), "TM_", 3) ||
-                !strnicmp(Pr.m_Values.c_str(), "TS_", 3) ||
-                !strnicmp(Pr.m_Values.c_str(), "TP_", 3))
+            if (!azstrnicmp(Pr.m_Values.c_str(), "TM_", 3) ||
+                !azstrnicmp(Pr.m_Values.c_str(), "TS_", 3) ||
+                !azstrnicmp(Pr.m_Values.c_str(), "TP_", 3))
             {
                 Pr.m_Semantic = Pr.m_Values;
                 Pr.m_szTexture = "";
@@ -5484,7 +5519,7 @@ SShaderTexSlots* CShaderManBin::GetTextureSlots(CParserBin& Parser, SShaderBin* 
             uint32 dwEntryFuncName = Parser.GetCRC32(ef->m_HWTechniques[nTech]->m_Passes[nPassIter].m_PShader->m_EntryFunc);
 
             // get the cached info for the entry func
-            SParamCacheInfo* pCache = GetParamInfo(pBin, dwEntryFuncName, ef->m_nMaskGenFX);
+            SParamCacheInfo* pCache = GetParamInfo(pBin, dwEntryFuncName, ef->m_nMaskGenFX, ef->m_maskGenStatic);
 
             if (pCache)
             {
@@ -5881,7 +5916,7 @@ void CShaderMan::mfPostLoadFX(CShader* ef, std::vector<SShaderTechParseParams>& 
             {
                 if (hw->m_NameStr == ps->techName[n])
                 {
-                    iLog->LogWarning("WARNING: technique '%s' refers to itself as the next technique (ignored)", hw->m_NameStr.c_str());
+                    iLog->LogWarning("WARN: technique '%s' refers to itself as the next technique (ignored)", hw->m_NameStr.c_str());
                 }
                 else
                 {
@@ -5897,7 +5932,7 @@ void CShaderMan::mfPostLoadFX(CShader* ef, std::vector<SShaderTechParseParams>& 
                     }
                     if (j == ef->m_HWTechniques.Num())
                     {
-                        iLog->LogWarning("WARNING: couldn't find technique '%s' in the sequence for technique '%s' (ignored)", ps->techName[n].c_str(), hw->m_NameStr.c_str());
+                        iLog->LogWarning("WARN: couldn't find technique '%s' in the sequence for technique '%s' (ignored)", ps->techName[n].c_str(), hw->m_NameStr.c_str());
                     }
                 }
             }
@@ -6062,17 +6097,17 @@ string SFXParam::GetValueForName(const char* szName, EParamType& eType)
         char* b = buf;
         fxFillPr(&b, tok);
         eType = eType_UNKNOWN;
-        if (!_stricmp(tok, "string"))
+        if (!azstricmp(tok, "string"))
         {
             eType = eType_STRING;
         }
         else
-        if (!_stricmp(tok, "float"))
+        if (!azstricmp(tok, "float"))
         {
             eType = eType_FLOAT;
         }
         else
-        if (!_stricmp(tok, "half"))
+        if (!azstricmp(tok, "half"))
         {
             eType = eType_HALF;
         }
@@ -6083,7 +6118,7 @@ string SFXParam::GetValueForName(const char* szName, EParamType& eType)
             {
                 continue;
             }
-            if (_stricmp(tok, szName))
+            if (azstricmp(tok, szName))
             {
                 continue;
             }
@@ -6100,7 +6135,7 @@ string SFXParam::GetValueForName(const char* szName, EParamType& eType)
         }
         else
         {
-            if (_stricmp(tok, szName))
+            if (azstricmp(tok, szName))
             {
                 continue;
             }
@@ -6128,7 +6163,7 @@ const char* CShaderMan::mfParseFX_Parameter (const string& script, EParamType eT
     static char sRet[128];
     int nLen = script.length();
     char* pTemp = new char [nLen + 1];
-    strcpy(pTemp, script.c_str());
+    azstrcpy(pTemp, nLen + 1, script.c_str());
     sRet[0] = 0;
     char* buf = pTemp;
 
@@ -6172,9 +6207,9 @@ const char* CShaderMan::mfParseFX_Parameter (const string& script, EParamType eT
                 }
                 n++;
             }
-            if (!_stricmp(szName, name))
+            if (!azstricmp(szName, name))
             {
-                strcpy(sRet, data);
+                azstrcpy(sRet, AZ_ARRAY_SIZE(sRet), data);
                 break;
             }
         }
@@ -6217,7 +6252,7 @@ SFXParam* CShaderMan::mfGetFXParameter(std::vector<SFXParam>& Params, const char
             szSrc++;
         }
         nameParam[n] = 0;
-        if (!_stricmp(nameParam, param))
+        if (!azstricmp(nameParam, param))
         {
             return pr;
         }
@@ -6248,7 +6283,7 @@ SFXSampler* CShaderMan::mfGetFXSampler(std::vector<SFXSampler>& Params, const ch
             szSrc++;
         }
         nameParam[n] = 0;
-        if (!stricmp(nameParam, param))
+        if (!azstricmp(nameParam, param))
         {
             return pr;
         }
@@ -6279,7 +6314,7 @@ SFXTexture* CShaderMan::mfGetFXTexture(std::vector<SFXTexture>& Params, const ch
             szSrc++;
         }
         nameParam[n] = 0;
-        if (!stricmp(nameParam, param))
+        if (!azstricmp(nameParam, param))
         {
             return pr;
         }
@@ -6333,6 +6368,14 @@ CTexture* CShaderMan::mfParseFXTechnique_LoadShaderTexture (STexSamplerRT* smp, 
     {
         return NULL;
     }
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // store the CRC for this sampler's texture name for fast lookup
+    // this is particularly useful for shared engine textures
+    CCryNameTSCRC crc(szName);
+    smp->m_nCrc = crc.get();
+#endif // #if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
     if (szName[0] == '$')
     {
         tp = mfCheckTemplateTexName(szName, (ETEX_Type)smp->m_eTexType);

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <ScriptCanvas/Core/Contract.h>
+#include <ScriptCanvas/Data/Data.h>
 
 namespace ScriptCanvas
 {
@@ -20,15 +21,14 @@ namespace ScriptCanvas
     {
     public:
         AZ_CLASS_ALLOCATOR(ConnectionLimitContract, AZ::SystemAllocator, 0);
-        AZ_RTTI(ConnectionLimitContract, "{C66FB68F-63D5-4EE2-BC28-D566EC2E5159}", Contract)
+        AZ_RTTI(ConnectionLimitContract, "{C66FB68F-63D5-4EE2-BC28-D566EC2E5159}", Contract);
 
-        ConnectionLimitContract(AZ::s32 limit = -1) : m_limit(AZStd::GetMax(-1, limit)) {}
-
+        ConnectionLimitContract(AZ::s32 limit = -1);
         ~ConnectionLimitContract() override = default;
 
         static void Reflect(AZ::ReflectContext* reflection);
 
-        void SetLimit(AZ::s32 limit) { m_limit = AZStd::GetMax(-1, limit); }
+        void SetLimit(AZ::s32 limit);
 
     protected:
         AZ::s32 m_limit;

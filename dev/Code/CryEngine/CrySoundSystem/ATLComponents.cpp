@@ -1,4 +1,4 @@
-/*
+﻿/*
 * All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates or
 * its licensors.
 *
@@ -20,8 +20,30 @@
 #include <I3DEngine.h>
 #include <IRenderAuxGeom.h>
 
+#if defined(INCLUDE_AUDIO_PRODUCTION_CODE)
+    #include <AzCore/std/string/conversions.h>
+#endif // INCLUDE_AUDIO_PRODUCTION_CODE
+
 namespace Audio
 {
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    // AudioObjectIDFactory
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    const TAudioObjectID AudioObjectIDFactory::s_invalidAudioObjectID = INVALID_AUDIO_OBJECT_ID;
+    const TAudioObjectID AudioObjectIDFactory::s_globalAudioObjectID = GLOBAL_AUDIO_OBJECT_ID;
+    const TAudioObjectID AudioObjectIDFactory::s_minValidAudioObjectID = (GLOBAL_AUDIO_OBJECT_ID + 1);
+    const TAudioObjectID AudioObjectIDFactory::s_maxValidAudioObjectID = static_cast<TAudioObjectID>(-256);
+    // Beyond the max ID value, allow for a range of 255 ID values which will be reserved for the audio middleware.
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    // static
+    TAudioObjectID AudioObjectIDFactory::GetNextID()
+    {
+        static TAudioObjectID s_nextId = s_minValidAudioObjectID;
+
+        return (s_nextId <= s_maxValidAudioObjectID ? s_nextId++ : s_invalidAudioObjectID);
+    }
+
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     //  CAudioEventManager
     ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -254,14 +276,9 @@ namespace Audio
     //  CAudioObjectManager
     ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // IDs below this number are reserved for the various unique
-    // objects inside the AudioSystem a user may want to address
-    // (e.g. an AudioManager, a MusicSystem, AudioListeners?...)
-    const TAudioObjectID CAudioObjectManager::s_nMinAudioObjectID = 100;
-
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     CAudioObjectManager::CAudioObjectManager(CAudioEventManager& refAudioEventManager)
-        : m_cObjectPool(g_audioCVars.m_nAudioObjectPoolSize, s_nMinAudioObjectID)
+        : m_cObjectPool(g_audioCVars.m_nAudioObjectPoolSize, AudioObjectIDFactory::s_minValidAudioObjectID)
         , m_fTimeSinceLastVelocityUpdateMS(0.0f)
         , m_refAudioEventManager(refAudioEventManager)
     #if defined(INCLUDE_AUDIO_PRODUCTION_CODE)
@@ -356,58 +373,6 @@ namespace Audio
         return bSuccess;
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    class CObjectIDPredicate
-    {
-    public:
-        CObjectIDPredicate(const TAudioObjectID nID)
-            : m_nID(nID)
-        {}
-
-        ~CObjectIDPredicate() {}
-
-        bool operator()(const CATLAudioObject* const pObject)
-        {
-            return pObject->GetID() == m_nID;
-        }
-
-    private:
-        const TAudioObjectID m_nID;
-    };
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    bool CAudioObjectManager::ReserveThisID(const TAudioObjectID nAudioObjectID)
-    {
-        bool bSuccess = false;
-        CATLAudioObject* pObject = LookupID(nAudioObjectID);
-
-        if (!pObject)
-        {
-            //no active object uses nAudioObjectID, so we can create one
-            auto audioObjectIter = AZStd::find_if(m_cObjectPool.m_cReserved.begin(), m_cObjectPool.m_cReserved.end(), CObjectIDPredicate(nAudioObjectID));
-
-            if (audioObjectIter != m_cObjectPool.m_cReserved.end())
-            {
-                // there is a reserved instance with the required ID
-                AZStd::swap((*audioObjectIter), m_cObjectPool.m_cReserved.back());
-                pObject = m_cObjectPool.m_cReserved.back();
-                m_cObjectPool.m_cReserved.pop_back();
-            }
-            else
-            {
-                // none of the reserved instances have the required ID
-                IATLAudioObjectData* pObjectData = nullptr;
-                AudioSystemImplementationRequestBus::BroadcastResult(pObjectData, &AudioSystemImplementationRequestBus::Events::NewAudioObjectData, nAudioObjectID);
-                pObject = azcreate(CATLAudioObject, (nAudioObjectID, pObjectData), Audio::AudioSystemAllocator, "ATLAudioObject");
-            }
-
-            m_cAudioObjects.emplace(nAudioObjectID, pObject);
-
-            bSuccess = true;
-        }
-
-        return bSuccess;
-    }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     bool CAudioObjectManager::ReleaseID(const TAudioObjectID nAudioObjectID)
@@ -545,16 +510,34 @@ namespace Audio
         else
         {
             //need to get a new instance
-            const TAudioObjectID nNewID = m_cObjectPool.GetNextID();
+            const TAudioObjectID nNewID = AudioObjectIDFactory::GetNextID();
             IATLAudioObjectData* pObjectData = nullptr;
             AudioSystemImplementationRequestBus::BroadcastResult(pObjectData, &AudioSystemImplementationRequestBus::Events::NewAudioObjectData, nNewID);
-            pObject = azcreate(CATLAudioObject, (nNewID, pObjectData), Audio::AudioSystemAllocator, "ATLAudioObject");
+           
+            size_t unallocatedMemorySize = AZ::AllocatorInstance<Audio::AudioSystemAllocator>::Get().GetUnAllocatedMemory();
+
+            const size_t minimalMemorySize = 100 * 1024;
+
+            if (unallocatedMemorySize < minimalMemorySize)
+            {
+                AZ::AllocatorInstance<Audio::AudioSystemAllocator>::Get().GarbageCollect();
+                unallocatedMemorySize = AZ::AllocatorInstance<Audio::AudioSystemAllocator>::Get().GetUnAllocatedMemory();
+            }
+
+            if (unallocatedMemorySize >= minimalMemorySize)
+            {
+                pObject = azcreate(CATLAudioObject, (nNewID, pObjectData), Audio::AudioSystemAllocator, "ATLAudioObject");
+            }
 
             if (!pObject)
             {
                 --m_cObjectPool.m_nIDCounter;
 
-                g_audioLogger.Log(eALT_WARNING, "Failed to get a new instance of an AudioObject from the implementation");
+                const char* msg = "Failed to get a new instance of an AudioObject from the implementation. "
+                    "If this limit was reached from legitimate content creation and not a scripting error, "
+                    "try increasing the Capacity of Audio::AudioSystemAllocator.";
+
+                g_audioLogger.Log(eALT_FATAL, msg);
                 //failed to get a new instance from the implementation
             }
         }
@@ -605,7 +588,7 @@ namespace Audio
 
         for (size_t i = 0; i < m_cObjectPool.m_nReserveSize - numRegisteredObjects; ++i)
         {
-            const TAudioObjectID nObjectID = static_cast<TAudioObjectID>(m_cObjectPool.GetNextID());
+            const auto nObjectID = AudioObjectIDFactory::GetNextID();
             IATLAudioObjectData* pObjectData = nullptr;
             AudioSystemImplementationRequestBus::BroadcastResult(pObjectData, &AudioSystemImplementationRequestBus::Events::NewAudioObjectData, nObjectID);
             auto pObject = azcreate(CATLAudioObject, (nObjectID, pObjectData), Audio::AudioSystemAllocator, "ATLAudioObject");
@@ -726,12 +709,11 @@ namespace Audio
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     CAudioListenerManager::CAudioListenerManager()
-        : m_nMaxNumberListeners(8)
-        , m_pDefaultListenerObject(nullptr)
-        , m_nDefaultListenerID(50) // IDs 50-57 are reserved for the AudioListeners.
+        : m_pDefaultListenerObject(nullptr)
+        , m_nDefaultListenerID(AudioObjectIDFactory::GetNextID())
         , m_listenerOverrideID(INVALID_AUDIO_OBJECT_ID)
     {
-        m_cListenerPool.reserve(m_nMaxNumberListeners);
+        m_cListenerPool.reserve(m_numReservedListeners);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -748,7 +730,7 @@ namespace Audio
         IATLListenerData* pNewListenerData = nullptr;
 
         // Default listener...
-        AudioSystemImplementationRequestBus::BroadcastResult(pNewListenerData, &AudioSystemImplementationRequestBus::Events::NewDefaultAudioListenerObjectData);
+        AudioSystemImplementationRequestBus::BroadcastResult(pNewListenerData, &AudioSystemImplementationRequestBus::Events::NewDefaultAudioListenerObjectData, m_nDefaultListenerID);
         m_pDefaultListenerObject = azcreate(CATLListenerObject, (m_nDefaultListenerID, pNewListenerData), Audio::AudioSystemAllocator, "ATLListenerObject-Default");
         if (m_pDefaultListenerObject)
         {
@@ -756,12 +738,12 @@ namespace Audio
         }
 
         // Additional listeners...
-        for (size_t i = 1; i < m_nMaxNumberListeners; ++i)
+        for (size_t listener = 0; listener < m_numReservedListeners; ++listener)
         {
-            const TAudioObjectID nListenerID = m_nDefaultListenerID + i;
-            AudioSystemImplementationRequestBus::BroadcastResult(pNewListenerData, &AudioSystemImplementationRequestBus::Events::NewAudioListenerObjectData, i);
-            auto pListenerObject = azcreate(CATLListenerObject, (nListenerID, pNewListenerData), Audio::AudioSystemAllocator, "ATLListenerObject");
-            m_cListenerPool.push_back(pListenerObject);
+            const TAudioObjectID listenerId = AudioObjectIDFactory::GetNextID();
+            AudioSystemImplementationRequestBus::BroadcastResult(pNewListenerData, &AudioSystemImplementationRequestBus::Events::NewAudioListenerObjectData, listenerId);
+            auto listenerObject = azcreate(CATLListenerObject, (listenerId, pNewListenerData), Audio::AudioSystemAllocator, "ATLListenerObject");
+            m_cListenerPool.push_back(listenerObject);
         }
     }
 
@@ -816,7 +798,7 @@ namespace Audio
         }
         else
         {
-            g_audioLogger.Log(eALT_WARNING, "CAudioListenerManager::ReserveID - Maximum number of Audio Listeners reached (%d)!", m_nMaxNumberListeners);
+            g_audioLogger.Log(eALT_WARNING, "CAudioListenerManager::ReserveID - Reserved pool of pre-allocated Audio Listeners has been exhausted!");
         }
 
         return bSuccess;
@@ -1870,7 +1852,7 @@ namespace Audio
     void CAudioEventManager::DrawDebugInfo(IRenderAuxGeom& rAuxGeom, float fPosX, float fPosY) const
     {
         static float const fHeaderColor[4] = { 1.0f, 1.0f, 1.0f, 0.9f };
-        static float const fItemPlayingColor[4] = { 0.1f, 0.6f, 0.1f, 0.9f };
+        static float const fItemPlayingColor[4] = { 0.3f, 0.6f, 0.3f, 0.9f };
         static float const fItemLoadingColor[4] = { 0.9f, 0.2f, 0.2f, 0.9f };
         static float const fItemOtherColor[4] = { 0.8f, 0.8f, 0.8f, 0.9f };
         static float const fNoImplColor[4] = { 1.0f, 0.6f, 0.6f, 0.9f };
@@ -1879,17 +1861,17 @@ namespace Audio
         fPosX += 20.0f;
         fPosY += 17.0f;
 
+        AZStd::string triggerFilter(g_audioCVars.m_pAudioTriggersDebugFilter->GetString());
+        AZStd::to_lower(triggerFilter.begin(), triggerFilter.end());
+
         for (auto& audioEventPair : m_cActiveAudioEvents)
         {
             auto const atlEvent = audioEventPair.second;
-            char const* const sOriginalName = m_pDebugNameStore->LookupAudioTriggerName(atlEvent->m_nTriggerID);
-            CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH> sLowerCaseAudioTriggerName(sOriginalName);
-            sLowerCaseAudioTriggerName.MakeLower();
-            CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH> sLowerCaseSearchString(g_audioCVars.m_pAudioTriggersDebugFilter->GetString());
-            sLowerCaseSearchString.MakeLower();
-            const bool bDraw = (sLowerCaseSearchString.empty() || (sLowerCaseSearchString.compareNoCase("0") == 0)) || (sLowerCaseAudioTriggerName.find(sLowerCaseSearchString) != CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH>::npos);
 
-            if (bDraw)
+            AZStd::string triggerName(m_pDebugNameStore->LookupAudioTriggerName(atlEvent->m_nTriggerID));
+            AZStd::to_lower(triggerName.begin(), triggerName.end());
+
+            if (AudioDebugDrawFilter(triggerName, triggerFilter))
             {
                 const float* pColor = fItemOtherColor;
 
@@ -1902,15 +1884,16 @@ namespace Audio
                     pColor = fItemLoadingColor;
                 }
 
-                rAuxGeom.Draw2dLabel(fPosX, fPosY, 1.2f,
+                rAuxGeom.Draw2dLabel(fPosX, fPosY, 1.6f,
                     pColor,
                     false,
-                    "%s on %s : %u",
-                    m_pDebugNameStore->LookupAudioTriggerName(atlEvent->m_nTriggerID),
+                    "%s (%llu): %s (%llu)",
                     m_pDebugNameStore->LookupAudioObjectName(atlEvent->m_nObjectID),
+                    atlEvent->m_nObjectID,
+                    triggerName.c_str(),
                     atlEvent->GetID());
 
-                fPosY += 10.0f;
+                fPosY += 16.0f;
             }
         }
     }
@@ -1978,11 +1961,21 @@ namespace Audio
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     void CAudioObjectManager::DrawPerObjectDebugInfo(IRenderAuxGeom& rAuxGeom, const Vec3& rListenerPos) const
     {
+        AZStd::string audioObjectFilter(g_audioCVars.m_pAudioObjectsDebugFilter->GetString());
+        AZStd::to_lower(audioObjectFilter.begin(), audioObjectFilter.end());
+
         for (auto& audioObjectPair : m_cAudioObjects)
         {
             auto const audioObject = audioObjectPair.second;
 
-            if (HasActiveEvents(audioObject))
+            AZStd::string audioObjectName(m_pDebugNameStore->LookupAudioObjectName(audioObject->GetID()));
+            AZStd::to_lower(audioObjectName.begin(), audioObjectName.end());
+
+            bool bDraw = AudioDebugDrawFilter(audioObjectName, audioObjectFilter);
+
+            bDraw = bDraw && (g_audioCVars.m_nShowActiveAudioObjectsOnly == 0 || HasActiveEvents(audioObject));
+
+            if (bDraw)
             {
                 audioObject->DrawDebugInfo(rAuxGeom, rListenerPos, m_pDebugNameStore);
             }
@@ -1993,41 +1986,67 @@ namespace Audio
     void CAudioObjectManager::DrawDebugInfo(IRenderAuxGeom& rAuxGeom, float fPosX, float fPosY) const
     {
         static const float fHeaderColor[4] = { 1.0f, 1.0f, 1.0f, 0.9f };
-        static const float fItemActiveColor[4] = { 0.1f, 0.6f, 0.1f, 0.9f };
+        static const float fItemActiveColor[4] = { 0.3f, 0.6f, 0.3f, 0.9f };
         static const float fItemInactiveColor[4] = { 0.8f, 0.8f, 0.8f, 0.9f };
+        static const float fOverloadColor[4] = { 1.0f, 0.3f, 0.3f, 0.9f };
 
-        size_t nObjects = 0;
+        size_t activeObjects = 0;
+        size_t aliveObjects = m_cAudioObjects.size();
+        size_t remainingObjects = (m_cObjectPool.m_nReserveSize > aliveObjects ? m_cObjectPool.m_nReserveSize - aliveObjects : 0);
         const float fHeaderPosY = fPosY;
+
         fPosX += 20.0f;
         fPosY += 17.0f;
+
+        AZStd::string audioObjectFilter(g_audioCVars.m_pAudioObjectsDebugFilter->GetString());
+        AZStd::to_lower(audioObjectFilter.begin(), audioObjectFilter.end());
 
         for (auto& audioObjectPair : m_cAudioObjects)
         {
             auto const audioObject = audioObjectPair.second;
-            const char* const sOriginalName = m_pDebugNameStore->LookupAudioObjectName(audioObject->GetID());
-            CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH> sLowerCaseAudioObjectName(sOriginalName);
-            sLowerCaseAudioObjectName.MakeLower();
-            CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH> sLowerCaseSearchString(g_audioCVars.m_pAudioObjectsDebugFilter->GetString());
-            sLowerCaseSearchString.MakeLower();
-            const bool bHasActiveEvents = HasActiveEvents(audioObject);
-            const bool bStringFound = (sLowerCaseSearchString.empty() || (sLowerCaseSearchString.compareNoCase("0") == 0)) || (sLowerCaseAudioObjectName.find(sLowerCaseSearchString) != CryFixedStringT<MAX_AUDIO_CONTROL_NAME_LENGTH>::npos);
-            const bool bDraw = bStringFound && ((g_audioCVars.m_nShowActiveAudioObjectsOnly == 0) || (g_audioCVars.m_nShowActiveAudioObjectsOnly > 0 && bHasActiveEvents));
+
+            AZStd::string audioObjectName(m_pDebugNameStore->LookupAudioObjectName(audioObject->GetID()));
+            AZStd::to_lower(audioObjectName.begin(), audioObjectName.end());
+
+            bool bDraw = AudioDebugDrawFilter(audioObjectName, audioObjectFilter);
+            bool hasActiveEvents = HasActiveEvents(audioObject);
+            bDraw = bDraw && (g_audioCVars.m_nShowActiveAudioObjectsOnly == 0 || hasActiveEvents);
 
             if (bDraw)
             {
-                rAuxGeom.Draw2dLabel(fPosX, fPosY, 1.2f,
-                    bHasActiveEvents ? fItemActiveColor : fItemInactiveColor,
+                rAuxGeom.Draw2dLabel(fPosX, fPosY, 1.6f,
+                    hasActiveEvents ? fItemActiveColor : fItemInactiveColor,
                     false,
-                    "%u : %s",
+                    "[%.2f  %.2f  %.2f] (%llu): %s",
+                    audioObject->GetPosition().mPosition.GetColumn3().x,
+                    audioObject->GetPosition().mPosition.GetColumn3().y,
+                    audioObject->GetPosition().mPosition.GetColumn3().z,
                     audioObject->GetID(),
-                    sOriginalName);
+                    audioObjectName.c_str());
 
-                fPosY += 10.0f;
-                ++nObjects;
+                fPosY += 16.0f;
+            }
+
+            if (hasActiveEvents)
+            {
+                ++activeObjects;
             }
         }
 
-        rAuxGeom.Draw2dLabel(fPosX, fHeaderPosY, 1.6f, fHeaderColor, false, "Audio Objects [%" PRISIZE_T "]", nObjects);
+        static const char* headerFormat = "Audio Objects [Active : %3" PRISIZE_T " | Alive: %3" PRISIZE_T " | Pool: %3" PRISIZE_T " | Remaining: %3" PRISIZE_T "]";
+        const bool overloaded = (m_cAudioObjects.size() > m_cObjectPool.m_nReserveSize);
+
+        rAuxGeom.Draw2dLabel(
+            fPosX,
+            fHeaderPosY,
+            1.6f,
+            overloaded ? fOverloadColor : fHeaderColor,
+            false,
+            headerFormat,
+            activeObjects,
+            aliveObjects,
+            m_cObjectPool.m_nReserveSize,
+            remainingObjects);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////

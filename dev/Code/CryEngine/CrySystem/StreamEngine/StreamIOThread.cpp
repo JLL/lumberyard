@@ -123,7 +123,11 @@ void CStreamingIOThread::Run()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION STREAMIOTHREAD_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(StreamIOThread_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/StreamIOThread_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/StreamIOThread_cpp_provo.inl"
+    #endif
 #endif
         }
 
@@ -134,11 +138,6 @@ void CStreamingIOThread::Run()
         }
         else
         {
-            if (m_eMediaType == eStreamSourceTypeDisc && gEnv->pSystem->GetPlatformOS())
-            {
-                gEnv->pSystem->GetPlatformOS()->SetOpticalDriveIdle(true);
-            }
-
 #if defined(_RELEASE)
             m_awakeEvent.Wait();
 #elif defined(STREAMENGINE_ENABLE_STATS)
@@ -167,11 +166,6 @@ void CStreamingIOThread::Run()
                 }
             }
 #endif
-
-            if (m_eMediaType == eStreamSourceTypeDisc && gEnv->pSystem->GetPlatformOS())
-            {
-                gEnv->pSystem->GetPlatformOS()->SetOpticalDriveIdle(false);
-            }
         }
 
         if (m_bNeedReset)
@@ -749,7 +743,11 @@ void CStreamingWorkerThread::Run()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION STREAMIOTHREAD_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(StreamIOThread_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/StreamIOThread_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/StreamIOThread_cpp_provo.inl"
+    #endif
 #endif
 
     // Main thread loop

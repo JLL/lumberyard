@@ -14,18 +14,17 @@
 ########################################################################################
 
 import os
+from runpy import run_path
 
 def build(bld):
 
-    #==============================
-    # Common
-    #==============================
     includes    = [ '.',
                     bld.Path('Code/Tools'),
                     bld.Path('Code/Tools/RC/ResourceCompiler'),
                     bld.Path('Code/Tools/CryCommonTools'),
                     bld.Path('Code/CryEngine/CryCommon'),
                     bld.ThirdPartyPath('squish')]
+
     defines     = [ 'RESOURCECOMPILERIMAGE_EXPORTS',
                     'RESOURCE_COMPILER_IMAGE']
     win_lib     = [ 'Gdi32' ]
@@ -34,18 +33,26 @@ def build(bld):
 
     darwin_copy_dependent_files = []
 
-    bld.CryResourceCompilerModule(
-        
+    for p0, p1, p2, p3 in bld.env['RESTRICTED_PLATFORMS']:
+        script_dir, script_base = os.path.split(bld.cur_script.abspath())
+        restricted_script_filename = os.path.join(script_dir, p0, '{0}_{1}'.format(script_base, p1))
+        if os.path.exists(restricted_script_filename):
+            restricted_script = run_path(restricted_script_filename)
+            if 'if_platform_supported' in restricted_script:
+                restricted_script['if_platform_supported'](bld, lambda *args: os.path.join(*args), includes, win_copy_dependent_files, win_lib, win_libpath)
+
+    kw = dict(
+
         #==============================
         # Settings
         #==============================
         target                      = 'ResourceCompilerImage',
         vs_filter                   = 'RC',
         copyright_org               = 'Amazon-CryTek',
-        file_list                   = [ 'resourcecompilerimage.waf_files',
-                                      ],
+        file_list                   = ['resourcecompilerimage.waf_files'],
         platforms                   = ['win', 'darwin'],
-        configurations              = ['debug', 'debug_test', 'profile', 'profile_test'],
+        exclude_monolithic          = True,
+        client_only                 = True,
         use                         = ['AzToolsFramework'],
         uselib                      = ['QT5CORE',
                                         'QT5GUI',
@@ -64,26 +71,29 @@ def build(bld):
         #==============================
         # Windows
         #==============================
-        win_cflags                  = ['/W3', '/EHsc'],
         win_defines                 = ['_WIN64'],
         win_copy_dependent_files    = win_copy_dependent_files,
-        win_export_definitions      = 'ImageExports.def',
         win_lib                     = win_lib,
         win_libpath                 = win_libpath,
-        win_cxxflags= [
+        msvc_cflags                 = ['/W3', '/EHsc'],
+        msvc_cxxflags = [
             '/wd4819',      # Invalid characters not in default code page.  Source contain characters above extended ascii, including in comments.
         ],
-        
+
         #==============================
         # Darwin
         #==============================
         darwin_copy_dependent_files = darwin_copy_dependent_files,
-        darwin_cflags               = ['-Wno-shift-count-overflow',
+        clang_cflags                = ['-Wno-shift-count-overflow',
                                     '-Wno-shift-negative-value'],
-        darwin_cxxflags             = ['-Wno-shift-count-overflow',
-                                    '-Wno-sometimes-uninitialized', # required fpr squish library to compile
+        clang_cxxflags              = ['-fexceptions',
+                                    '-Wno-shift-count-overflow',
+                                    '-Wno-sometimes-uninitialized', # required for squish library to compile
                                     '-Wno-shift-negative-value'],
 
         # Testing
         test_all_file_list          = ['resourcecompilerimage_test.waf_files'],
     )
+    for p0, p1, p2, p3 in bld.env['RESTRICTED_PLATFORMS']:
+        kw['file_list'] += ['{0}/resourcecompilerimage_{1}.waf_files'.format(p0, p1)]
+    bld.CryResourceCompilerModule(**kw)

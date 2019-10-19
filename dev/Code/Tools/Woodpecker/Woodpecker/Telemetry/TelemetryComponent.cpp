@@ -9,7 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include <LyMetricsProducer/LyMetricsAPI.h>
 
@@ -25,7 +25,6 @@ namespace Telemetry
         {
             serialize->Class<TelemetryComponent, AZ::Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass()
             ;
         }
     }
@@ -43,7 +42,7 @@ namespace Telemetry
 
     void TelemetryComponent::Initialize(const char* applicationName, AZ::u32 processInterval, bool doAPIInitShutdown)
     {
-        LyMetrics_Initialize(applicationName, processInterval, doAPIInitShutdown, nullptr, nullptr);
+        LyMetrics_Initialize(applicationName, processInterval, doAPIInitShutdown, nullptr, nullptr, LY_METRICS_BUILD_TIME);
     }
 
     void TelemetryComponent::LogEvent(const TelemetryEvent& telemetryEvent)

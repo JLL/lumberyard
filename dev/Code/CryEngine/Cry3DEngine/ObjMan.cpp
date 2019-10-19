@@ -31,6 +31,9 @@
 #include "DecalRenderNode.h"
 #include <cctype>
 
+#include <StatObjBus.h>
+#include <Vegetation/StaticVegetationBus.h>
+
 #include <LoadScreenBus.h>
 
 #define BRUSH_LIST_FILE "brushlist.txt"
@@ -71,6 +74,7 @@ void CObjManager::UnloadVegetationModels(bool bDeleteAll)
 
             rGroup.pStatObj = NULL;
             rGroup.pMaterial = NULL;
+            ReleaseStatInstGroupId(nGroupId);
         }
 
         if (bDeleteAll)
@@ -78,6 +82,7 @@ void CObjManager::UnloadVegetationModels(bool bDeleteAll)
             rGroupTable.Free();
         }
     }
+    Vegetation::StaticVegetationNotificationBus::Broadcast(&Vegetation::StaticVegetationNotificationBus::Events::VegetationCleared);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -271,7 +276,8 @@ void CObjManager::PreloadLevelObjects()
 
             // Parse file, every line in a file represents a resource filename.
             char seps[] = "\r\n";
-            char* token = strtok(buf, seps);
+            char *next_token = nullptr;
+            char* token = azstrtok(buf, 0, seps, &next_token);
             while (token != NULL)
             {
                 int nAliasLen = sizeof("%level%") - 1;
@@ -293,7 +299,7 @@ void CObjManager::PreloadLevelObjects()
                 //cgfStreamer.StartStreaming(cgfFilename.c_str());
                 nCgfCounter++;
 
-                token = strtok(NULL, seps);
+                token = azstrtok(NULL, 0, seps, &next_token);
 
                 //This loop can take a few seconds, so we should refresh the loading screen and call the loading tick functions to ensure that no big gaps in coverage occur.
                 SYNCHRONOUS_LOADING_TICK();
@@ -380,8 +386,7 @@ T CObjManager::LoadStatObjInternal(const char* filename,
     LoadDefaultCGF(filename, nLoadingFlags);
 
     LOADING_TIME_PROFILE_SECTION;
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Static Geometry");
-
+    
     if (ppSubObject)
     {
         *ppSubObject = NULL;
@@ -544,7 +549,7 @@ IStatObj* CObjManager::LoadNewCGF(IStatObj* pObject, int flagCloth, bool bUseStr
     }
 
     // now try to load lods
-    if (!pData)
+    if (!pObject->AreLodsLoaded())
     {
         pObject->LoadLowLODs(bUseStreaming, nLoadingFlags);
     }
@@ -740,6 +745,8 @@ CObjManager::CObjManager()
     // init queue for check occlusion
     m_CheckOcclusionQueue.Init(GetCVars()->e_CheckOcclusionQueueSize);
     m_CheckOcclusionOutputQueue.Init(GetCVars()->e_CheckOcclusionOutputQueueSize);
+
+    StatInstGroupEventBus::Handler::BusConnect();
 }
 
 // make unit box for occlusion test
@@ -804,6 +811,8 @@ void CObjManager::MakeUnitCube()
 
 CObjManager::~CObjManager()
 {
+    StatInstGroupEventBus::Handler::BusDisconnect();
+
     // free default object
     m_pDefaultCGF = 0;
 
@@ -831,7 +840,7 @@ float CObjManager::GetXYRadius(int type, int nSID)
 
     if ((m_lstStaticTypes[nSID].Count() <= type || !m_lstStaticTypes[nSID][type].pStatObj))
     {
-        return 0;
+        return 0.0f;
     }
 
     Vec3 vSize = m_lstStaticTypes[nSID][type].pStatObj->GetBoxMax() - m_lstStaticTypes[nSID][type].pStatObj->GetBoxMin();
@@ -848,7 +857,7 @@ bool CObjManager::GetStaticObjectBBox(int nType, Vec3& vBoxMin, Vec3& vBoxMax, i
 
     if ((m_lstStaticTypes[nSID].Count() <= nType || !m_lstStaticTypes[nSID][nType].pStatObj))
     {
-        return 0;
+        return false;
     }
 
     vBoxMin = m_lstStaticTypes[nSID][nType].pStatObj->GetBoxMin();
@@ -873,8 +882,6 @@ void CObjManager::AddDecalToRenderer(float fDistance,
     const SRendItemSorter& rendItemSorter)
 {
     FUNCTION_PROFILER_3DENGINE;
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "AddDecalToRenderer");
-
     bool bBending = pVegetation && pVegetation->m_pRNTmpData && !!pVegetation->m_pRNTmpData->userData.m_Bending.m_vBending;
 
     if (bBending)
@@ -1147,7 +1154,9 @@ void StatInstGroup::Update(CVars* pCVars, int nGeomDetailScreenRes)
 
 #if defined(FEATURE_SVO_GI)
     _smart_ptr<IMaterial> pMat = pMaterial ? pMaterial : (pStatObj ? pStatObj->GetMaterial() : 0);
-    if (pMat && (Cry3DEngineBase::GetCVars()->e_svoTI_Active >= 0) && (gEnv->IsEditor() || Cry3DEngineBase::GetCVars()->e_svoTI_Apply))
+    if (pMat && (gEnv->pConsole->GetCVar("e_svoTI_Active") && 
+        gEnv->pConsole->GetCVar("e_svoTI_Active")->GetIVal() && 
+        gEnv->pConsole->GetCVar("e_GI")->GetIVal()))
     {
         pMat->SetKeepLowResSysCopyForDiffTex();
     }
@@ -1225,8 +1234,6 @@ void CObjManager::ClearStatObjGarbage()
 {
     FUNCTION_PROFILER_3DENGINE;
 
-    std::vector<IStatObj*> garbage;
-
     // No work? Exit early before attempting to take any locks
     if (m_checkForGarbage.empty())
     {
@@ -1235,54 +1242,79 @@ void CObjManager::ClearStatObjGarbage()
 
     // We have to take the load lock here because InternalDeleteObject needs this lock and loadMutex has to be locked before garbageMutex
     // Additionally, we need to hold one of these locks for the entire duration of this function to prevent the loading thread from using an object that is about to be deleted
-    AZStd::lock_guard<AZStd::recursive_mutex> loadLock(m_loadMutex);
-
+    // To avoid stalls due to the threads loading files, try to get the lock and if it fails simply try again next frame unless there are too many garbage objects.
+    AZStd::unique_lock<AZStd::recursive_mutex> loadLock(m_loadMutex, AZStd::try_to_lock_t());
+    if (!loadLock.owns_lock())
     {
-        AZStd::unique_lock<AZStd::recursive_mutex> garbageLock(m_garbageMutex);
-
-        // Make sure all stat objects inside this array are unique.
-        // Only check explicitly added objects.
-        IStatObj* pStatObj;
-
-        while (!m_checkForGarbage.empty())
+        if (m_checkForGarbage.size() > s_maxPendingGarbageObjects)
         {
-            pStatObj = m_checkForGarbage.back();
-            m_checkForGarbage.pop_back();
+            AZ_PROFILE_SCOPE_STALL(AZ::Debug::ProfileCategory::ThreeDEngine, "StatObjGarbage overflow");
+            // There are too many objects pending garbage collection so force a clear this frame even if loading is happening.
+            loadLock.lock();
+        }
+        else
+        {
+            return;
+        }
+    }
 
-            if (pStatObj->CheckGarbage())
+    AZStd::vector<IStatObj*> garbage;
+
+    // We might need to perform the entire garbage collection logic more than once because the call to
+    // pStatObj->Shutdown() has the potential to add separate LOD models back onto the m_checkForGarbage list.
+    // If we only run the logic once, we might exit the ClearStatObjGarbage() function with garbage that hasn't been
+    // fully cleared.
+    while (!m_checkForGarbage.empty())
+    {
+        {
+            AZStd::unique_lock<AZStd::recursive_mutex> garbageLock(m_garbageMutex);
+
+            // Make sure all stat objects inside this array are unique.
+            // Only check explicitly added objects.
+            IStatObj* pStatObj;
+
+            while (!m_checkForGarbage.empty())
             {
-                // Check if it must be released.
-                int nChildRefs = pStatObj->CountChildReferences();
+                pStatObj = m_checkForGarbage.back();
+                m_checkForGarbage.pop_back();
 
-                if (pStatObj->GetUserCount() <= 0 && nChildRefs <= 0)
+                if (pStatObj->CheckGarbage())
                 {
-                    garbage.push_back(pStatObj);
-                }
-                else
-                {
-                    pStatObj->SetCheckGarbage(false);
+                    // Check if it must be released.
+                    int nChildRefs = pStatObj->CountChildReferences();
+
+                    if (pStatObj->GetUserCount() <= 0 && nChildRefs <= 0)
+                    {
+                        garbage.push_back(pStatObj);
+                    }
+                    else
+                    {
+                        pStatObj->SetCheckGarbage(false);
+                    }
                 }
             }
         }
-    }
 
-    // First ShutDown object clearing all pointers.
-    for (int i = 0, num = (int)garbage.size(); i < num; i++)
-    {
-        IStatObj* pStatObj = garbage[i];
-
-        if (!m_bLockCGFResources && !IsResourceLocked(pStatObj->GetFileName()))
+        // First ShutDown object clearing all pointers.
+        for (int i = 0, num = (int)garbage.size(); i < num; i++)
         {
-            // only shutdown object if it can be deleted by InternalDeleteObject()
-            pStatObj->ShutDown();
-        }
-    }
+            IStatObj* pStatObj = garbage[i];
 
-    // Then delete all garbage objects.
-    for (int i = 0, num = (int)garbage.size(); i < num; i++)
-    {
-        IStatObj* pStatObj = garbage[i];
-        InternalDeleteObject(pStatObj);
+            if (!m_bLockCGFResources && !IsResourceLocked(pStatObj->GetFileName()))
+            {
+                // only shutdown object if it can be deleted by InternalDeleteObject()
+                pStatObj->ShutDown();
+            }
+        }
+
+        // Then delete all garbage objects.
+        for (int i = 0, num = (int)garbage.size(); i < num; i++)
+        {
+            IStatObj* pStatObj = garbage[i];
+            InternalDeleteObject(pStatObj);
+        }
+
+        garbage.clear();
     }
 }
 
@@ -1364,3 +1396,53 @@ void CObjManager::MakeDepthCubemapRenderItemList(CVisArea* pReceiverArea, const 
         }
     }
 }
+
+//////////////////////////////////////////////////////////////////////////
+// StatInstGroupEventBus
+//////////////////////////////////////////////////////////////////////////
+StatInstGroupId CObjManager::GenerateStatInstGroupId()
+{
+    // generate new id
+    StatInstGroupId id = StatInstGroupEvents::s_InvalidStatInstGroupId;
+    for (StatInstGroupId i = 0; i < std::numeric_limits<StatInstGroupId>::max(); ++i)
+    {
+        if (m_usedIds.find(i) == m_usedIds.end())
+        {
+            id = i;
+            break;
+        }
+    }
+
+    if (id == StatInstGroupEvents::s_InvalidStatInstGroupId)
+    {
+        return id;
+    }
+
+    // Mark id as used
+    m_usedIds.insert(id);
+    return id;
+}
+
+void CObjManager::ReleaseStatInstGroupId(StatInstGroupId statInstGroupId)
+{
+    // Free id for this object
+    m_usedIds.erase(statInstGroupId);
+}
+
+void CObjManager::ReleaseStatInstGroupIdSet(const AZStd::unordered_set<StatInstGroupId>& statInstGroupIdSet)
+{
+    for (auto groupId : statInstGroupIdSet)
+    {
+        m_usedIds.erase(groupId);
+    }
+}
+
+void CObjManager::ReserveStatInstGroupIdRange(StatInstGroupId from, StatInstGroupId to)
+{
+    for (StatInstGroupId id = from; id < to; ++id)
+    {
+        m_usedIds.insert(id);
+    }
+}
+
+

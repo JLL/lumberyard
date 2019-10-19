@@ -28,7 +28,12 @@
             "native/connection/connectionworker.cpp",
             "native/connection/connectionworker.h"
         ],
-        
+
+        "FileProcessor": [
+            "native/FileProcessor/FileProcessor.cpp",
+            "native/FileProcessor/FileProcessor.h"
+        ],
+
         "FileWatcher": [
             "native/FileWatcher/FileWatcher.cpp",
             "native/FileWatcher/FileWatcher.h",
@@ -89,13 +94,15 @@
             "native/utilities/IniConfiguration.h",
             "native/utilities/assetUtils.cpp",
             "native/utilities/assetUtils.h",
-            "native/utilities/assetUtilEBusHelper.h",
+            "native/utilities/AssetUtilEBusHelper.h",
             "native/utilities/ByteArrayStream.h",
             "native/utilities/ByteArrayStream.cpp",
             "native/utilities/AssetBuilderInfo.h",
             "native/utilities/AssetBuilderInfo.cpp",
             "native/utilities/CommunicatorTracePrinter.h",
-            "native/utilities/CommunicatorTracePrinter.cpp"
+            "native/utilities/CommunicatorTracePrinter.cpp",
+            "native/utilities/AssetServerHandler.h",
+            "native/utilities/AssetServerHandler.cpp"
         ]
 
     }

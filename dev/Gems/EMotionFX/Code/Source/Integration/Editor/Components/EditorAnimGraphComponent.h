@@ -83,11 +83,11 @@ namespace EMotionFX
             AZ::Data::Asset<MotionSetAsset>* GetMotionAsset() { return &m_motionSetAsset; }
 
             // Property callbacks.
-            void OnAnimGraphAssetSelected();
-            void OnMotionSetAssetSelected();
+            AZ::u32 OnAnimGraphAssetSelected();
+            AZ::u32 OnMotionSetAssetSelected();
 
             // Called at edit-time when creating the component directly from an asset.
-            void SetPrimaryAsset(const AZ::Data::AssetId& assetId);
+            void SetPrimaryAsset(const AZ::Data::AssetId& assetId) override;
 
             // Called at export-time to produce runtime entities/components.
             void BuildGameEntity(AZ::Entity* gameEntity) override;
@@ -95,8 +95,8 @@ namespace EMotionFX
             AZ::Data::Asset<AnimGraphAsset>             m_animGraphAsset;       ///< Selected anim graph.
             AZ::Data::Asset<MotionSetAsset>             m_motionSetAsset;       ///< Selected motion set asset.
             AZStd::string                               m_activeMotionSetName;  ///< Selected motion set.
-
-            AnimGraphComponent::ParameterDefaults      m_parameterDefaults;    ///< AnimGraph parameter defaults.
+            bool                                        m_visualize = false;    ///< Enable debug visualisation?
+            AnimGraphComponent::ParameterDefaults       m_parameterDefaults;    ///< AnimGraph parameter defaults.
         };
 
     } // namespace Integration

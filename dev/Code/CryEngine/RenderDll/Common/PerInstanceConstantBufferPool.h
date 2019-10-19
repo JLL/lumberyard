@@ -1,3 +1,16 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
+
+// Original file Copyright Crytek GMBH or its affiliates, used under license.
 #pragma once
 
 #if (defined(WIN32) || defined(APPLE) || defined(LINUX))
@@ -29,7 +42,12 @@
 
 struct SRendItem;
 
-class PerInstanceConstantBufferPool
+class IPerInstanceConstantBufferPool
+{
+    virtual void SetConstantBuffer(SRendItem* renderItem) = 0;
+};
+
+class PerInstanceConstantBufferPool : public IPerInstanceConstantBufferPool
 {
 public:
     PerInstanceConstantBufferPool();
@@ -44,9 +62,9 @@ public:
     void Init();
     void Shutdown();
 
-    ENGINE_API void SetConstantBuffer(SRendItem* renderItem);
-    ENGINE_API void UpdateConstantBuffer(ConstantUpdateCB callback, float realTime);
-    ENGINE_API void Update(CRenderView& renderView, float realTime);
+    void SetConstantBuffer(SRendItem* renderItem);
+    void UpdateConstantBuffer(ConstantUpdateCB callback, float realTime);
+    void Update(CRenderView& renderView, float realTime);
     
 private:
     SRendItem* m_CurrentRenderItem;

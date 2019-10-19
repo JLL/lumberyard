@@ -97,11 +97,12 @@ void UiSliderComponent::SetValue(float value)
 
     if (m_stepValue)
     {
+        m_value += (m_stepValue / 2.0f);    ///< Add half the step size to the value before the fmodf so that we round to nearest step rather than flooring to previous step
         m_value = m_value - fmodf(m_value, m_stepValue);
     }
 
     float valueRange = fabsf(m_maxValue - m_minValue);
-    float unitValue = fabsf(m_value - m_minValue) / valueRange;
+    float unitValue = valueRange > 0.0f ? (fabsf(m_value - m_minValue) / valueRange) : 0.0f;
 
     if (m_fillEntity.IsValid())
     {
@@ -563,6 +564,7 @@ void UiSliderComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiSliderComponent>("Slider", "An interactable component for modifying a floating point value with a slider.");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiSlider.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiSlider.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -609,7 +611,6 @@ void UiSliderComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiSliderBus>("UiSliderBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetValue", &UiSliderBus::Events::GetValue)
             ->Event("SetValue", &UiSliderBus::Events::SetValue)
             ->Event("GetMinValue", &UiSliderBus::Events::GetMinValue)
@@ -636,7 +637,6 @@ void UiSliderComponent::Reflect(AZ::ReflectContext* context)
         behaviorContext->Class<UiSliderComponent>()->RequestBus("UiSliderBus");
 
         behaviorContext->EBus<UiSliderNotificationBus>("UiSliderNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiSliderNotificationBusBehaviorHandler>();
     }
 }

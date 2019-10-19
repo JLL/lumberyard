@@ -79,9 +79,9 @@ namespace GraphicsReflectContext
             AZ_Warning("Editor", false, "TimeOfDayLoadDefinitionFileNode: tod file name is empty.");
             return false;
         }
-        ILevel* currentLevel = gEnv->pGame->GetIGameFramework()->GetILevelSystem()->GetCurrentLevel();
+        ILevel* currentLevel = gEnv->pSystem->GetILevelSystem()->GetCurrentLevel();
         AZStd::string path = currentLevel ? currentLevel->GetLevelInfo()->GetPath() : "";
-        pathAndfileName = AZStd::string::format("%s/%s", path.c_str(), fileName.to_string().c_str());
+        pathAndfileName = AZStd::string::format("%s/%s", path.c_str(), fileName.data());
 
         // try to load it
         XmlNodeRef root = GetISystem()->LoadXmlFromFile(pathAndfileName.c_str());

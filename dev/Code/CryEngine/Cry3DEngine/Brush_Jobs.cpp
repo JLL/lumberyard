@@ -24,8 +24,6 @@
 #include "terrain.h"
 #include "Environment/OceanEnvironmentBus.h"
 
-#include <IJobManager_JobDelegator.h>
-
 ///////////////////////////////////////////////////////////////////////////////
 void CBrush::Render(const CLodValue& lodValue, const SRenderingPassInfo& passInfo, const SSectorTextureSet* pTerrainTexInfo, AZ::LegacyJobExecutor* pJobExecutor, const SRendItemSorter& rendItemSorter)
 {
@@ -74,6 +72,7 @@ void CBrush::Render(const CLodValue& lodValue, const SRenderingPassInfo& passInf
     if (m_dwRndFlags & ERF_NO_DECALNODE_DECALS)
     {
         pObj->m_ObjFlags |= FOB_DYNAMIC_OBJECT;
+        pObj->m_NoDecalReceiver = true;
     }
     else
     {
@@ -169,7 +168,7 @@ void CBrush::Render(const CLodValue& lodValue, const SRenderingPassInfo& passInf
 
         if (lodValue.LodA() <= 0 && Cry3DEngineBase::GetCVars()->e_MergedMeshes != 0 && m_pDeform && m_pDeform->HasDeformableData())
         {
-            if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass() && JobManager::InvokeAsJob("CheckOcclusion"))
+            if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass())
             {
                 GetObjManager()->PushIntoCullOutputQueue(SCheckOcclusionOutput::CreateDeformableBrushOutput(this, gEnv->pRenderer->EF_DuplicateRO(pObj, passInfo), lodValue.LodA(), rendItemSorter));
             }
@@ -179,7 +178,7 @@ void CBrush::Render(const CLodValue& lodValue, const SRenderingPassInfo& passInf
             }
         }
 
-        if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass() && JobManager::InvokeAsJob("CheckOcclusion") && GetCVars()->e_DebugDraw)
+        if (GetCVars()->e_StatObjBufferRenderTasks == 1 && passInfo.IsGeneralPass() && GetCVars()->e_DebugDraw)
         {
             // execute on MainThread for debug drawing, as else we run into threading issues with the AuxRenderer
             GetObjManager()->PushIntoCullOutputQueue(SCheckOcclusionOutput::CreateBrushOutput(this, pObj, lodValue, rendItemSorter));
@@ -190,7 +189,7 @@ void CBrush::Render(const CLodValue& lodValue, const SRenderingPassInfo& passInf
             // these lists are handled earlier than GENERAL lists, thus they need to use another sync variable
             if (!passInfo.IsShadowPass() && !passInfo.IsRecursivePass() && m_bExecuteAsPreprocessJob)
             {
-                pJobExecutor = gEnv->pRenderer->GetGenerateRendItemJobExecutorPreProcess(passInfo.ThreadID());
+                pJobExecutor = gEnv->pRenderer->GetGenerateRendItemJobExecutorPreProcess();
             }
 
             if (pJobExecutor && GetCVars()->e_DebugDraw == 0)

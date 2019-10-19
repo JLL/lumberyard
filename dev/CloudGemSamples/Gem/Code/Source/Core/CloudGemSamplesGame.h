@@ -1,3 +1,14 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
 
 #pragma once
 
@@ -20,33 +31,6 @@ namespace LYGame
     class IGameInterface;
     class GameRules;
     class Actor;
-
-    /*!
-     * Platform types that the game can run on.
-     */
-    enum Platform
-    {
-        ePlatform_Unknown,
-        ePlatform_PC,
-        ePlatform_Xbox, // ACCEPTED_USE
-        ePlatform_PS4, // ACCEPTED_USE
-        ePlatform_Android,
-        ePlatform_iOS,
-        ePlatform_Count
-    };
-
-    /*!
-     * Platform names.
-     */
-    static char const* s_PlatformNames[ePlatform_Count] =
-    {
-        "Unknown",
-        "PC",
-        "Xbox", // ACCEPTED_USE
-        "PS4", // ACCEPTED_USE
-        "Android",
-        "iOS"
-    };
 
     /*!
      * Initializes, runs, and handles a game's simulation.
@@ -106,35 +90,11 @@ namespace LYGame
          */
         bool ReadProfile(const XmlNodeRef& rootNode);
 
-        /*!
-         * Reads a profile xml node and adds an input device mapping to ActionMapManager
-         * /param[in] platformNode a refernece to profile xml node
-         * /param[in] platformId current platform
-         * /return returns true if mapping device was added, false if failed
-         */
-        bool ReadProfilePlatform(const XmlNodeRef& platformsNode, Platform platformId);
-
-        Platform GetPlatform() const;
-    protected:
-        /*!
-         * Platform information as defined in defaultProfile.xml.
-         */
-        struct PlatformInfo
-        {
-            Platform    m_platformId;
-            BYTE        m_devices;
-
-            PlatformInfo(Platform platformId = ePlatform_Unknown)
-                : m_platformId(platformId)
-                , m_devices(eAID_KeyboardMouse | eAID_XboxPad | eAID_PS4Pad) { } // ACCEPTED_USE
-        };
-
     protected:
         EntityId                    m_clientEntityId;
         GameRules*                  m_gameRules;
         IGameFramework*             m_gameFramework;
         IActionMap*                 m_defaultActionMap;
-        PlatformInfo                m_platformInfo;
     };
 
     SC_API extern CloudGemSamplesGame* g_Game;

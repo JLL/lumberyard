@@ -19,19 +19,16 @@ struct SEntityEvent;
 struct IEntity;
 class IComponent;
 
+#include <AzCore/std/smart_ptr/weak_ptr.h>
+#include <AzCore/std/smart_ptr/enable_shared_from_this.h>
 
 #include <CryFlags.h>
 #include <Cry_Math.h>
-#include <BoostHelpers.h>
+#include <SmartPointersHelpers.h>
 #include <IMaterial.h>
-#define DECLARE_COMPONENT_POINTERS(name)                \
-    typedef std::shared_ptr<name> name##Ptr;            \
-    typedef std::shared_ptr<const name> name##ConstPtr; \
-    typedef std::weak_ptr<name> name##WeakPtr;          \
-    typedef std::weak_ptr<const name> name##ConstWeakPtr;
 
 typedef unsigned int EntityId;
-DECLARE_COMPONENT_POINTERS(IComponent)
+DECLARE_SMART_POINTERS(IComponent)
 
 class ComponentType;
 struct SEntityEvent;
@@ -93,7 +90,7 @@ struct IComponentEventDistributer
 //! The factories are gathered into a central registry during program startup.
 //! For a standard factory, use the DECLARE_DEFAULT_COMPONENT_FACTORY macro.
 class IComponent
-    : public std::enable_shared_from_this<IComponent>
+    : public AZStd::enable_shared_from_this<IComponent>
 {
 public:
     typedef int ComponentEventPriority;

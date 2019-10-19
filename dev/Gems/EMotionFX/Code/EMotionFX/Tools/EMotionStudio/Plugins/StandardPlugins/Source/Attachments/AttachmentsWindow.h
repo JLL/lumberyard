@@ -16,8 +16,6 @@
 
 #include "../StandardPluginsConfig.h"
 #include <MCore/Source/MemoryCategoriesCore.h>
-#include <MysticQt/Source/DoubleSpinbox.h>
-#include <MysticQt/Source/IntSpinbox.h>
 #include <EMotionFX/CommandSystem/Source/SelectionCommands.h>
 #include <EMotionFX/CommandSystem/Source/ActorCommands.h>
 #include <EMotionFX/CommandSystem/Source/CommandManager.h>
@@ -64,6 +62,7 @@ namespace EMStudio
 
         EMotionFX::ActorInstance* GetSelectedAttachment();
         AZStd::string GetSelectedNodeName();
+
     protected:
         void dropEvent(QDropEvent* event) override;
         void dragEnterEvent(QDragEnterEvent* event) override;
@@ -81,7 +80,6 @@ namespace EMStudio
         void OnDroppedAttachmentsActors();
         void OnDroppedDeformableActors();
         void OnVisibilityChanged(int visibility);
-        void OnFastUpdatesChanged(int fastUpdates);
         void OnAttachmentNodesSelected(MCore::Array<SelectionItem> selection);
         void OnCancelAttachmentNodeSelection();
         void OnEscapeButtonPressed();

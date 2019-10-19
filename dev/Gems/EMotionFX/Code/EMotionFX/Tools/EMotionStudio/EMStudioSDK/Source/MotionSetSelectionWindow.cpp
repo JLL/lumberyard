@@ -43,9 +43,9 @@ namespace EMStudio
         layout->addLayout(buttonLayout);
         setLayout(layout);
 
-        connect(mOKButton, SIGNAL(clicked()), this, SLOT(accept()));
-        connect(mCancelButton, SIGNAL(clicked()), this, SLOT(reject()));
-        connect(this, SIGNAL(accepted()), this, SLOT(OnAccept()));
+        connect(mOKButton, &QPushButton::clicked, this, &MotionSetSelectionWindow::accept);
+        connect(mCancelButton, &QPushButton::clicked, this, &MotionSetSelectionWindow::reject);
+        connect(this, &MotionSetSelectionWindow::accepted, this, &MotionSetSelectionWindow::OnAccept);
         connect(mHierarchyWidget, &MotionSetHierarchyWidget::SelectionChanged, this, &MotionSetSelectionWindow::OnSelectionChanged);
 
         // set the selection mode
@@ -56,6 +56,25 @@ namespace EMStudio
 
     MotionSetSelectionWindow::~MotionSetSelectionWindow()
     {
+    }
+
+
+    void MotionSetSelectionWindow::Select(const AZStd::vector<MotionSetSelectionItem>& selectedItems)
+    {
+        mHierarchyWidget->Select(selectedItems);
+    }
+
+
+    void MotionSetSelectionWindow::Select(const AZStd::vector<AZStd::string>& selectedMotionIds, EMotionFX::MotionSet* motionSet)
+    {
+        AZStd::vector<MotionSetSelectionItem> selectedItems;
+
+        for (const AZStd::string& motionId : selectedMotionIds)
+        {
+            selectedItems.push_back(MotionSetSelectionItem(motionId, motionSet));
+        }
+
+        Select(selectedItems);
     }
 
 

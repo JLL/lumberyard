@@ -3,18 +3,20 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-*or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+*or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
 
 #pragma once
 
-#include <AzCore/std/smart_ptr/unique_ptr.h>
 #include <AssetBuilderSDK/AssetBuilderBusses.h>
 #include <AssetBuilderSDK/AssetBuilderSDK.h>
+#include <AzCore/Outcome/Outcome.h>
+#include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/Asset/AssetCommon.h>
 
 namespace AZ
 {
@@ -24,20 +26,30 @@ namespace AZ
     }
 }
 
+namespace ScriptCanvas
+{
+    class RuntimeAsset;
+}
+
 namespace ScriptCanvasBuilder
 {
     class Worker
         : public AssetBuilderSDK::AssetBuilderCommandBus::Handler
     {
     public:
+        static AZ::Outcome<AZ::Data::Asset<ScriptCanvas::RuntimeAsset>, AZStd::string> CreateRuntimeAsset(AZStd::string_view graphPath);
+        static AZ::Data::Asset<ScriptCanvas::RuntimeAsset> ProcessEditorAsset(AZ::Data::AssetHandler& editorAssetHandler, AZ::IO::GenericStream& editorAssetStream);
+
         Worker();
         ~Worker();
-
+        
+        int GetVersionNumber() const;
+        const char* GetFingerprintString() const;
 
         //! Asset Builder Callback Functions
         void CreateJobs(const AssetBuilderSDK::CreateJobsRequest& request, AssetBuilderSDK::CreateJobsResponse& response) const;
         void ProcessJob(const AssetBuilderSDK::ProcessJobRequest& request, AssetBuilderSDK::ProcessJobResponse& response) const;
-
+        
         //////////////////////////////////////////////////////////////////////////
         //!AssetBuilderSDK::AssetBuilderCommandBus interface
         void ShutDown() override;
@@ -54,5 +66,8 @@ namespace ScriptCanvasBuilder
         
         AZStd::unique_ptr<AZ::Data::AssetHandler> m_editorAssetHandler;
         AZStd::unique_ptr<AZ::Data::AssetHandler> m_runtimeAssetHandler;
+
+        // cached on first time query
+        mutable AZStd::string m_fingerprintString;
     };
 }

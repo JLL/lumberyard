@@ -16,8 +16,11 @@
 #include <AzCore/Component/Component.h>
 
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
+#include <AzToolsFramework/API/ToolsApplicationAPI.h>
 
 #include <AzCore/std/containers/set.h>
+
+#include <IEditor.h>
 
 namespace LyEditorMetrics
 {
@@ -25,7 +28,10 @@ namespace LyEditorMetrics
 
     class LyEditorMetricsSystemComponent
         : public AZ::Component
-        , protected AzToolsFramework::EditorMetricsEventsBus::Handler
+        , private AzToolsFramework::EditorMetricsEventsBus::Handler
+        , private AzToolsFramework::ToolsApplicationNotificationBus::Handler
+        , private AzToolsFramework::EditorEvents::Bus::Handler
+        , private IEditorNotifyListener
     {
     public:
         AZ_COMPONENT(LyEditorMetricsSystemComponent, "{B8C74085-F6B7-4E2F-8135-78C991CC53C5}");
@@ -38,6 +44,8 @@ namespace LyEditorMetrics
         static void GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& dependent);
 
         LyEditorMetricsSystemComponent();
+
+        void OnEditorNotifyEvent(EEditorNotifyEvent event) override;
 
     protected:
         ////////////////////////////////////////////////////////////////////////
@@ -70,6 +78,25 @@ namespace LyEditorMetrics
         void RegisterAction(QAction* action, const QString& metricsText) override;
         void UnregisterAction(QAction* action) override;
 
+        // From the EditorMetricsEventsBus; same thing as BeforeEntitySelectionChanged and AfterEntitySelectionChanged but called properly
+        void BeginSelectionChange() override;
+        void EndSelectionChange() override;
+
+        void EnteredComponentMode(
+            const AZStd::vector<AZ::EntityId>& entityIds, const AZStd::vector<AZ::Uuid>& componentTypeIds) override;
+        void LeftComponentMode(
+            const AZStd::vector<AZ::EntityId>& entityIds, const AZStd::vector<AZ::Uuid>& componentTypeIds) override;
+
+        void EnabledNewViewportInteractionModel() override;
+        void DisabledNewViewportInteractionModel() override;
+
+        ////////////////////////////////////////////////////////////////////////
+        // ToolsApplicationEvents
+        void BeforeEntitySelectionChanged() override;
+        void AfterEntitySelectionChanged(const AzToolsFramework::EntityIdList&, const AzToolsFramework::EntityIdList&) override;
+        void BeforeUndoRedo() override;
+        void AfterUndoRedo() override;
+
         ////////////////////////////////////////////////////////////////////////
 
         ////////////////////////////////////////////////////////////////////////
@@ -79,7 +106,14 @@ namespace LyEditorMetrics
         void Deactivate() override;
         ////////////////////////////////////////////////////////////////////////
 
+        ////////////////////////////////////////////////////////////////////////
+        // AzToolsFramework::EditorEvents implementation
+        void NotifyIEditorAvailable(IEditor* editor) override;
+        ////////////////////////////////////////////////////////////////////////
+
     private:
+        bool m_notifierRegistered = false;
+
         AZ::u64 m_actionId = 0;
         NavigationTrigger m_navigationBehaviour;
         bool m_needToFireNavigationEvent = false;
@@ -89,6 +123,9 @@ namespace LyEditorMetrics
         AZStd::set<AZStd::string> m_legacyScriptEntityNameWhiteList;
         AZStd::set<AZStd::string> m_extensionWhiteList;
         AZStd::unordered_map<AzToolsFramework::AssetBrowserActionType, AZStd::string> m_assetBrowserActionMap;
+
+        int m_batchingSelectionStackSize = 0;
+        int m_queuedSelectionChangedEvents = 0;
 
         void InitializeLegacyEntityList();
         void InitializeLegacyScriptEntityList();
@@ -102,6 +139,10 @@ namespace LyEditorMetrics
 
         // helper function for add/remove component metrics events
         void SendComponentsMetricsEvent(const char* eventName, const AZ::EntityId& entityId, const AZ::Uuid& componentTypeId);
+
+        // helper function for multiple component metrics events (ComponentMode)
+        void SendComponentsMetricsEvent(
+            const char* eventName, const AZStd::vector<AZ::EntityId>& entityIds, const AZStd::vector<AZ::Uuid>& componentTypeIds);
 
         // helper function for sending parent changed events
         void SendParentIdMetricsEvent(const char* eventName, const AZ::EntityId& entityId, const AZ::EntityId& newParentId, const AZ::EntityId& oldParentId);

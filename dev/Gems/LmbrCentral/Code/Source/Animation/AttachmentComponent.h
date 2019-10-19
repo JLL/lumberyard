@@ -17,7 +17,6 @@
 #include <AzCore/Component/TransformBus.h>
 #include <AzCore/Component/TickBus.h>
 #include <AzCore/Math/Transform.h>
-#include <IGameFramework.h>
 
 struct ISkeletonPose;
 
@@ -69,7 +68,8 @@ namespace LmbrCentral
         : public AttachmentComponentRequestBus::Handler
         , public AZ::TransformNotificationBus::Handler
         , public MeshComponentNotificationBus::Handler
-        , public IGameFrameworkListener
+        , public AZ::Data::AssetBus::Handler
+        , public AZ::TickBus::Handler
     {
     public:
         void Activate(AZ::Entity* owner, const AttachmentConfiguration& initialConfiguration, bool targetCanAnimate);
@@ -77,17 +77,23 @@ namespace LmbrCentral
 
         ////////////////////////////////////////////////////////////////////////
         // AttachmentComponentRequests
+        void Reattach(bool detachFirst);
         void Attach(AZ::EntityId targetId, const char* targetBoneName, const AZ::Transform& offset) override;
         void Detach() override;
         void SetAttachmentOffset(const AZ::Transform& offset) override;
+        const char* GetJointName() override;
+        AZ::EntityId GetTargetEntityId() override;
+        AZ::Transform GetOffset() override;
         ////////////////////////////////////////////////////////////////////////
 
     private:
 
         ////////////////////////////////////////////////////////////////////////
-        // IGameFrameworkListener
-        //! Check bone transform every frame
-        void OnPreRender() override;
+        // AZ::TickBus
+        //! Check target bone transform every frame.
+        void OnTick(float deltaTime, AZ::ScriptTimePoint time) override;
+        //! Make sure target bone transform updates after animation update.
+        int GetTickOrder() override;
         ////////////////////////////////////////////////////////////////////////
 
         ////////////////////////////////////////////////////////////////////////

@@ -89,9 +89,12 @@ namespace EMStudio
             : public EMotionFX::EventHandler
         {
         public:
+            AZ_CLASS_ALLOCATOR_DECL
+
             ProgressHandler(CommandBarPlugin* commandbarPlugin)
                 : EventHandler() { mCommandbarPlugin = commandbarPlugin; }
 
+            const AZStd::vector<EMotionFX::EventTypes> GetHandledEventTypes() const override { return { EMotionFX::EVENT_TYPE_ON_PROGRESS_START, EMotionFX::EVENT_TYPE_ON_PROGRESS_END, EMotionFX::EVENT_TYPE_ON_PROGRESS_TEXT, EMotionFX::EVENT_TYPE_ON_PROGRESS_VALUE, EMotionFX::EVENT_TYPE_ON_SUB_PROGRESS_TEXT, EMotionFX::EVENT_TYPE_ON_SUB_PROGRESS_VALUE }; }
             void OnProgressStart() override                                 { mCommandbarPlugin->OnProgressStart(); }
             void OnProgressEnd() override                                   { mCommandbarPlugin->OnProgressEnd(); }
             void OnProgressText(const char* text) override                  { mCommandbarPlugin->OnProgressText(text); }

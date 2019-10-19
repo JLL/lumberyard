@@ -13,8 +13,10 @@
 #pragma once
 
 // include the required headers
+#include <AzCore/PlatformIncl.h>
 #include "EMotionFXConfig.h"
 #include "BaseObject.h"
+#include <AzCore/Memory/Memory.h>
 #include <MCore/Source/Attribute.h>
 #include <MCore/Source/AttributeFloat.h>
 #include <MCore/Source/AttributeString.h>
@@ -25,7 +27,6 @@
 #include <MCore/Source/AttributeVector2.h>
 #include <MCore/Source/AttributeVector3.h>
 #include <MCore/Source/AttributeVector4.h>
-#include "AnimGraphObjectDataPool.h"
 
 
 namespace EMotionFX
@@ -39,14 +40,14 @@ namespace EMotionFX
     // implement standard load and save
 #define EMFX_ANIMGRAPHOBJECTDATA_IMPLEMENT_LOADSAVE                      \
 public:                                                                  \
-    virtual uint32 Save(uint8 * outputBuffer) const override             \
+    uint32 Save(uint8 * outputBuffer) const override             \
     {                                                                    \
         if (outputBuffer) {                                              \
             MCore::MemCopy(outputBuffer, (uint8*)this, sizeof(*this)); } \
         return sizeof(*this);                                            \
     }                                                                    \
                                                                          \
-    virtual uint32 Load(const uint8 * dataBuffer) override               \
+    uint32 Load(const uint8 * dataBuffer) override               \
     {                                                                    \
         if (dataBuffer) {                                                \
             MCore::MemCopy((uint8*)this, dataBuffer, sizeof(*this)); }   \
@@ -62,15 +63,16 @@ public:                                                                  \
     class EMFX_API AnimGraphObjectData
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphObjectData, MCore::MCORE_SIMD_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTUNIQUEDATA);
-
-        friend class AnimGraphObjectDataPool;
-
     public:
+        AZ_CLASS_ALLOCATOR_DECL
+
         enum
         {
             FLAGS_HAS_ERROR = 1 << 0
         };
+
+        AnimGraphObjectData(AnimGraphObject* object, AnimGraphInstance* animGraphInstance);
+        virtual ~AnimGraphObjectData();
 
         static AnimGraphObjectData* Create(AnimGraphObject* object, AnimGraphInstance* animGraphInstance);
 
@@ -79,12 +81,16 @@ public:                                                                  \
 
         // save and return number of bytes written, when outputBuffer is nullptr only return num bytes it would write
         virtual uint32 Save(uint8* outputBuffer) const;
-        virtual uint32 Load(const uint8* dataBuffer);
+        void SaveChunk(const uint8* chunkData, uint32 chunkSize, uint8** inOutBuffer, uint32& inOutSize) const;
+        template <class T>
+        void SaveVectorOfObjects(const AZStd::vector<T>& objects, uint8** inOutBuffer, uint32& inOutSize) const;
 
-        virtual AnimGraphObjectData* Clone(void* destMem, AnimGraphObject* object, AnimGraphInstance* animGraphInstance);
+        virtual uint32 Load(const uint8* dataBuffer);
+        void LoadChunk(uint8* chunkData, uint32 chunkSize, uint8** inOutBuffer, uint32& inOutSize);
+        template <class T>
+        void LoadVectorOfObjects(AZStd::vector<T>& inOutObjects, uint8** inOutBuffer, uint32& inOutSize);
 
         virtual void Reset() {}
-        virtual uint32 GetClassSize() const                             { return sizeof(AnimGraphObjectData); }
 
         MCORE_INLINE uint8 GetObjectFlags() const                       { return mObjectFlags; }
         MCORE_INLINE void SetObjectFlags(uint8 flags)                   { mObjectFlags = flags; }
@@ -106,16 +112,35 @@ public:                                                                  \
         MCORE_INLINE bool GetHasError() const                           { return (mObjectFlags & FLAGS_HAS_ERROR); }
         MCORE_INLINE void SetHasError(bool hasError)                    { SetObjectFlags(FLAGS_HAS_ERROR, hasError); }
 
-        void SetSubPool(AnimGraphObjectDataPool::SubPool* subPool);
-        AnimGraphObjectDataPool::SubPool* GetSubPool() const;
-
     protected:
-        AnimGraphObject*                   mObject;                /**< Pointer to the object where this data belongs to. */
-        AnimGraphInstance*                 mAnimGraphInstance;    /**< The animgraph instance where this unique data belongs to. */
-        AnimGraphObjectDataPool::SubPool*  mSubPool;               /**< The subpool we belong to, can be nullptr. */
-        uint8                               mObjectFlags;
-
-        AnimGraphObjectData(AnimGraphObject* object, AnimGraphInstance* animGraphInstance);
-        virtual ~AnimGraphObjectData();
+        AnimGraphObject*    mObject;               /**< Pointer to the object where this data belongs to. */
+        AnimGraphInstance*  mAnimGraphInstance;    /**< The animgraph instance where this unique data belongs to. */
+        uint8               mObjectFlags;
     };
-}   // namespace EMotionFX
+
+    template <class T>
+    void AnimGraphObjectData::SaveVectorOfObjects(const AZStd::vector<T>& objects, uint8** inOutBuffer, uint32& inOutSize) const
+    {
+        const size_t numObjects = objects.size();
+        SaveChunk((uint8*)&numObjects, sizeof(size_t), inOutBuffer, inOutSize);
+        if (numObjects > 0)
+        {
+            const uint32 sizeInBytes = static_cast<uint32>(numObjects * sizeof(T));
+            SaveChunk((uint8*)&objects[0], sizeInBytes, inOutBuffer, inOutSize);
+        }
+    }
+
+    template <class T>
+    void AnimGraphObjectData::LoadVectorOfObjects(AZStd::vector<T>& inOutObjects, uint8** inOutBuffer, uint32& inOutSize)
+    {
+        size_t numObjects;
+        LoadChunk((uint8*)&numObjects, sizeof(size_t), inOutBuffer, inOutSize);
+
+        if (*inOutBuffer && numObjects > 0)
+        {
+            inOutObjects.resize(numObjects);
+            const uint32 sizeInBytes = static_cast<uint32>(numObjects * sizeof(T));
+            LoadChunk((uint8*)&inOutObjects[0], sizeInBytes, inOutBuffer, inOutSize);
+        }
+    }
+} // namespace EMotionFX

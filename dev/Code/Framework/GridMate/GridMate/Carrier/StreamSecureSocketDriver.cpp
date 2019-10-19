@@ -9,11 +9,10 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <GridMate/Carrier/StreamSecureSocketDriver.h>
 
-#if AZ_ENABLE_OPENSSL
+#if AZ_TRAIT_GRIDMATE_ENABLE_OPENSSL
 
 #include <AzCore/Math/MathUtils.h>
 
@@ -365,8 +364,11 @@ namespace GridMate
 
         void Teardown()
         {
-            delete[] m_scratch;
-            m_scratch = nullptr;
+            if (m_scratch != nullptr)
+            {
+                azfree(m_scratch);
+                m_scratch = nullptr;
+            }
 
             if (m_ssl != nullptr)
             {
@@ -762,5 +764,4 @@ namespace GridMate
     }
 }
 
-#endif // AZ_ENABLE_OPENSSL
-#endif // #ifndef AZ_UNITY_BUILD
+#endif // AZ_TRAIT_GRIDMATE_ENABLE_OPENSSL

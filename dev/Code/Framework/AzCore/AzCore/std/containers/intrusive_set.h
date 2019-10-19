@@ -17,6 +17,9 @@
 #include <AzCore/std/typetraits/aligned_storage.h>
 #include <AzCore/std/typetraits/alignment_of.h>
 
+// Enable enable checks that validate that the set is correct on insertions and removals
+//#define DEBUG_INTRUSIVE_MULTISET
+
 namespace AZStd
 {
     #define AZSTD_RBTREE_BLACK  0
@@ -134,7 +137,7 @@ namespace AZStd
         typedef const node_type*                        const_node_ptr_type;
 
         static node_ptr_type    to_node_ptr(pointer ptr)            { return static_cast<node_ptr_type>(&(ptr->*PtrToMember)); }
-        static const_node_ptr_type to_node_ptr(const_pointer ptr)   { return static_cast<const node_ptr_type>(&(ptr->*PtrToMember)); }
+        static const_node_ptr_type to_node_ptr(const_pointer ptr)   { return static_cast<const_node_ptr_type>(&(ptr->*PtrToMember)); }
     };
 
     /**
@@ -181,7 +184,7 @@ namespace AZStd
         typedef T                               node_type;
         typedef node_type*                      node_ptr_type;
         typedef const node_type*                const_node_ptr_type;
-        typedef intrusive_multiset_node<T>  hook_node_type;
+        typedef intrusive_multiset_node<T>      hook_node_type;
         typedef hook_node_type*                 hook_node_ptr_type;
 
         /**
@@ -198,7 +201,7 @@ namespace AZStd
             typedef const_iterator_impl         this_type;
             typedef intrusive_multiset<T, Hook> tree_type;
         public:
-            typedef T                           value_type;
+            typedef const T                     value_type;
             typedef AZStd::ptrdiff_t            difference_type;
             typedef const T*                    pointer;
             typedef const T&                    reference;
@@ -248,7 +251,7 @@ namespace AZStd
 
             inline static node_ptr_type PredOrSucc(const_node_ptr_type node, SideType side)
             {
-                node_ptr_type cur = node->m_neighbours[side];
+                node_ptr_type cur = Hook::to_node_ptr(node)->m_neighbours[side];
                 hook_node_ptr_type curHook = Hook::to_node_ptr(cur);
                 if (!curHook->getParent())
                 {
@@ -267,9 +270,8 @@ namespace AZStd
                 {
                     AZSTD_CONTAINER_ASSERT(!isNil(cur), "This node can't be nil");
                     xessor = curHook->getParent();
-                    while (curHook->getParentSide() == side)
+                    while (!isNil(xessor) && curHook->getParentSide() == side)
                     {
-                        AZSTD_CONTAINER_ASSERT(!isNil(xessor), "This node can't be nil");
                         cur = xessor;
                         curHook = Hook::to_node_ptr(cur);
                         xessor = Hook::to_node_ptr(xessor)->getParent();
@@ -290,6 +292,7 @@ namespace AZStd
             typedef iterator_impl       this_type;
             typedef const_iterator_impl base_type;
         public:
+            typedef T                               value_type;
             typedef T*                              pointer;
             typedef T&                              reference;
 
@@ -329,16 +332,124 @@ namespace AZStd
             }
         };
 
+        /**
+         * reverse iterator implementation bidirectional iterator.
+         */
+        template<typename Iter>
+        class reverse_iterator_impl
+        {
+            friend class intrusive_multiset;
+            typedef reverse_iterator_impl this_type;
+            typedef intrusive_multiset<T, Hook> tree_type;
+        public:
+            using value_type = typename AZStd::iterator_traits<Iter>::value_type;
+            using difference_type = typename AZStd::iterator_traits<Iter>::difference_type;
+            using pointer = typename AZStd::iterator_traits<Iter>::pointer;
+            using reference = typename AZStd::iterator_traits<Iter>::reference;
+            using iterator_category = typename AZStd::iterator_traits<Iter>::iterator_category;
+            using iterator_type = Iter;
+
+            AZ_FORCE_INLINE reverse_iterator_impl()
+                : m_node(nullptr) {}
+            AZ_FORCE_INLINE reverse_iterator_impl(pointer node, const value_type* head)
+                : m_node(node)
+                , m_headNode(head)
+            {}
+
+            iterator_type base() const
+            {
+                AZSTD_CONTAINER_ASSERT(m_node != nullptr, "AZStd::intrusive_set::reference_iterator_impl invoked base() on invalid node!");
+                // The intrusive multiset head node is a fake head node that represents a sentinel node
+                // Therefore in the reverse iterator case, when the head node is stored in the iterator the minimum value needs to be returned
+                // otherwise the successor value needs to be returned
+                return m_node == m_headNode
+                    ? MinOrMax(Hook::to_node_ptr(m_node)->m_children[AZSTD_RBTREE_LEFT], AZSTD_RBTREE_LEFT)
+                    : iterator_type(GetPredicateOrSuccessorNode(m_node, AZSTD_RBTREE_RIGHT));
+            }
+            AZ_FORCE_INLINE reference operator*() const { return *m_node; }
+            AZ_FORCE_INLINE pointer operator->() const { return m_node; }
+            AZ_FORCE_INLINE this_type& operator++()
+            {
+                AZSTD_CONTAINER_ASSERT(m_node != nullptr, "AZStd::intrusive_set::reference_iterator_impl invalid node!");
+                m_node = GetPredicateOrSuccessorNode(m_node, AZSTD_RBTREE_LEFT);
+                return *this;
+            }
+
+            AZ_FORCE_INLINE this_type operator++(int)
+            {
+                AZSTD_CONTAINER_ASSERT(m_node != nullptr, "AZStd::intrusive_set::reference_iterator_impl invalid node!");
+                this_type temp = *this;
+                m_node = GetPredicateOrSuccessorNode(m_node, AZSTD_RBTREE_LEFT);
+                return temp;
+            }
+
+            AZ_FORCE_INLINE this_type& operator--()
+            {
+                AZSTD_CONTAINER_ASSERT(m_node != nullptr, "AZStd::intrusive_set::reference_iterator_impl invalid node!");
+                m_node = GetPredicateOrSuccessorNode(m_node, AZSTD_RBTREE_RIGHT);
+                return *this;
+            }
+
+            AZ_FORCE_INLINE this_type operator--(int)
+            {
+                AZSTD_CONTAINER_ASSERT(m_node != nullptr, "AZStd::intrusive_set::reference_iterator_impl invalid node!");
+                this_type temp = *this;
+                m_node = GetPredicateOrSuccessorNode(m_node, AZSTD_RBTREE_RIGHT);
+                return temp;
+            }
+
+            AZ_FORCE_INLINE bool operator==(const this_type& rhs) const { return (m_node == rhs.m_node); }
+            AZ_FORCE_INLINE bool operator!=(const this_type& rhs) const { return (m_node != rhs.m_node); }
+        protected:
+
+            static bool IsNilLeafNode(const_node_ptr_type node) { return node == Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_RIGHT]; }
+
+            static node_ptr_type GetPredicateOrSuccessorNode(const_node_ptr_type node, SideType childNodeSide)
+            {
+                node_ptr_type cur = Hook::to_node_ptr(node)->m_neighbours[childNodeSide];
+                hook_node_ptr_type curHook = Hook::to_node_ptr(cur);
+                if (!curHook->getParent())
+                {
+                    return cur;
+                }
+                node_ptr_type predicateOrSuccessorNode = curHook->m_children[childNodeSide];
+                if (!IsNilLeafNode(predicateOrSuccessorNode))
+                {
+                    SideType otherChildNodeSide = (SideType)(1 - childNodeSide);
+                    while (!IsNilLeafNode(Hook::to_node_ptr(predicateOrSuccessorNode)->m_children[otherChildNodeSide]))
+                    {
+                        predicateOrSuccessorNode = Hook::to_node_ptr(predicateOrSuccessorNode)->m_children[otherChildNodeSide];
+                    }
+                }
+                else
+                {
+                    AZSTD_CONTAINER_ASSERT(!IsNilLeafNode(cur), "This node can't be nil");
+                    predicateOrSuccessorNode = curHook->getParent();
+                    while (!IsNilLeafNode(predicateOrSuccessorNode) && curHook->getParentSide() == childNodeSide)
+                    {
+                        cur = predicateOrSuccessorNode;
+                        curHook = Hook::to_node_ptr(cur);
+                        predicateOrSuccessorNode = Hook::to_node_ptr(predicateOrSuccessorNode)->getParent();
+                    }
+                }
+                return predicateOrSuccessorNode;
+            }
+
+            pointer m_node;
+            const value_type* m_headNode{};
+        };
 
 #ifdef AZSTD_HAS_CHECKED_ITERATORS
-        typedef Debug::checked_bidirectional_iterator<iterator_impl, this_type>          iterator;
-        typedef Debug::checked_bidirectional_iterator<const_iterator_impl, this_type>    const_iterator;
+        typedef Debug::checked_bidirectional_iterator<iterator_impl, this_type>                 iterator;
+        typedef Debug::checked_bidirectional_iterator<const_iterator_impl, this_type>           const_iterator;
+        typedef Debug::checked_bidirectional_iterator<reverse_iterator_impl<iterator>, this_type>         reverse_iterator;
+        typedef Debug::checked_bidirectional_iterator<reverse_iterator_impl<const_iterator>, this_type>   const_reverse_iterator;
 #else
-        typedef iterator_impl                           iterator;
-        typedef const_iterator_impl                     const_iterator;
+        typedef iterator_impl                   iterator;
+        typedef const_iterator_impl             const_iterator;
+        typedef reverse_iterator_impl<iterator>           reverse_iterator;
+        typedef reverse_iterator_impl<const_iterator>     const_reverse_iterator;
 #endif
-        typedef AZStd::reverse_iterator<iterator>       reverse_iterator;
-        typedef AZStd::reverse_iterator<const_iterator> const_reverse_iterator;
 
         AZ_FORCE_INLINE explicit intrusive_multiset()
             : m_numElements(0)
@@ -348,7 +459,7 @@ namespace AZStd
 
         AZ_FORCE_INLINE intrusive_multiset(const KeyCompare& keyEq)
             : m_numElements(0)
-            , m_keyEq(keyEq)
+            , m_keyCompare(keyEq)
         {
             setNil(get_head());
         }
@@ -357,7 +468,7 @@ namespace AZStd
             : m_numElements(0)
         {
             setNil(get_head());
-            insert(begin(), first, last);
+            insert(first, last);
         }
 
         ~intrusive_multiset()
@@ -365,45 +476,8 @@ namespace AZStd
             clear();
         }
 
-#ifdef AZ_HAS_RVALUE_REFS
-        // TODO
-        /*AZ_FORCE_INLINE intrusive_multiset(this_type&& rhs)
-        {
-            assign_rv(AZStd::forward<this_type>(rhs));
-        }
-
-        this_type& operator=(this_type&& rhs)
-        {
-            assign_rv(AZStd::forward<this_type>(rhs));
-            return *this;
-        }
-
-        void assign_rv(this_type&& rhs)
-        {
-            if (this == &rhs) return;
-            node_ptr_type head = get_head();
-            node_ptr_type rhsHead = rhs.get_head();
-            hook_node_ptr_type headHook = Hook::to_node_ptr(head);
-            hook_node_ptr_type rhsHeadHook = Hook::to_node_ptr(rhsHead);
-
-            Hook::to_node_ptr(rhsHeadHook->m_next)->m_prev = head;
-            Hook::to_node_ptr(rhsHeadHook->m_prev)->m_next = head;
-            headHook->m_next = rhsHeadHook->m_next;
-            headHook->m_prev = rhsHeadHook->m_prev;
-            m_numElements = rhs.m_numElements;
-
-            rhsHeadHook->m_next = rhsHeadHook->m_prev = rhsHead;
-            rhs.m_numElements = 0;
-        }
-
-        void swap(this_type&& rhs)
-        {
-            assign_rv(AZStd::forward(rhs));
-        }*/
-#endif // AZ_HAS_RVALUE_REFS
-
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        // We can completely forbit copy/assign operators once we fully switch for containers that requre movable only.
+        // We can completely forbid copy/assign operators once we fully switch for containers that require movable only.
         AZ_FORCE_INLINE intrusive_multiset(const this_type& rhs)
         {
             (void)rhs;
@@ -426,10 +500,12 @@ namespace AZStd
         AZ_FORCE_INLINE const_iterator end() const { return const_iterator(get_head()); }
         AZ_FORCE_INLINE iterator end() { return iterator(get_head()); }
 
-        AZ_FORCE_INLINE reverse_iterator rbegin()               { return reverse_iterator(end()); }
-        AZ_FORCE_INLINE const_reverse_iterator rbegin() const   { return const_reverse_iterator(end()); }
-        AZ_FORCE_INLINE reverse_iterator rend()                 { return reverse_iterator(begin()); }
-        AZ_FORCE_INLINE const_reverse_iterator rend() const     { return const_reverse_iterator(begin()); }
+        AZ_FORCE_INLINE reverse_iterator rbegin()               { return reverse_iterator(MinOrMax(get_root(), AZSTD_RBTREE_RIGHT), get_head()); }
+        AZ_FORCE_INLINE const_reverse_iterator rbegin() const   { return const_reverse_iterator(MinOrMax(get_root(), AZSTD_RBTREE_RIGHT), get_head()); }
+        const_reverse_iterator crbegin() const { return const_reverse_iterator(MinOrMax(get_root(), AZSTD_RBTREE_RIGHT), get_head()); }
+        AZ_FORCE_INLINE reverse_iterator rend()                 { return reverse_iterator(get_head(), get_head()); }
+        AZ_FORCE_INLINE const_reverse_iterator rend() const     { return const_reverse_iterator(get_head(), get_head()); }
+        const_reverse_iterator crend() const { return const_reverse_iterator(get_head(), get_head()); }
 
         AZ_FORCE_INLINE const_iterator root() const { return const_iterator(get_root()); }
         AZ_FORCE_INLINE iterator root() { return iterator(get_root()); }
@@ -445,7 +521,7 @@ namespace AZStd
         AZ_FORCE_INLINE iterator find(const KeyType& key)
         {
             T* found = DoLowerBound(key);
-            if (found == get_head() || m_keyEq(key, found))
+            if (found == get_head() || m_keyCompare(key, *found))
             {
                 return end();
             }
@@ -453,8 +529,8 @@ namespace AZStd
         }
         AZ_FORCE_INLINE const_iterator find(const KeyType& key) const
         {
-            T* found = DoLowerBound(key);
-            if (found == get_head() || m_keyEq(key, found->data()))
+            const T* found = DoLowerBound(key);
+            if (found == get_head() || m_keyCompare(key, *found))
             {
                 return end();
             }
@@ -479,11 +555,11 @@ namespace AZStd
             {
                 lastNode = curNode;
                 s = AZSTD_RBTREE_RIGHT;
-                if (m_keyEq(*node, *curNode))
+                if (m_keyCompare(*node, *curNode))
                 {
                     s = AZSTD_RBTREE_LEFT;
                 }
-                else if (!m_keyEq(*curNode, *node))
+                else if (!m_keyCompare(*curNode, *node))
                 {
                     Link(node, curNode);
                     return iterator(node);
@@ -492,6 +568,10 @@ namespace AZStd
             }
             AttachTo(node, lastNode, s);
             InsertFixup(node);
+
+#ifdef DEBUG_INTRUSIVE_MULTISET
+            validate();
+#endif
             return iterator(node);
         }
 
@@ -515,7 +595,7 @@ namespace AZStd
             hook_node_ptr_type nodeHook = Hook::to_node_ptr(node);
 
 #ifdef AZ_DEBUG_BUILD
-            // TODO: we can add slow debug check to make sure the element is on the continer
+            // TODO: we can add slow debug check to make sure the element is on the container
             AZSTD_CONTAINER_ASSERT(nodeHook->m_children[0] != nullptr || nodeHook->m_children[1] != nullptr || nodeHook->m_parentColorSide != nullptr ||
                 nodeHook->m_neighbours[0] != nullptr || nodeHook->m_neighbours[1] != nullptr, "This node is NOT attached to this list");
 #endif
@@ -577,6 +657,9 @@ namespace AZStd
 #ifdef AZ_DEBUG_BUILD
             nodeHook->m_children[0] = nodeHook->m_children[1] = nullptr;
             nodeHook->m_parentColorSide = nullptr;
+#ifdef DEBUG_INTRUSIVE_MULTISET
+            validate();
+#endif
 #endif
         }
 
@@ -614,12 +697,36 @@ namespace AZStd
 
         AZ_FORCE_INLINE bool empty() const { return get_root() == get_head(); }
 
-        // Validate container status.
-        inline bool     validate() const
+#ifdef DEBUG_INTRUSIVE_MULTISET
+        inline unsigned int validateHeight(const_node_ptr_type node) const
         {
-            // \noto \todo traverse the list and make sure it's properly linked.
+            if (node == get_head())
+            {
+                return 0;
+            }
+            if (Hook::to_node_ptr(node)->getColor() == AZSTD_RBTREE_BLACK)
+            {
+                return validateHeight(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_LEFT]) + validateHeight(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_RIGHT]) + 1;
+            }
+            AZSTD_CONTAINER_ASSERT(Hook::to_node_ptr(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_LEFT])->getColor() == AZSTD_RBTREE_BLACK
+                && Hook::to_node_ptr(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_RIGHT])->getColor() == AZSTD_RBTREE_BLACK, "");
+            const unsigned lh = validateHeight(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_LEFT]);
+            const unsigned rh = validateHeight(Hook::to_node_ptr(node)->m_children[AZSTD_RBTREE_RIGHT]);
+            AZSTD_CONTAINER_ASSERT(lh == rh, "");
+            return lh;
+        }
+
+        // Validate container status.
+        inline bool validate() const
+        {
+            AZSTD_CONTAINER_ASSERT(Hook::to_node_ptr(get_head())->getColor() == AZSTD_RBTREE_BLACK, "");
+            AZSTD_CONTAINER_ASSERT(Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_RIGHT] == get_head(), "");
+            AZSTD_CONTAINER_ASSERT(Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT] == get_head() || Hook::to_node_ptr(Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT])->getColor() == AZSTD_RBTREE_BLACK, "");
+            validateHeight(Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT]);
             return true;
         }
+#endif
+
         // Validate iterator.
         inline int      validate_iterator(const const_iterator& iter) const
         {
@@ -630,7 +737,7 @@ namespace AZStd
             node_ptr_type iterNode = iter.m_node;
 #endif
 
-            if ((void*)iterNode == (void*)&m_root)
+            if (iterNode == get_head())
             {
                 return isf_valid;
             }
@@ -645,7 +752,7 @@ namespace AZStd
 #else
             node_ptr_type iterNode = iter.m_node;
 #endif
-            if ((void*)iterNode == (void*)&m_root)
+            if (iterNode == get_head())
             {
                 return isf_valid;
             }
@@ -656,7 +763,7 @@ namespace AZStd
         /// Reset the container without going to unhook any elements.
         inline void     leak_and_reset()
         {
-            hook_node_type::setNil(get_head());
+            setNil(get_head());
             m_numElements = 0;
 #ifdef AZSTD_HAS_CHECKED_ITERATORS
             orphan_all();
@@ -671,7 +778,7 @@ namespace AZStd
             node_ptr_type curNode = get_root();
             while (curNode != endNode)
             {
-                if (m_keyEq(*curNode, key))
+                if (m_keyCompare(*curNode, key))
                 {
                     curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_RIGHT];
                 }
@@ -691,7 +798,48 @@ namespace AZStd
             node_ptr_type curNode = get_root();
             while (curNode != endNode)
             {
-                if (m_keyEq(key, *curNode))
+                if (m_keyCompare(key, *curNode))
+                {
+                    bestNode = curNode;
+                    curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_LEFT];
+                }
+                else
+                {
+                    curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_RIGHT];
+                }
+            }
+            return bestNode;
+        }
+
+
+        const_node_ptr_type DoLowerBound(const KeyType& key) const
+        {
+            const_node_ptr_type endNode = get_head();
+            const_node_ptr_type bestNode = get_head();
+            const_node_ptr_type curNode = get_root();
+            while (curNode != endNode)
+            {
+                if (m_keyCompare(*curNode, key))
+                {
+                    curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_RIGHT];
+                }
+                else
+                {
+                    bestNode = curNode;
+                    curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_LEFT];
+                }
+            }
+            return bestNode;
+        }
+
+        const_node_ptr_type DoUpperBound(const KeyType& key) const
+        {
+            const_node_ptr_type endNode = get_head();
+            const_node_ptr_type bestNode = get_head();
+            const_node_ptr_type curNode = get_root();
+            while (curNode != endNode)
+            {
+                if (m_keyCompare(key, *curNode))
                 {
                     bestNode = curNode;
                     curNode = Hook::to_node_ptr(curNode)->m_children[AZSTD_RBTREE_LEFT];
@@ -749,7 +897,7 @@ namespace AZStd
             hookNode->setParentSide(side);
         }
 
-        inline node_ptr_type MinOrMax(const_node_ptr_type node, SideType side) const
+        inline static node_ptr_type MinOrMax(const_node_ptr_type node, SideType side)
         {
             const_node_ptr_type cur = node;
             const_node_ptr_type minMax = cur;
@@ -849,7 +997,6 @@ namespace AZStd
                 }
             }
 
-            //Hook::to_node_ptr(Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT])->setColor(AZSTD_RBTREE_BLACK);
             Hook::to_node_ptr(get_root())->setColor(AZSTD_RBTREE_BLACK);
         }
 
@@ -857,7 +1004,7 @@ namespace AZStd
         {
             node_ptr_type cur = node;
             hook_node_ptr_type curHook = Hook::to_node_ptr(cur);
-            while (curHook->getColor() != AZSTD_RBTREE_RED && cur != Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT])
+            while (curHook->getColor() != AZSTD_RBTREE_RED && cur != get_root())
             {
                 node_ptr_type p = curHook->getParent();
                 hook_node_ptr_type parentHook = Hook::to_node_ptr(p);
@@ -901,7 +1048,7 @@ namespace AZStd
                     parentHook->setColor(AZSTD_RBTREE_BLACK);
                     Hook::to_node_ptr(wHook->m_children[o])->setColor(AZSTD_RBTREE_BLACK);
                     Rotate(p, s);
-                    cur = get_head()->m_children[AZSTD_RBTREE_LEFT];
+                    cur = get_root();
                     curHook = Hook::to_node_ptr(cur);
                 }
             }
@@ -909,26 +1056,26 @@ namespace AZStd
         }
 
         /**
-         * OK we face different problems when we implement intrusive list. We choose to create fake node_type as a root node!
+         * OK we face different problems when we implement intrusive list. We choose to create fake node_type as a head node!
          * Why ? There are 2 general ways to solve this issue:
          * 1. Store the head and tail pointer here and store pointer to the list in the iterator. This makes iterator 2 size,
          * plus operators -- and ++ include an if. This is the case because we need end iterator (which will be NULL). And we can't move it.
          * 2. We can store the base class in the iterator, and every time we need the value we compute the hook offset and recast the pointer.
          * all of this is fine, but we need to have a "simple" way to debug our containers" in a easy way.
-         * So at this stage we consider the wasting a memory for a fake root node as the best solution, while we can debug the container.
+         * So at this stage we consider the wasting a memory for a fake head node as the best solution, while we can debug the container.
          * This can change internally at any moment if needed, no interface change will occur.
          */
-        typename aligned_storage<sizeof(node_type), alignment_of<node_type>::value>::type m_root;
+        typename aligned_storage<sizeof(node_type), alignment_of<node_type>::value>::type m_head;
 
         AZStd::size_t   m_numElements;
-        KeyCompare      m_keyEq;
+        KeyCompare      m_keyCompare;
 
 
-        AZ_FORCE_INLINE node_ptr_type get_head() { return reinterpret_cast<node_ptr_type>(&m_root); }
-        AZ_FORCE_INLINE node_ptr_type get_root() { return Hook::to_node_ptr(reinterpret_cast<node_ptr_type>(&m_root))->m_children[AZSTD_RBTREE_LEFT]; }
+        AZ_FORCE_INLINE node_ptr_type get_head() { return reinterpret_cast<node_ptr_type>(&m_head); }
+        AZ_FORCE_INLINE node_ptr_type get_root() { return Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT]; }
 
-        AZ_FORCE_INLINE const_node_ptr_type get_head() const { return reinterpret_cast<const_node_ptr_type>(&m_root); }
-        AZ_FORCE_INLINE const_node_ptr_type get_root() const { return Hook::to_node_ptr(reinterpret_cast<const_node_ptr_type>(&m_root))->m_children[AZSTD_RBTREE_LEFT]; }
+        AZ_FORCE_INLINE const_node_ptr_type get_head() const { return reinterpret_cast<const_node_ptr_type>(&m_head); }
+        AZ_FORCE_INLINE const_node_ptr_type get_root() const { return Hook::to_node_ptr(get_head())->m_children[AZSTD_RBTREE_LEFT]; }
 
         // Debug
 #ifdef AZSTD_HAS_CHECKED_ITERATORS

@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-*or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+*or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -16,7 +16,7 @@
 #include <AssetBuilderSDK/AssetBuilderBusses.h>
 #include <LyShine/UiComponentTypes.h>
 #include <LyShine/UiAssetTypes.h>
-#include <AzToolsFramework/ToolsComponents/GenericComponentWrapper.h>
+#include <AzToolsFramework/Entity/EditorEntityFixupComponent.h>
 
 void BuilderOnInit()
 {
@@ -43,8 +43,8 @@ void BuilderAddComponents(AZ::Entity* entity)
         entity->CreateComponent(LyShine::lyShineSystemComponentUuid);
     }
 
-    // Add the GenericComponentUnwrapper for slice processing
-    entity->CreateComponent(azrtti_typeid<AzToolsFramework::Components::GenericComponentUnwrapper>());
+    // Add the EditorEntityFixupComponent for slice processing
+    entity->CreateComponent(azrtti_typeid<AzToolsFramework::EditorEntityFixupComponent>());
 }
 
 // we must use this macro to register this as an assetbuilder

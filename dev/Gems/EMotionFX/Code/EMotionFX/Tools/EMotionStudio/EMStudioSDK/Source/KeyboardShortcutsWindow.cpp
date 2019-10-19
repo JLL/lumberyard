@@ -13,15 +13,17 @@
 // include required headers
 #include "KeyboardShortcutsWindow.h"
 
+#include <QContextMenuEvent>
 #include <QVBoxLayout>
 #include <QGridLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QHeaderView>
 #include <QTableWidget>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
-#include <QtCore/QSettings>
+#include <QSettings>
 
 #include "EMStudioManager.h"
 #include <MCore/Source/LogManager.h>
@@ -67,12 +69,12 @@ namespace EMStudio
         mTableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
         mTableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
 
-        connect(mTableWidget, SIGNAL(cellDoubleClicked(int, int)), this, SLOT(OnShortcutChange(int, int)));
+        connect(mTableWidget, &QTableWidget::cellDoubleClicked, this, &KeyboardShortcutsWindow::OnShortcutChange);
 
         // create the list widget
         mListWidget = new QListWidget();
         mListWidget->setAlternatingRowColors(true);
-        connect(mListWidget, SIGNAL(itemSelectionChanged()), this, SLOT(OnGroupSelectionChanged()));
+        connect(mListWidget, &QListWidget::itemSelectionChanged, this, &KeyboardShortcutsWindow::OnGroupSelectionChanged);
 
         // build the layout
         mHLayout = new QHBoxLayout();
@@ -100,14 +102,14 @@ namespace EMStudio
         {
             mListWidget->setCurrentRow(0);
         }
-
-        connect(this, SIGNAL(setVisible(bool)), this, SLOT(OnSetVisible(bool)));
     }
 
 
-    void KeyboardShortcutsWindow::OnSetVisible(bool isVisible)
+    void KeyboardShortcutsWindow::setVisible(bool visible)
     {
-        if (isVisible)
+        QWidget::setVisible(visible);
+
+        if (visible)
         {
             ReInit();
         }
@@ -286,7 +288,11 @@ namespace EMStudio
 
         if (ctrl)
         {
-            keyText += "CTRL + ";
+            #if AZ_TRAIT_OS_PLATFORM_APPLE
+                keyText += "COMMAND + ";
+            #else
+                keyText += "CTRL + ";
+            #endif  
         }
         if (alt)
         {
@@ -351,10 +357,10 @@ namespace EMStudio
         QMenu menu(this);
 
         QAction* defaultAction = menu.addAction("Reset To Default");
-        connect(defaultAction, SIGNAL(triggered()), this, SLOT(OnResetToDefault()));
+        connect(defaultAction, &QAction::triggered, this, &KeyboardShortcutsWindow::OnResetToDefault);
 
         QAction* newKeyAction = menu.addAction("Assign New Key");
-        connect(newKeyAction, SIGNAL(triggered()), this, SLOT(OnAssignNewKey()));
+        connect(newKeyAction, &QAction::triggered, this, &KeyboardShortcutsWindow::OnAssignNewKey);
 
         // show the menu at the given position
         menu.exec(event->globalPos());
@@ -403,15 +409,15 @@ namespace EMStudio
 
         mOKButton = new QPushButton("OK");
         buttonLayout->addWidget(mOKButton);
-        connect(mOKButton, SIGNAL(clicked()), this, SLOT(accept()));
+        connect(mOKButton, &QPushButton::clicked, this, &ShortcutReceiverDialog::accept);
 
         QPushButton* defaultButton = new QPushButton("Default");
         buttonLayout->addWidget(defaultButton);
-        connect(defaultButton, SIGNAL(clicked()), this, SLOT(ResetToDefault()));
+        connect(defaultButton, &QPushButton::clicked, this, &ShortcutReceiverDialog::ResetToDefault);
 
         QPushButton* cancelButton = new QPushButton("Cancel");
         buttonLayout->addWidget(cancelButton);
-        connect(cancelButton, SIGNAL(clicked()), this, SLOT(reject()));
+        connect(cancelButton, &QPushButton::clicked, this, &ShortcutReceiverDialog::reject);
 
         layout->addLayout(buttonLayout);
 

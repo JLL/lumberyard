@@ -3,17 +3,14 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-*or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+*or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
 
-#ifndef MOCK_APPLICATION_MANAGER_H
-#define MOCK_APPLICATION_MANAGER_H
-
-#if defined (UNIT_TEST)
+#pragma once
 
 #include "../utilities/ApplicationManagerAPI.h"
 #include "native/AssetManager/assetProcessorManager.h"
@@ -65,6 +62,7 @@ namespace AssetProcessor
         void UnRegisterAllBuilders();
 
         void GetMatchingBuildersInfo(const AZStd::string& assetPath, AssetProcessor::BuilderInfoList& builderInfoList) override;
+        void GetAllBuildersInfo(AssetProcessor::BuilderInfoList& builderInfoList) override;
 
         void ResetMatchingBuildersInfoFunctionCalls();
         int GetMatchingBuildersInfoFunctionCalls();
@@ -99,11 +97,11 @@ namespace AssetProcessor
 
         //! AssetProcessor::AssetBuilderInfoBus Interface
         void GetMatchingBuildersInfo(const AZStd::string& assetPath, AssetProcessor::BuilderInfoList& builderInfoList) override;
+        void GetAllBuildersInfo(AssetProcessor::BuilderInfoList& builderInfoList) override;
         ////////////////////////////////////////////////
 
         AssetBuilderSDK::AssetBuilderDesc m_assetBuilderDesc;
         int m_numberOfJobsToCreate = 0;
     };
 }
-#endif // UNIT_TEST
-#endif //MOCK_APPLICATION_MANAGER_H
+

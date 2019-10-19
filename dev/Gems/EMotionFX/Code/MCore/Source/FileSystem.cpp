@@ -21,15 +21,8 @@
 
 namespace MCore
 {
-    // Specifies the folder separator slash type used on the different supported platforms.
-#if defined(MCORE_PLATFORM_POSIX)
-    const char FileSystem::mFolderSeparatorChar = '/';
-#else
-    const char FileSystem::mFolderSeparatorChar = '\\';
-#endif
-
     // The folder path used to keep a backup in SaveToFileSecured.
-    AZStd::string FileSystem::mSecureSavePath;
+    StaticString FileSystem::mSecureSavePath;
 
     // Save to file secured by a backup file.
     bool FileSystem::SaveToFileSecured(const char* filename, const AZStd::function<bool()>& saveFunction, CommandManager* commandManager)
@@ -56,12 +49,12 @@ namespace MCore
             // Find a unique backup filename.
             AZ::u32 backupFileIndex = 0;
             AZStd::string backupFileIndexString;
-            AZStd::string backupFilename = mSecureSavePath + baseFilename + '.' + extension;
+            AZStd::string backupFilename = mSecureSavePath.c_str() + baseFilename + '.' + extension;
             while (fileIo->Exists(backupFilename.c_str()))
             {
                 AZStd::to_string(backupFileIndexString, ++backupFileIndex);
 
-                backupFilename = mSecureSavePath+  baseFilename + backupFileIndexString + '.' + extension;
+                backupFilename = mSecureSavePath.c_str() +  baseFilename + backupFileIndexString + '.' + extension;
             }
 
             // Copy the file to the backup filename.

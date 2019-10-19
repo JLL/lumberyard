@@ -49,20 +49,31 @@ namespace ScriptCanvas
                 }
             }
 
+            ~NativeDatumNode() override = default;
+
         protected:
-            void ConfigureSetters()
+            virtual void ConfigureSetters()
             {
                 Data::SetterContainer setterWrappers = Data::ExplodeToSetters(Data::FromAZType(Data::Traits<t_Datum>::GetAZType()));
                 for (const auto& setterWrapperPair : setterWrappers)
                 {
                     SlotId setterSlotId;
                     const Data::SetterWrapper& setterWrapper = setterWrapperPair.second;
-                    const AZStd::string argName = AZStd::string::format("%s: %s", Data::GetName(setterWrapper.m_propertyType), setterWrapper.m_propertyName.data());
+                    const AZStd::string argName = AZStd::string::format("%s: %s", Data::GetName(setterWrapper.m_propertyType).data(), setterWrapper.m_propertyName.data());
                     AZStd::string_view argumentTooltip;
                     // Add the slot if it doesn't exist
-                    if (!SlotExists(argName, SlotType::DataIn, setterSlotId))
+                    setterSlotId = FindSlotIdForDescriptor(argName, SlotDescriptors::DataIn());
+
+                    if (!setterSlotId.IsValid())
                     {
-                        setterSlotId = AddInputTypeSlot(argName, argumentTooltip, setterWrapper.m_propertyType, InputTypeContract::DatumType);
+                        DataSlotConfiguration slotConfiguration;
+
+                        slotConfiguration.m_name = argName;
+                        slotConfiguration.m_toolTip = argumentTooltip;
+                        slotConfiguration.SetType(setterWrapper.m_propertyType);
+                        slotConfiguration.SetConnectionType(ConnectionType::Input);
+
+                        setterSlotId = AddSlot(slotConfiguration);
                     }
 
                     if (setterSlotId.IsValid())
@@ -73,7 +84,7 @@ namespace ScriptCanvas
                 }
             }
 
-            void ConfigureGetters()
+            virtual void ConfigureGetters()
             {
                 Data::GetterContainer getterWrappers = Data::ExplodeToGetters(Data::FromAZType(Data::Traits<t_Datum>::GetAZType()));
                 for (const auto& getterWrapperPair : getterWrappers)
@@ -81,11 +92,20 @@ namespace ScriptCanvas
                     SlotId getterSlotId;
 
                     const Data::GetterWrapper& getterWrapper = getterWrapperPair.second;
-                    const AZStd::string resultSlotName(AZStd::string::format("%s: %s", getterWrapper.m_propertyName.data(), Data::GetName(getterWrapper.m_propertyType)));
+                    const AZStd::string resultSlotName(AZStd::string::format("%s: %s", getterWrapper.m_propertyName.data(), Data::GetName(getterWrapper.m_propertyType).data()));
                     // Add the slot if it doesn't exist
-                    if (!SlotExists(resultSlotName, SlotType::DataOut, getterSlotId))
+
+                    getterSlotId = FindSlotIdForDescriptor(resultSlotName, SlotDescriptors::DataOut());
+
+                    if (!getterSlotId.IsValid())
                     {
-                        getterSlotId = AddOutputTypeSlot(resultSlotName, {}, getterWrapper.m_propertyType, OutputStorage::Optional);
+                        DataSlotConfiguration slotConfiguration;
+
+                        slotConfiguration.m_name = resultSlotName;
+                        slotConfiguration.SetType(getterWrapper.m_propertyType);
+                        slotConfiguration.SetConnectionType(ConnectionType::Output);                        
+
+                        getterSlotId = AddSlot(slotConfiguration);
                     }
 
                     if (getterSlotId.IsValid())

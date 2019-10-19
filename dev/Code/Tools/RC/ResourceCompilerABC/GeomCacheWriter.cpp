@@ -23,7 +23,8 @@
 GeomCacheDiskWriteThread::GeomCacheDiskWriteThread(const string& fileName)
     : m_bExit(false)
 {
-    m_fileHandle = fopen(fileName, "w+b");
+    m_fileHandle = nullptr; 
+    azfopen(&m_fileHandle, fileName, "w+b");
 }
 
 GeomCacheDiskWriteThread::~GeomCacheDiskWriteThread()
@@ -151,6 +152,9 @@ GeomCacheWriter::GeomCacheWriter(const string& filename, GeomCacheFile::EBlockCo
         break;
     case GeomCacheFile::eBlockCompressionFormat_LZ4HC:
         m_pBlockCompressor.reset(new GeomCacheLZ4HCBlockCompressor);
+        break;
+    case GeomCacheFile::eBlockCompressionFormat_ZSTD:
+        m_pBlockCompressor.reset(new GeomCacheZStdBlockCompressor);
         break;
     }
 

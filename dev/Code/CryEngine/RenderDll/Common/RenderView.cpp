@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -95,7 +95,7 @@ uint32 CRenderView::GetBatchFlags(int recusrion, int nAfterWater, int nRenderLis
 }
 
 //////////////////////////////////////////////////////////////////////////
-void CRenderView::AddRenderItem(CRendElementBase* pElem, CRenderObject* RESTRICT_POINTER pObj, const SShaderItem& pSH,
+void CRenderView::AddRenderItem(IRenderElement* pElem, CRenderObject* RESTRICT_POINTER pObj, const SShaderItem& pSH,
     uint32 nList, int nAafterWater, uint32 nBatchFlags, const SRenderingPassInfo& passInfo, const SRendItemSorter& rendItemSorter)
 {
     nBatchFlags |= (pSH.m_nPreprocessFlags & FSPR_MASK);

@@ -23,16 +23,21 @@
 #include "Recorder.h"
 #include "MotionInstancePool.h"
 #include "AnimGraphManager.h"
-#include <MCore/Source/JobManager.h>
 #include <MCore/Source/MCoreSystem.h>
 #include <MCore/Source/MemoryTracker.h>
 #include <AzCore/std/algorithm.h>
 #include <AzCore/IO/FileIO.h>
+#include <AzCore/Jobs/JobContext.h>
+#include <AzCore/Jobs/Job.h>
 #include <AzFramework/API/ApplicationAPI.h>
+#include <EMotionFX/Source/Allocators.h>
+#include <EMotionFX/Source/DebugDraw.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(EMotionFXManager, EMotionFXManagerAllocator, 0)
+
     // the global EMotion FX manager object
     AZ::EnvironmentVariable<EMotionFXManager*> gEMFX;
 
@@ -47,6 +52,9 @@ namespace EMotionFX
             return true;
         }
 
+        // Create EMotion FX allocators
+        Allocators::Create();
+        
         // create the new object
         gEMFX = AZ::Environment::CreateVariable<EMotionFXManager*>(kEMotionFXInstanceVarName);
         gEMFX.Set(EMotionFXManager::Create());
@@ -71,19 +79,13 @@ namespace EMotionFX
         gEMFX.Get()->GetAnimGraphManager()->Init();
         gEMFX.Get()->SetRecorder              (Recorder::Create());
         gEMFX.Get()->SetMotionInstancePool    (MotionInstancePool::Create());
-        //gEMFX->SetRigManager          ( RigManager::Create() );
+        gEMFX.Get()->SetDebugDraw             (aznew DebugDraw());
         gEMFX.Get()->SetGlobalSimulationSpeed (1.0f);
 
         // set the number of threads
-        uint32 numThreads = MCore::GetJobManager().GetNumThreads();
-        if (numThreads > 0)
-        {
-            gEMFX.Get()->SetNumThreads(numThreads, false, MCore::GetMCore().GetJobListExecuteFunc());
-        }
-        else
-        {
-            gEMFX.Get()->SetNumThreads(1, false);
-        }
+        const AZ::u32 numThreads = AZ::JobContext::GetGlobalContext()->GetJobManager().GetNumWorkerThreads();
+        AZ_Assert(numThreads > 0, "The number of threads is expected to be bigger than 0.");
+        gEMFX.Get()->SetNumThreads(numThreads);
 
         // show details
         gEMFX.Get()->LogInfo();
@@ -97,6 +99,8 @@ namespace EMotionFX
         // delete the global object and reset it to nullptr
         gEMFX.Get()->Destroy();
         gEMFX.Reset();
+
+        Allocators::Destroy();
     }
 
     //-----------------------------------------------------------------------------
@@ -122,9 +126,10 @@ namespace EMotionFX
         mWaveletCache           = nullptr;
         mRecorder               = nullptr;
         mMotionInstancePool     = nullptr;
-        //mRigManager           = nullptr;
+        mDebugDraw              = nullptr;
         mUnitType               = MCore::Distance::UNITTYPE_METERS;
         mGlobalSimulationSpeed  = 1.0f;
+        m_isInEditorMode        = false;
 
         if (MCore::GetMCore().GetIsTrackingMemory())
         {
@@ -148,6 +153,7 @@ namespace EMotionFX
         mSoftSkinManager->Destroy();
         mWaveletCache->Destroy();
         mRecorder->Destroy();
+        delete mDebugDraw;
 
         // delete the thread datas
         for (uint32 i = 0; i < mThreadDatas.GetLength(); ++i)
@@ -161,26 +167,20 @@ namespace EMotionFX
     // create
     EMotionFXManager* EMotionFXManager::Create()
     {
-        return new EMotionFXManager();
+        return aznew EMotionFXManager();
     }
 
 
     // update
     void EMotionFXManager::Update(float timePassedInSeconds)
     {
-        // update the wavelet cache
+        AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::Animation, "EMotionFXManager::Update");
+
+        mDebugDraw->Clear();
         mWaveletCache->Update(timePassedInSeconds);
-
-        // update the recorder in playback mode
         mRecorder->UpdatePlayMode(timePassedInSeconds);
-
-        // update all actor instances (the main thing)
         mActorManager->UpdateActorInstances(timePassedInSeconds);
-
-        // update physics
         mEventManager->OnSimulatePhysics(timePassedInSeconds);
-
-        // update the recorder
         mRecorder->Update(timePassedInSeconds);
 
         // sample and apply all anim graphs we recorded
@@ -188,9 +188,6 @@ namespace EMotionFX
         {
             mRecorder->SampleAndApplyAnimGraphs(mRecorder->GetCurrentPlayTime());
         }
-
-        // wait for all jobs to be completed
-        MCore::GetJobManager().NextFrame();
     }
 
 
@@ -213,12 +210,6 @@ namespace EMotionFX
     #else
         MCore::LogInfo("OpenMP enabled:   No");
     #endif
-
-        //#if (defined(MCORE_EVALUATION) && defined(MCORE_PLATFORM_WINDOWS) && !defined(MCORE_NO_LICENSESYSTEM))
-        //  MCore::LogInfo("License System:   Yes");
-        //#else
-        //MCore::LogInfo("License System:   No");
-        //#endif
 
         MCore::LogInfo("-----------------------------------------------");
     }
@@ -293,13 +284,6 @@ namespace EMotionFX
         mAnimGraphManager = manager;
     }
 
-    /*
-    // set the rig manager
-    void EMotionFXManager::SetRigManager(RigManager* manager)
-    {
-        mRigManager = manager;
-    }
-    */
 
     // set the recorder
     void EMotionFXManager::SetRecorder(Recorder* recorder)
@@ -307,6 +291,10 @@ namespace EMotionFX
         mRecorder = recorder;
     }
 
+    void EMotionFXManager::SetDebugDraw(DebugDraw* draw)
+    {
+        mDebugDraw = draw;
+    }
 
     // set the motion instance pool
     void EMotionFXManager::SetMotionInstancePool(MotionInstancePool* pool)
@@ -462,36 +450,16 @@ namespace EMotionFX
 
 
     // set the number of threads
-    void EMotionFXManager::SetNumThreads(uint32 numThreads, bool adjustJobManagerNumThreads, MCore::JobListExecuteFunctionType jobListExecuteFunction)
+    void EMotionFXManager::SetNumThreads(uint32 numThreads)
     {
-        MCORE_ASSERT(numThreads > 0 && numThreads <= 1024);
+        AZ_Assert(numThreads > 0 && numThreads <= 1024, "Number of threads is expected to be between 0 and 1024");
         if (numThreads == 0)
         {
-            MCore::LogWarning("EMotionFXManager::SetNumThreads() - Cannot set the number of threads to 0, using 1 instead.");
             numThreads = 1;
         }
 
         if (mThreadDatas.GetLength() == numThreads)
         {
-            if (adjustJobManagerNumThreads)
-            {
-                if (MCore::GetJobManager().GetNumThreads() == numThreads)
-                {
-                    return;
-                }
-
-                // if we want one thread, kill all threads and force going onto the main thread instead
-                if (numThreads == 1)
-                {
-                    MCore::GetJobManager().RemoveAllThreads();
-                    MCore::GetMCore().SetJobListExecuteFunc(MCore::JobListExecuteSerial);
-                }
-                else
-                {
-                    MCore::GetJobManager().SetNumThreads(numThreads);
-                    MCore::GetMCore().SetJobListExecuteFunc(jobListExecuteFunction);
-                }
-            }
             return;
         }
 
@@ -509,31 +477,14 @@ namespace EMotionFX
         {
             mThreadDatas[i] = ThreadData::Create(i);
         }
-
-        // set the number of threads inside the job manager (only does that when we use the job system job execute function)
-        if (adjustJobManagerNumThreads)
-        {
-            MCore::GetJobManager().SetNumThreads(numThreads);
-        }
-
-        // if we want one thread, kill all threads and force going onto the main thread instead
-        if (numThreads == 1)
-        {
-            MCore::GetJobManager().RemoveAllThreads();
-            MCore::GetMCore().SetJobListExecuteFunc(MCore::JobListExecuteSerial);
-        }
-        else
-        {
-            MCore::GetMCore().SetJobListExecuteFunc(jobListExecuteFunction);
-        }
     }
+
 
     // shrink internal pools to minimize memory usage
     void EMotionFXManager::ShrinkPools()
     {
-        mAnimGraphManager->GetObjectDataPool().Shrink();
+        Allocators::ShrinkPools();
         mMotionInstancePool->Shrink();
-        //MCore::GetAttributePool().Shrink();
     }
 
 
@@ -598,7 +549,6 @@ namespace EMotionFX
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_ATTRIBUTEINFOS,                "EMFX_MEMCATEGORY_ANIMGRAPH_ATTRIBUTEINFOS");
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTUNIQUEDATA,              "EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTUNIQUEDATA");
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTS,                       "EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTS");
-        memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS,                    "EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS");
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_TRANSITIONS,                   "EMFX_MEMCATEGORY_ANIMGRAPH_TRANSITIONS");
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_SYNCTRACK,                     "EMFX_MEMCATEGORY_ANIMGRAPH_SYNCTRACK");
         memTracker.RegisterCategory(EMFX_MEMCATEGORY_ANIMGRAPH_POSE,                          "EMFX_MEMCATEGORY_ANIMGRAPH_POSE");
@@ -668,7 +618,6 @@ namespace EMotionFX
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_ATTRIBUTEINFOS);
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTUNIQUEDATA);
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTS);
-        idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS);
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_TRANSITIONS);
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_SYNCTRACK);
         idValues.push_back(EMFX_MEMCATEGORY_ANIMGRAPH_POSE);

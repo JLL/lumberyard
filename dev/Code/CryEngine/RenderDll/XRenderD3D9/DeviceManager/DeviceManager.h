@@ -41,7 +41,11 @@
 #ifndef CRY_USE_DX12
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_1
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #  endif
 
 #  if defined(USE_NV_API)
@@ -51,7 +55,11 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_2
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -91,7 +99,11 @@ struct STextureInfo
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_3
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 
 //===============================================================================================================
@@ -119,7 +131,11 @@ private:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_4
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 # endif
 
 private:
@@ -246,7 +262,11 @@ private:
             return buffer != other.buffer
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_5
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 # endif
             ;
         }
@@ -290,7 +310,8 @@ public:
         USAGE_DIRECT_ACCESS              = BIT(0),
         USAGE_DIRECT_ACCESS_CPU_COHERENT = BIT(1),
         USAGE_DIRECT_ACCESS_GPU_COHERENT = BIT(2),
-        USAGE_TRANSIENT                  = BIT(5), //  Igor: this forces Metal runtime to create a special mode buffer. Mapped data is valid during a single frame only and until next map.
+        USAGE_TRANSIENT                  = BIT(5), //This forces Metal runtime to create a special mode buffer. Mapped data is valid during a single frame only and until next map.
+        USAGE_MEMORYLESS                 = BIT(16), //Used to tag memoryless textures on ios
         USAGE_DEPTH_STENCIL              = BIT(17),
         USAGE_RENDER_TARGET              = BIT(18),
         USAGE_DYNAMIC                    = BIT(19),
@@ -376,6 +397,7 @@ public:
 
     // Unbind a constant buffer if it is bound to an active Constant buffer slot in hardware
     void UnbindConstantBuffer(AzRHI::ConstantBuffer* constantBuffer);
+    void UnbindSRV(D3DShaderResourceView* shaderResourceView);
 
     inline void BindSRV(EHWShaderClass type, D3DShaderResourceView* SRV, uint32 slot);
     inline void BindSRV(EHWShaderClass type, D3DShaderResourceView** SRV, uint32 start_slot, uint32 count);
@@ -403,7 +425,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_6
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
     uint32 GetNumInvalidDrawcalls() const
     {
@@ -416,9 +442,15 @@ public:
     static void* GetBackingStorage(D3DBuffer* buffer);
     static void FreebackingStorage(void* base_ptr);
 
+    void DisplayMemoryUsage();
+
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_7
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 #endif
 
@@ -439,7 +471,7 @@ private:
         }
     };
 
-    typedef std::vector<StagingTextureDef, stl::STLGlobalAllocator<StagingTextureDef> > StagingPoolVec;
+    typedef std::vector<StagingTextureDef> StagingPoolVec;
 
 private:
     StagingPoolVec m_stagingPool;
@@ -448,7 +480,11 @@ private:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_8
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 };
 
@@ -477,7 +513,11 @@ class CDeviceTexture
 #endif
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_9
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 
 public:
@@ -527,7 +567,11 @@ public:
 #endif
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_10
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
     {
 #ifdef DEVMAN_USE_STAGING_POOL
@@ -545,7 +589,11 @@ public:
 #endif
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_11
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
     {
 #ifdef DEVMAN_USE_STAGING_POOL
@@ -563,7 +611,11 @@ public:
 #endif
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_12
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
     {
 #ifdef DEVMAN_USE_STAGING_POOL
@@ -593,7 +645,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_13
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -603,7 +659,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DEVICEMANAGER_H_SECTION_14
-#include AZ_RESTRICTED_FILE(DeviceManager_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceManager_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceManager_h_provo.inl"
+    #endif
 #endif
 
     void GetMemoryUsage(ICrySizer* pSizer) const
@@ -617,9 +677,14 @@ public:
         m_bNoDelete = noDelete;
     }
 
+    void TrackTextureMemory(uint32 usageFlags, const char* name);
+    void RemoveFromTextureMemoryTracking();
+
 private:
     CDeviceTexture(const CDeviceTexture&);
     CDeviceTexture& operator = (const CDeviceTexture&);
+
+    bool m_isTracked = false;
 
 private:
     int Cleanup();

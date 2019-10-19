@@ -19,11 +19,13 @@
 
 #include <AzCore/std/string/string.h>
 #include <AzCore/std/parallel/thread.h>
-#include <AzCore/std/parallel/conditional_variable.h>
+#include <AzCore/std/parallel/condition_variable.h>
 #include <AzCore/std/parallel/mutex.h>
 #include <AzCore/std/parallel/atomic.h>
 #include <AzCore/std/parallel/semaphore.h>
+#include <VideoPlayback_Traits_Platform.h>
 
+#if AZ_TRAIT_VIDEOPLAYBACK_ENABLE_DECODER
 extern "C"
 {
     #pragma warning( disable : 4244 )   //Disable warning for libav
@@ -189,3 +191,5 @@ namespace AZ
         };
     } // namespace VideoPlayback
 }//namespace AZ
+
+#endif

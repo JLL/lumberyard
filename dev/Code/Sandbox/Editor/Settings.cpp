@@ -109,7 +109,9 @@ SEditorSettings::SEditorSettings()
     bSettingsManagerMode = false;
 
     undoLevels = 50;
+    m_undoSliceOverrideSaveValue = false;
     bShowDashboardAtStartup = true;
+    m_showCircularDependencyError = true;
     bAutoloadLastLevelAtStartup = false;
     bMuteAudio = false;
     bEnableGameModeVR = false;
@@ -125,7 +127,7 @@ SEditorSettings::SEditorSettings()
 
     bAutoSaveTagPoints = false;
 
-    bNavigationContinuousUpdate = true;
+    bNavigationContinuousUpdate = false;
     bNavigationShowAreas = true;
     bNavigationDebugDisplay = false;
     bVisualizeNavigationAccessibility = false;
@@ -165,6 +167,7 @@ SEditorSettings::SEditorSettings()
     cameraRotateSpeed = 1;
     cameraFastMoveSpeed = 2;
     stylusMode = false;
+    restoreViewportCamera = true;
     wheelZoomSpeed = 1;
     invertYRotation = false;
     invertPan = false;
@@ -187,6 +190,7 @@ SEditorSettings::SEditorSettings()
     bLayerDoubleClicking = false;
 
     enableSceneInspector = false;
+    enableLegacyUI = false;
 
     strStandardTempDirectory = "Temp";
     strEditorEnv = "Editor/Editor.env";
@@ -198,7 +202,7 @@ SEditorSettings::SEditorSettings()
     freezeReadOnly = true;
     frozenSelectable = false;
 
-#if defined(AZ_PLATFORM_APPLE)
+#if AZ_TRAIT_OS_PLATFORM_APPLE
     textEditorForScript = "TextEdit";
     textEditorForShaders = "TextEdit";
     textEditorForBspaces = "TextEdit";
@@ -270,6 +274,8 @@ SEditorSettings::SEditorSettings()
     g_TemporaryLevelName = nullptr;
 
     sMetricsSettings.bEnableMetricsTracking = true;
+
+    sliceSettings.dynamicByDefault = false;
 
     bEnableUI2 = false;
 
@@ -500,7 +506,9 @@ void SEditorSettings::Save()
 
     // Save settings to registry.
     SaveValue("Settings", "UndoLevels", undoLevels);
+    SaveValue("Settings", "UndoSliceOverrideSaveValue", m_undoSliceOverrideSaveValue);
     SaveValue("Settings", "ShowDashboardAtStartup", bShowDashboardAtStartup);
+    SaveValue("Settings", "ShowCircularDependencyError", m_showCircularDependencyError);
     SaveValue("Settings", "AutoloadLastLevelAtStartup", bAutoloadLastLevelAtStartup);
     SaveValue("Settings", "MuteAudio", bMuteAudio);
     SaveValue("Settings", "AutoBackup", autoBackupEnabled);
@@ -510,6 +518,7 @@ void SEditorSettings::Save()
     SaveValue("Settings", "CameraMoveSpeed", cameraMoveSpeed);
     SaveValue("Settings", "CameraRotateSpeed", cameraRotateSpeed);
     SaveValue("Settings", "StylusMode", stylusMode);
+    SaveValue("Settings", "RestoreViewportCamera", restoreViewportCamera);
     SaveValue("Settings", "WheelZoomSpeed", wheelZoomSpeed);
     SaveValue("Settings", "InvertYRotation", invertYRotation);
     SaveValue("Settings", "InvertPan", invertPan);
@@ -540,6 +549,8 @@ void SEditorSettings::Save()
     SaveValue("Settings", "LayerDoubleClicking", bLayerDoubleClicking);
 
     SaveValue("Settings", "EnableSceneInspector", enableSceneInspector);
+    SaveValue("Settings", "EnableLegacyUI", enableLegacyUI);
+    SaveValue("Settings", "ViewportInteractionModel", newViewportInteractionModel);
     
     //////////////////////////////////////////////////////////////////////////
     // Viewport settings.
@@ -696,6 +707,7 @@ void SEditorSettings::Save()
     // Deep Selection Settings
     //////////////////////////////////////////////////////////////////////////
     SaveValue("Settings", "DeepSelectionNearness", deepSelectionSettings.fRange);
+    SaveValue("Settings", "StickDuplicate", deepSelectionSettings.bStickDuplicate);
 
 
     //////////////////////////////////////////////////////////////////////////
@@ -739,6 +751,10 @@ void SEditorSettings::Save()
     //////////////////////////////////////////////////////////////////////////
     SaveValue("Settings\\Metrics", "EnableMetricsTracking",    sMetricsSettings.bEnableMetricsTracking);
 
+    //////////////////////////////////////////////////////////////////////////
+    // Slice settings
+    //////////////////////////////////////////////////////////////////////////
+    SaveValue("Settings\\Slices", "DynamicByDefault", sliceSettings.dynamicByDefault);
 
     //////////////////////////////////////////////////////////////////////////
     // UI 2.0 Settings
@@ -779,7 +795,9 @@ void SEditorSettings::Load()
     QString     strPlaceholderString;
     // Load settings from registry.
     LoadValue("Settings", "UndoLevels", undoLevels);
+    LoadValue("Settings", "UndoSliceOverrideSaveValue", m_undoSliceOverrideSaveValue);  
     LoadValue("Settings", "ShowDashboardAtStartup", bShowDashboardAtStartup);
+    LoadValue("Settings", "ShowCircularDependencyError", m_showCircularDependencyError);
     LoadValue("Settings", "AutoloadLastLevelAtStartup", bAutoloadLastLevelAtStartup);
     LoadValue("Settings", "MuteAudio", bMuteAudio);
     LoadValue("Settings", "AutoBackup", autoBackupEnabled);
@@ -789,6 +807,7 @@ void SEditorSettings::Load()
     LoadValue("Settings", "CameraMoveSpeed", cameraMoveSpeed);
     LoadValue("Settings", "CameraRotateSpeed", cameraRotateSpeed);
     LoadValue("Settings", "StylusMode", stylusMode);
+    LoadValue("Settings", "RestoreViewportCamera", restoreViewportCamera);
     LoadValue("Settings", "WheelZoomSpeed", wheelZoomSpeed);
     LoadValue("Settings", "InvertYRotation", invertYRotation);
     LoadValue("Settings", "InvertPan", invertPan);
@@ -825,6 +844,8 @@ void SEditorSettings::Load()
     LoadValue("Settings", "LayerDoubleClicking", bLayerDoubleClicking);
 
     LoadValue("Settings", "EnableSceneInspector", enableSceneInspector);
+    LoadValue("Settings", "EnableLegacyUI", enableLegacyUI);
+    LoadValue("Settings", "ViewportInteractionModel", newViewportInteractionModel);
     
     //////////////////////////////////////////////////////////////////////////
     // Viewport Settings.
@@ -989,6 +1010,7 @@ void SEditorSettings::Load()
     // Deep Selection Settings
     //////////////////////////////////////////////////////////////////////////
     LoadValue("Settings", "DeepSelectionNearness", deepSelectionSettings.fRange);
+    LoadValue("Settings", "StickDuplicate", deepSelectionSettings.bStickDuplicate);
 
     //////////////////////////////////////////////////////////////////////////
     // Object Highlight Colors
@@ -1047,6 +1069,11 @@ void SEditorSettings::Load()
     // Metrics settings
     //////////////////////////////////////////////////////////////////////////
     LoadValue("Settings\\Metrics", "EnableMetricsTracking",    sMetricsSettings.bEnableMetricsTracking);
+
+    //////////////////////////////////////////////////////////////////////////
+    // Slice settings
+    //////////////////////////////////////////////////////////////////////////
+    LoadValue("Settings\\Slices", "DynamicByDefault", sliceSettings.dynamicByDefault);
 
     //////////////////////////////////////////////////////////////////////////
     // UI 2.0 Settings
@@ -1144,7 +1171,7 @@ bool SEditorSettings::BrowseTerrainTexture(bool bIsSave)
     else
     {
         fileName = "terraintex.bmp";
-        strcpy(path, Path::GamePathToFullPath("").toUtf8().data());
+        azstrcpy(path, MAX_PATH, Path::GamePathToFullPath("").toUtf8().data());
     }
 
     if (bIsSave)

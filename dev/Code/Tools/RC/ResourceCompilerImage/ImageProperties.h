@@ -15,7 +15,7 @@
 #define CRYINCLUDE_TOOLS_RC_RESOURCECOMPILERIMAGE_IMAGEPROPERTIES_H
 #pragma once
 
-#if defined(AZ_PLATFORM_APPLE)
+#if AZ_TRAIT_OS_PLATFORM_APPLE
 #include <AzDXGIFormat.h>
 #endif
 #include "Cry_Math.h"
@@ -679,7 +679,7 @@ public:
             static const int count = sizeof(selector) / sizeof(selector[0]);
             for (size_t i = 0; i < count; ++i)
             {
-                if (_stricmp(optionValue.c_str(), selector[i].name) == 0)
+                if (azstricmp(optionValue.c_str(), selector[i].name) == 0)
                 {
                     return selector[i].compressor;
                 }
@@ -743,7 +743,7 @@ public:
         if (!sHex.empty())
         {
             uint32 dw32BitValue = 0;
-            if (sscanf(sHex, "%x", &dw32BitValue) == 1)
+            if (azsscanf(sHex, "%x", &dw32BitValue) == 1)
             {
                 return (int64)dw32BitValue;
             }
@@ -866,7 +866,12 @@ public:
                 assert(0);
                 RCLogError("%s: pixelformat '%s' not recognized", __FUNCTION__, sPixelformat.c_str());
             }
-            else if (format != ePixelFormat_A8 && format != ePixelFormat_3DCp && format != ePixelFormat_EAC_R11 && format != ePixelFormat_BC4 && format != ePixelFormat_BC4s && format != ePixelFormat_DXT1 && format != ePixelFormat_BC1)
+            else if (format != ePixelFormat_A8 && format != ePixelFormat_3DCp && format != ePixelFormat_EAC_R11 
+                    && format != ePixelFormat_BC4 && format != ePixelFormat_BC4s && format != ePixelFormat_DXT1 
+                    && format != ePixelFormat_BC1 
+                    && format != ePixelFormat_PVRTC2 //This format can be used to store normal/smoothness data for ios
+                    && format != ePixelFormat_PVRTC4 //This format can be used to store normal/smoothness data for ios
+                )
             {
                 assert(0);
                 RCLogError("%s: pixelformat '%s' cannot be used for alpha", __FUNCTION__, sPixelformat.c_str());
@@ -1016,10 +1021,9 @@ public:
             // "value" or "value,value" or "value,value,value" or "value,value,value,value" string format
             //
             // The last three formats above are obsolete. Those formats were used to store nameless
-            // values for up to four *hardcoded* platforms pc, x360, ps3, wiiu (in this order). // ACCEPTED_USE
+            // values for up to four *hardcoded* platforms (pc and three deprecated platforms).
             // We don't write those formats anymore, but we still need to parse them because we
-            // have a lot of old files that have strings stored in those formats. The good news are
-            // that the platforms x360, ps3, wiiu are not supported by the CryEngine anymore - // ACCEPTED_USE
+            // have a lot of old files that have strings stored in those formats - 
             // because of that we use the first value only.
 
             const int value = ComputeClampedReduce(::atoi(parts[0].c_str()));
@@ -1217,27 +1221,27 @@ public:
         const string sTypeName = m_pCC->config->GetAsString("cm_ftype", "cosine", "cosine");
 
         uint32 type;
-        if (_stricmp(sTypeName.c_str(), "disc") == 0)
+        if (azstricmp(sTypeName.c_str(), "disc") == 0)
         {
             type = 0;
         }
-        else if (_stricmp(sTypeName.c_str(), "cone") == 0)
+        else if (azstricmp(sTypeName.c_str(), "cone") == 0)
         {
             type = 1;
         }
-        else if (_stricmp(sTypeName.c_str(), "cosine") == 0)
+        else if (azstricmp(sTypeName.c_str(), "cosine") == 0)
         {
             type = 2;
         }
-        else if (_stricmp(sTypeName.c_str(), "gaussian") == 0)
+        else if (azstricmp(sTypeName.c_str(), "gaussian") == 0)
         {
             type = 3;
         }
-        else if (_stricmp(sTypeName.c_str(), "cosine_power") == 0)
+        else if (azstricmp(sTypeName.c_str(), "cosine_power") == 0)
         {
             type = 4;
         }
-        else if (_stricmp(sTypeName.c_str(), "ggx") == 0)
+        else if (azstricmp(sTypeName.c_str(), "ggx") == 0)
         {
             type = 5;
         }

@@ -10,29 +10,31 @@
 *
 */
 
-#ifndef __EMSTUDIO_BLENDGRAPHWIDGET_H
-#define __EMSTUDIO_BLENDGRAPHWIDGET_H
+#pragma once
 
-// include required headers
-#include <MCore/Source/StandardHeaders.h>
-#include "../StandardPluginsConfig.h"
-#include <EMotionFX/Source/AnimGraphNode.h>
-#include <EMotionFX/Source/AnimGraphStateMachine.h>
-#include "NodeGraphWidget.h"
-#include "../../../../EMStudioSDK/Source/EMStudioManager.h"
-#include <MysticQt/Source/LinkWidget.h>
-#include <QTimer>
+#include <AzCore/std/containers/unordered_map.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphActionManager.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/StandardPluginsConfig.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphModel.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/NodeGraphWidget.h>
+#include <MCore/Source/CommandGroup.h>
 
 QT_FORWARD_DECLARE_CLASS(QMenu)
-QT_FORWARD_DECLARE_CLASS(QHBoxLayout)
+QT_FORWARD_DECLARE_CLASS(QItemSelection);
 
+namespace EMotionFX
+{
+    class AnimGraphNode;
+    class AnimGraphStateTransition;
+    class BlendTreeConnection;
+}
 
 namespace EMStudio
 {
     // forward declarations
     class AnimGraphPlugin;
 
-    //
+
     class BlendGraphWidget
         : public NodeGraphWidget
     {
@@ -43,36 +45,25 @@ namespace EMStudio
         BlendGraphWidget(AnimGraphPlugin* plugin, QWidget* parent);
         ~BlendGraphWidget();
 
-        void ShowNothing();
-
-        void SetCurrentNode(EMotionFX::AnimGraphNode* node);
-        MCORE_INLINE EMotionFX::AnimGraphNode* GetCurrentNode()                    { return mCurrentNode; }
-        MCORE_INLINE AnimGraphPlugin* GetPlugin()                                  { return mPlugin; }
-
-        EMotionFX::AnimGraphStateTransition* FindTransitionForConnection(NodeConnection* connection);
-        EMotionFX::BlendTreeConnection* FindBlendTreeConnection(NodeConnection* connection) const;
-        EMotionFX::AnimGraphNode* FindFirstSelectedAnimGraphNode();
-
         // overloaded
         bool CheckIfIsCreateConnectionValid(uint32 portNr, GraphNode* portNode, NodePort* port, bool isInputPort) override;
-        static bool CheckIfIsRelinkConnectionValid(NodeConnection* connection, GraphNode* newTargetNode, uint32 newTargetPortNr, bool isTargetInput);
-        bool CreateConnectionMustBeCurved();
-        bool CreateConnectionShowsHelpers();
+        bool CheckIfIsValidTransition(GraphNode* sourceState, GraphNode* targetState) override;
+        bool CheckIfIsValidTransitionSource(GraphNode* sourceState) override;
+        bool CreateConnectionMustBeCurved() override;
+        bool CreateConnectionShowsHelpers() override;
 
         // callbacks
-        virtual void OnDrawOverlay(QPainter& painter);
-        virtual void OnMoveStart();
-        virtual void OnMoveNode(GraphNode* node, int32 x, int32 y);
-        virtual void OnMoveEnd();
-        virtual void OnNodeCollapsed(GraphNode* node, bool isCollapsed);
-        virtual void OnShiftClickedNode(GraphNode* node);
-        virtual void OnVisualizeToggle(GraphNode* node, bool visualizeEnabled);
-        virtual void OnEnabledToggle(GraphNode* node, bool enabled);
-        virtual void OnSetupVisualizeOptions(GraphNode* node);
-        virtual void ReplaceTransition(NodeConnection* connection, QPoint startOffset, QPoint endOffset, GraphNode* sourceNode, GraphNode* targetNode);
+        void OnMoveStart() override;
+        void OnMoveNode(GraphNode* node, int32 x, int32 y) override;
+        void OnMoveEnd() override;
+        void OnNodeCollapsed(GraphNode* node, bool isCollapsed) override;
+        void OnShiftClickedNode(GraphNode* node) override;
+        void OnVisualizeToggle(GraphNode* node, bool visualizeEnabled) override;
+        void OnEnabledToggle(GraphNode* node, bool enabled) override;
+        void OnSetupVisualizeOptions(GraphNode* node) override;
+        void ReplaceTransition(NodeConnection* connection, QPoint oldStartOffset, QPoint oldEndOffset, GraphNode* oldSourceNode, GraphNode* oldTargetNode, GraphNode* newSourceNode, GraphNode* newTargetNode) override;
 
-        void OnSelectionChanged();
-        void OnCreateConnection(uint32 sourcePortNr, GraphNode* sourceNode, bool sourceIsInputPort, uint32 targetPortNr, GraphNode* targetNode, bool targetIsInputPort, const QPoint& startOffset, const QPoint& endOffset);
+        void OnCreateConnection(uint32 sourcePortNr, GraphNode* sourceNode, bool sourceIsInputPort, uint32 targetPortNr, GraphNode* targetNode, bool targetIsInputPort, const QPoint& startOffset, const QPoint& endOffset) override;
 
         void DeleteSelectedItems(NodeGraph* nodeGraph);
 
@@ -81,62 +72,66 @@ namespace EMStudio
         // checks if the currently shown graph is a state machine
         bool CheckIfIsStateMachine();
 
-        QPoint GetContextMenuEventMousePos()                            { return mContextMenuEventMousePos; }
+        // context menu shared function (definitions in ContextMenu.cpp)
+        void AddNodeGroupSubmenu(QMenu* menu, EMotionFX::AnimGraph* animGraph, const AZStd::vector<EMotionFX::AnimGraphNode*>& selectedNodes);
+        void AddAnimGraphObjectCategoryMenu(AnimGraphPlugin* plugin, QMenu* parentMenu,
+            EMotionFX::AnimGraphObject::ECategory category, EMotionFX::AnimGraphObject* focusedGraphObject);
 
-        // context menu shared function
-        void AddNodeGroupSubmenu(QMenu* menu, EMotionFX::AnimGraph* animGraph, const MCore::Array<EMotionFX::AnimGraphNode*>& selectedNodes);
-        void RegisterItems(AnimGraphPlugin* plugin, QMenu* menu, EMotionFX::AnimGraphObject* object, EMotionFX::AnimGraphObject::ECategory category);
-        void OnContextMenuEvent(QWidget* parentWidget, QPoint localMousePos, QPoint globalMousePos, AnimGraphPlugin* plugin, const MCore::Array<EMotionFX::AnimGraphNode*> selectedNodes, bool graphWidgetOnlyMenusEnabled);
+        void OnContextMenuEvent(QWidget* parentWidget, QPoint localMousePos, QPoint globalMousePos, AnimGraphPlugin* plugin,
+            const AZStd::vector<EMotionFX::AnimGraphNode*>& selectedNodes, bool graphWidgetOnlyMenusEnabled, bool selectingAnyReferenceNodeFromNavigation,
+            const AnimGraphActionFilter& actionFilter);
+
         void SetSelectedTransitionsEnabled(bool isEnabled);
-
-        // gather all selected connections/transitions of the currently shown graph and put them into the given array, the array will be cleared upfront
-        void CollectSelectedConnections(MCore::Array<NodeConnection*>* outConnections);
 
         bool PreparePainting() override;
 
+        void ProcessFrame(bool redraw);
+
+        void SetVirtualFinalNode(const QModelIndex& nodeModelIndex);
+
     protected:
-        void dropEvent(QDropEvent* event);
-        void dragEnterEvent(QDragEnterEvent* event);
-        void dragLeaveEvent(QDragLeaveEvent* event);
-        void dragMoveEvent(QDragMoveEvent* event);
+        void dropEvent(QDropEvent* event) override;
+        void dragEnterEvent(QDragEnterEvent* event) override;
+        void dragLeaveEvent(QDragLeaveEvent* event) override;
+        void dragMoveEvent(QDragMoveEvent* event) override;
 
-        void mouseDoubleClickEvent(QMouseEvent* event);
-        void mousePressEvent(QMouseEvent* event);
-        void mouseReleaseEvent(QMouseEvent* event);
+        void mouseDoubleClickEvent(QMouseEvent* event) override;
+        void mousePressEvent(QMouseEvent* event) override;
+        void mouseReleaseEvent(QMouseEvent* event) override;
 
-        //void contextMenuEvent(QContextMenuEvent* event);
+        void OnContextMenuEvent(QPoint mousePos, QPoint globalMousePos, const AnimGraphActionFilter& actionFilter);
 
-        void OnContextMenuEvent(QPoint mousePos, QPoint globalMousePos);
-
-        //      void paintEvent(QPaintEvent* event);
-        bool event(QEvent* event);
+        bool event(QEvent* event) override;
 
     public slots:
-        void OnMouseClickTimeout();
         void DeleteSelectedItems();
         void OnContextMenuCreateNode();
         void OnNodeGroupSelected();
         void EnableSelectedTransitions()                    { SetSelectedTransitionsEnabled(true); }
         void DisableSelectedTransitions()                   { SetSelectedTransitionsEnabled(false); }
 
-    private:
-        void keyReleaseEvent(QKeyEvent* event);
-        void keyPressEvent(QKeyEvent* event);
+        void OnRowsInserted(const QModelIndex& parent, int first, int last);
+        void OnRowsAboutToBeRemoved(const QModelIndex& parent, int first, int last);
+        void OnDataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles);
+        void OnFocusChanged(const QModelIndex& newFocusIndex, const QModelIndex& newFocusParent, const QModelIndex& oldFocusIndex, const QModelIndex& oldFocusParent);
+        void OnSelectionModelChanged(const QItemSelection& selected, const QItemSelection& deselected);
 
     private:
+        void keyReleaseEvent(QKeyEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
+
+        EMotionFX::AnimGraphStateTransition* FindTransitionForConnection(NodeConnection* connection) const;
+        EMotionFX::BlendTreeConnection* FindBlendTreeConnection(NodeConnection* connection) const;
+
+        // We are going to cache the NodeGraph that we have been focusing on
+        // so we can swap them quickly.
+        // TODO: investigate if we can avoid the caching
+        // TODO: defer updates from graphs we are not showing
+        using NodeGraphByModelIndex = AZStd::unordered_map<QPersistentModelIndex, AZStd::unique_ptr<NodeGraph>, QPersistentModelIndexHash>;
+        NodeGraphByModelIndex m_nodeGraphByModelIndex;
+
         QPoint                      mContextMenuEventMousePos;
-        //QTimer*                   mMouseClickTimer;
-        bool                        mLastRightClick;
         bool                        mDoubleClickHappened;
-        QPoint                      mLastGlobalMousePos;
-        EMotionFX::AnimGraphNode*  mCurrentNode;
         MCore::CommandGroup         mMoveGroup;
-        AZStd::string               mMoveString;
-        AZStd::string               mTextString;
-        QFont                       mOverlayFont;
     };
 }   // namespace EMStudio
-
-
-#endif
-

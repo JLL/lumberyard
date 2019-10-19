@@ -230,12 +230,18 @@ namespace ScriptCanvasEditor
         ScriptCanvasAssetFileInfo scFileInfo;
         AZ::Data::AssetInfo assetInfo;
         AZStd::string rootFilePath;
-        AzToolsFramework::AssetSystemRequestBus::Broadcast(&AzToolsFramework::AssetSystemRequestBus::Events::GetAssetInfoById, assetId, azrtti_typeid<ScriptCanvasAsset>(), assetInfo, rootFilePath);
+        bool foundAssetInfo = false;
+        AzToolsFramework::AssetSystemRequestBus::BroadcastResult(foundAssetInfo, &AzToolsFramework::AssetSystemRequestBus::Events::GetAssetInfoById, assetId, azrtti_typeid<ScriptCanvasAsset>(), assetInfo, rootFilePath);
+        if (!foundAssetInfo)
+        {
+            return {};
+        }
+
         AzFramework::StringFunc::Path::Join(rootFilePath.data(), assetInfo.m_relativePath.data(), scFileInfo.m_absolutePath);
         m_scriptCanvasAssetFileInfo.emplace(assetId, AZStd::move(scFileInfo));
 
         AZ::Data::AssetBus::MultiHandler::BusConnect(assetId);
-        auto loadingAsset = AZ::Data::AssetManager::Instance().GetAsset(assetId, azrtti_typeid<ScriptCanvasAsset>(), true, &AZ::ObjectStream::AssetFilterDefault, loadBlocking);
+        auto loadingAsset = AZ::Data::AssetManager::Instance().GetAsset(assetId, ScriptCanvasAssetHandler::GetAssetTypeStatic(), true, nullptr, loadBlocking);
 
         Metrics::MetricsEventsBus::Broadcast(&Metrics::MetricsEventRequests::SendMetric, ScriptCanvasEditor::Metrics::Events::Canvas::OpenGraph);
 

@@ -16,7 +16,6 @@
 #include <EMotionFX/Source/MorphSubMotion.h>
 #include <EMotionFX/Source/KeyTrackLinear.h>
 #include <EMotionFX/Source/Node.h>
-#include <MCore/Source/AttributeSet.h>
 #include <EMotionFX/Source/Actor.h>
 #include <MCore/Source/StringConversions.h>
 
@@ -649,6 +648,7 @@ namespace ExporterLib
 
             // create the keyframe chunk
             EMotionFX::FileFormat::Motion_UnsignedShortKey keyChunk;
+            memset(&keyChunk, 0, sizeof(EMotionFX::FileFormat::Motion_UnsignedShortKey));
             keyChunk.mTime  = keyframe->GetTime();
             keyChunk.mValue = keyframe->GetStorageTypeValue().mValue;
 

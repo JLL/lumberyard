@@ -28,6 +28,8 @@ supported_compilers = ['clang', 'clang++',
 lock = threading.Lock()
 nodes = {}  # Cache the path -> Node lookup
 
+# platforms with old versions of clang which do not support -Xclang -fno-pch-timestamp
+_NO_PCH_TIMESTAMP_UNSUPPORTED_PLATFORMS = set(['linux_x64'])
 
 #############################################################################
 #############################################################################
@@ -45,6 +47,21 @@ def exec_response_command_clang(self, cmd, **kw):
     try:
         tmp = None
         arg_max = get_command_line_limit()
+
+        # 1) Join options that carry no space are joined e.g. /Fo FilePath -> /FoFilePath
+        # 2) Join options that carry a ':' as last character : e.g. /OUT: FilePath -> /OUT:FilePath
+        if isinstance(cmd, list):
+            lst = []
+            carry = ''
+            join_with_next_list_item = ['/Fo', '/doc', '/Fi', '/Fa']
+            for a in cmd:
+                if a in join_with_next_list_item or a[-1] == ':':
+                    carry = a
+                else:
+                    lst.append(carry + a)
+                    carry = ''
+
+            cmd = lst
 
         if isinstance(cmd, list) and len(' '.join(cmd)) >= arg_max:
             program = cmd[0]  # unquoted program name, otherwise exec_command will fail
@@ -95,11 +112,6 @@ def wrap_class_clang(class_name):
     def exec_command(self, *k, **kw):
         if self.env.CC_NAME in supported_compilers:
             return exec_command_clang(self, *k, **kw)
-        elif self.env.CC_NAME in ['gcc']:
-            # workaround: the previous module was intercepting commands to gcc and clang
-            # and issuing them with response files.  This new module only handled clang, and this
-            # this is the only place that needs response files
-            return exec_command_clang(self, *k, **kw)
         else:
             return super(derived_class, self).exec_command(*k, **kw)
 
@@ -108,13 +120,13 @@ def wrap_class_clang(class_name):
             return exec_response_command_clang(self, cmd, **kw)
         else:
             return super(derived_class, self).exec_response_command(cmd, **kw)
-            
+
     def quote_response_command(self, *k, **kw):
         if self.env.CC_NAME in supported_compilers:
             return quote_response_command_clang(self, *k, **kw)
         else:
             return super(derived_class, self).quote_response_command(*k, **kw)
-        
+
 
     # Chain-up monkeypatch needed since these commands are in base class API
     derived_class.exec_command = exec_command
@@ -136,6 +148,7 @@ class pch_clang(waflib.Task.Task):
     run_str = '${CXX} -x c++-header ${ARCH_ST:ARCH} ${CXXFLAGS} ${CPPFLAGS} ${FRAMEWORKPATH_ST:FRAMEWORKPATH} ${CPPPATH_ST:INCPATHS} ${DEFINES_ST:DEFINES} ${SRC} -o ${TGT}'
     scan = c_preproc.scan
     color = 'BLUE'
+    nocache = True
 
     # bindings to our executor, allows us to filter the dependencies from the output
 
@@ -175,10 +188,27 @@ def add_pch_clang(self):
     pch_header = pch_source.change_ext('.h')
     # Generate PCH per target project idx
     # Avoids the case where two project have the same PCH output path but compile the PCH with different compiler options i.e. defines, includes, ...
-    pch_file = pch_source.change_ext('.%d.h.pch' % self.idx)
+    pch_file = pch_source.change_ext('.%d.h.pch' % self.target_uid)
 
     # Create PCH Task
     pch_task = self.create_task('pch_clang', pch_source, pch_file)
+
+    # By default, clang stores timestamps of all files used when building the PCH, so that it can later determine.
+    # if the PCH is out of date. In contrast, WAF uses file contents (e.g. MD5 signature) to determine when the
+    # PCH is out of date.
+    #
+    # Various scenarios result in timestamp change/variation without the contents changing.
+    # For example
+    #   - distributed build artifacts
+    #   - Perforce commits without contents changing
+    #     (workspaces which don't have "do not submit unchnaged files" checked)
+    #
+    # Since WAF properly manages dependencies, there is no need to also perform this check in Clang. The
+    # -fno-pch-timestamp was introduced specifically to address distributed build timestamp issue.
+    #
+    # NOTE: this is a clang "front end" option, so must be passed with -Xclang.
+    if self.env['PLATFORM'] not in _NO_PCH_TIMESTAMP_UNSUPPORTED_PLATFORMS:
+        pch_task.env['CXXFLAGS'].extend(['-Xclang', '-fno-pch-timestamp'])
 
     # we need to get the absolute path to the pch.h.pch
     # which we then need to include as pch.h
@@ -201,7 +231,7 @@ def add_pch_clang(self):
             t.env.append_value('CFLAGS', pch_flag)
 
             # if rtti is enabled for this source file then we need to make sure
-            # rtti is enabled in the pch otherwise clang will fail to compile 
+            # rtti is enabled in the pch otherwise clang will fail to compile
             if ('-fno-rtti' not in t.env['CXXFLAGS']):
                 pch_task.env['CXXFLAGS'] = list(filter(lambda r:not r.startswith('-fno-rtti'), pch_task.env['CXXFLAGS']))
 
@@ -250,7 +280,7 @@ def path_to_node(base_node, path, cached_nodes, b_drive_hack):
         node = cached_nodes[node_lookup_key]
     except KeyError:
         node = base_node.find_resource(path)
-        if not node and b_drive_hack: # To handle absolute path on C when building on another drive 
+        if not node and b_drive_hack: # To handle absolute path on C when building on another drive
             node = base_node.make_node(path)
         cached_nodes[node_lookup_key] = node
     finally:
@@ -412,17 +442,10 @@ def wrap_compiled_task_clang(classname):
 
         return ret
 
-    def can_retrieve_cache(self):
-        # msvcdeps and netcaching are incompatible, so disable the cache
-        if self.env.CC_NAME not in supported_compilers:
-            return super(derived_class, self).can_retrieve_cache()
-        self.nocache = True  # Disable sending the file to the cache
-        return False
 
     derived_class.post_run = post_run
     derived_class.scan = scan
     derived_class.exec_command = exec_command
-    derived_class.can_retrieve_cache = can_retrieve_cache
 
 
 #############################################################################

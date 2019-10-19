@@ -24,8 +24,8 @@
 namespace ScriptedEntityTweener
 {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    //! ScriptedEntityTweenerNotificationBusHandler Behavior context handler class 
-    class ScriptedEntityTweenerNotificationBusHandler : 
+    //! ScriptedEntityTweenerNotificationBusHandler Behavior context handler class
+    class ScriptedEntityTweenerNotificationBusHandler :
         public ScriptedEntityTweenerNotificationsBus::Handler,
         public AZ::BehaviorEBusHandler
     {
@@ -65,7 +65,7 @@ namespace ScriptedEntityTweener
         {
             serialize->Class<ScriptedEntityTweenerSystemComponent, AZ::Component>()
                 ->Version(0)
-                ->SerializerForEmptyClass();
+                ;
         }
 
         AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context);
@@ -74,14 +74,17 @@ namespace ScriptedEntityTweener
             behaviorContext->EBus<ScriptedEntityTweenerBus>("ScriptedEntityTweenerBus")
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                 ->Event("AnimateEntity", &ScriptedEntityTweenerBus::Events::AnimateEntityScript)
+                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::List)
                 ->Event("SetOptionalParams", &ScriptedEntityTweenerBus::Events::SetOptionalParams)
+                ->Event("Stop", &ScriptedEntityTweenerBus::Events::Stop)
                 ->Event("Pause", &ScriptedEntityTweenerBus::Events::Pause)
                 ->Event("Resume", &ScriptedEntityTweenerBus::Events::Resume)
                 ->Event("SetPlayDirectionReversed", &ScriptedEntityTweenerBus::Events::SetPlayDirectionReversed)
                 ->Event("SetSpeed", &ScriptedEntityTweenerBus::Events::SetSpeed)
                 ->Event("SetInitialValue", &ScriptedEntityTweenerBus::Events::SetInitialValue)
+                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::List)
                 ->Event("GetVirtualPropertyValue", &ScriptedEntityTweenerBus::Events::GetVirtualPropertyValue);
-            
+
             behaviorContext->EBus<ScriptedEntityTweenerNotificationsBus>("ScriptedEntityTweenerNotificationBus")
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                 ->Handler<ScriptedEntityTweenerNotificationBusHandler>();
@@ -125,7 +128,6 @@ namespace ScriptedEntityTweener
 
     void ScriptedEntityTweenerSystemComponent::Init()
     {
-        AZ::TickBus::Handler::m_tickOrder = AZ::TICK_LAST;
     }
 
     void ScriptedEntityTweenerSystemComponent::Activate()
@@ -138,7 +140,7 @@ namespace ScriptedEntityTweener
     void ScriptedEntityTweenerSystemComponent::Deactivate()
     {
         ScriptedEntityTweenerBus::Handler::BusDisconnect();
-        
+
         AZ::TickBus::Handler::BusDisconnect();
     }
 
@@ -147,7 +149,7 @@ namespace ScriptedEntityTweener
         auto animationTask = m_animationTasks.find(ScriptedEntityTweenerTask(entityId));
         if (animationTask == m_animationTasks.end())
         {
-            animationTask = m_animationTasks.insert(ScriptedEntityTweenerTask(entityId, true)).first;
+            animationTask = m_animationTasks.insert(ScriptedEntityTweenerTask(entityId)).first;
         }
 
         animationTask->AddAnimation(params);
@@ -178,6 +180,17 @@ namespace ScriptedEntityTweener
         params.m_animationParameters.emplace(data, paramTarget);
         AnimateEntity(entityId, params);
         m_tempParams.Reset();
+    }
+
+    void ScriptedEntityTweenerSystemComponent::Stop(int timelineId, const AZ::EntityId& entityId)
+    {
+        auto animationTask = m_animationTasks.find(ScriptedEntityTweenerTask(entityId));
+        if (animationTask == m_animationTasks.end())
+        {
+            return;
+        }
+
+        animationTask->Stop(timelineId);
     }
 
     void ScriptedEntityTweenerSystemComponent::Pause(int timelineId, const AZ::EntityId& entityId, const AZStd::string& componentName, const AZStd::string& virtualPropertyName)
@@ -252,7 +265,7 @@ namespace ScriptedEntityTweener
         }
         else
         {
-            ScriptedEntityTweenerTask task(entityId, true);
+            ScriptedEntityTweenerTask task(entityId);
             task.GetVirtualPropertyValue(toReturn, data);
         }
         return toReturn;
@@ -282,5 +295,10 @@ namespace ScriptedEntityTweener
                 ++it;
             }
         }
+    }
+
+    int ScriptedEntityTweenerSystemComponent::GetTickOrder()
+    {
+        return AZ::TICK_LAST;
     }
 }

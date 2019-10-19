@@ -10,18 +10,196 @@
 *
 */
 
-#include "BlendSpaceNode.h"
-#include "BlendSpaceManager.h"
-#include "MotionInstance.h"
-#include "MotionEventTable.h"
-#include "AnimGraphManager.h"
-#include "EMotionFXManager.h"
-#include <MCore/Source/AttributeSettings.h>
-
+#include <AzCore/Serialization/SerializeContext.h>
+#include <AzCore/Serialization/EditContext.h>
+#include <EMotionFX/Source/AnimGraphManager.h>
+#include <EMotionFX/Source/AnimGraph.h>
+#include <EMotionFX/Source/BlendSpaceNode.h>
+#include <EMotionFX/Source/BlendSpaceManager.h>
+#include <EMotionFX/Source/MotionInstance.h>
+#include <EMotionFX/Source/MotionEventTable.h>
+#include <EMotionFX/Source/EMotionFXManager.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(BlendSpaceNode, AnimGraphAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(BlendSpaceNode::BlendSpaceMotion, AnimGraphAllocator, 0)
+
+    BlendSpaceNode::BlendSpaceMotion::BlendSpaceMotion()
+        : m_coordinates(0.0f, 0.0f)
+        , m_typeFlags(TypeFlags::None)
+    {
+    }
+
+
+    BlendSpaceNode::BlendSpaceMotion::BlendSpaceMotion(const AZStd::string& motionId)
+        : BlendSpaceMotion()
+    {
+        m_motionId = motionId;
+    }
+
+
+    BlendSpaceNode::BlendSpaceMotion::BlendSpaceMotion(const AZStd::string& motionId, const AZ::Vector2& coordinates, TypeFlags typeFlags)
+        : m_motionId(motionId)
+        , m_coordinates(coordinates)
+        , m_typeFlags(typeFlags)
+    {
+    }
+
+
+    BlendSpaceNode::BlendSpaceMotion::~BlendSpaceMotion()
+    {
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::Set(const AZStd::string& motionId, const AZ::Vector2& coordinates, TypeFlags typeFlags)
+    {
+        m_motionId = motionId;
+        m_coordinates = coordinates;
+        m_typeFlags = typeFlags;
+    }
+
+
+    const AZStd::string& BlendSpaceNode::BlendSpaceMotion::GetMotionId() const
+    {
+        return m_motionId;
+    }
+
+
+    const AZ::Vector2& BlendSpaceNode::BlendSpaceMotion::GetCoordinates() const
+    {
+        return m_coordinates;
+    }
+
+
+    float BlendSpaceNode::BlendSpaceMotion::GetXCoordinate() const
+    {
+        return m_coordinates.GetX();
+    }
+
+
+    float BlendSpaceNode::BlendSpaceMotion::GetYCoordinate() const
+    {
+        return m_coordinates.GetY();
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::SetXCoordinate(float x)
+    {
+        m_coordinates.SetX(x);
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::SetYCoordinate(float y)
+    {
+        m_coordinates.SetY(y);
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::MarkXCoordinateSetByUser(bool setByUser)
+    {
+        if (setByUser)
+        {
+            SetFlag(TypeFlags::UserSetCoordinateX);
+        }
+        else
+        {
+            UnsetFlag(TypeFlags::UserSetCoordinateX);
+        }
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::MarkYCoordinateSetByUser(bool setByUser)
+    {
+        if (setByUser)
+        {
+            SetFlag(TypeFlags::UserSetCoordinateY);
+        }
+        else
+        {
+            UnsetFlag(TypeFlags::UserSetCoordinateY);
+        }
+    }
+
+
+    bool BlendSpaceNode::BlendSpaceMotion::IsXCoordinateSetByUser() const
+    {
+        return TestFlag(TypeFlags::UserSetCoordinateX);
+    }
+
+
+    bool BlendSpaceNode::BlendSpaceMotion::IsYCoordinateSetByUser() const
+    {
+        return TestFlag(TypeFlags::UserSetCoordinateY);
+    }
+
+
+    int BlendSpaceNode::BlendSpaceMotion::GetDimension() const
+    {
+        if (TestFlag(TypeFlags::BlendSpace1D))
+        {
+            return 1;
+        }
+
+        if (TestFlag(TypeFlags::BlendSpace2D))
+        {
+            return 2;
+        }
+
+        return 0;
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::SetDimension(int dimension)
+    {
+        switch (dimension)
+        {
+        case 1:
+            SetFlag(TypeFlags::BlendSpace1D);
+            break;
+        case 2:
+            SetFlag(TypeFlags::BlendSpace2D);
+            break;
+        default:
+            AZ_Assert(false, "Unexpected value for dimension");
+        }
+    }
+
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags operator~(BlendSpaceNode::BlendSpaceMotion::TypeFlags a) { return static_cast<BlendSpaceNode::BlendSpaceMotion::TypeFlags>(~static_cast<AZ::u8>(a)); }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags operator| (BlendSpaceNode::BlendSpaceMotion::TypeFlags a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { return static_cast<BlendSpaceNode::BlendSpaceMotion::TypeFlags>(static_cast<AZ::u8>(a) | static_cast<AZ::u8>(b)); }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags operator& (BlendSpaceNode::BlendSpaceMotion::TypeFlags a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { return static_cast<BlendSpaceNode::BlendSpaceMotion::TypeFlags>(static_cast<AZ::u8>(a) & static_cast<AZ::u8>(b)); }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags operator^ (BlendSpaceNode::BlendSpaceMotion::TypeFlags a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { return static_cast<BlendSpaceNode::BlendSpaceMotion::TypeFlags>(static_cast<AZ::u8>(a) ^ static_cast<AZ::u8>(b)); }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags& operator|= (BlendSpaceNode::BlendSpaceMotion::TypeFlags& a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { (AZ::u8&)(a) |= static_cast<AZ::u8>(b); return a; }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags& operator&= (BlendSpaceNode::BlendSpaceMotion::TypeFlags& a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { (AZ::u8&)(a) &= static_cast<AZ::u8>(b); return a; }
+    BlendSpaceNode::BlendSpaceMotion::TypeFlags& operator^= (BlendSpaceNode::BlendSpaceMotion::TypeFlags& a, BlendSpaceNode::BlendSpaceMotion::TypeFlags b) { (AZ::u8&)(a) ^= static_cast<AZ::u8>(b); return a; }
+
+    void BlendSpaceNode::BlendSpaceMotion::SetFlag(TypeFlags flag)
+    {
+        m_typeFlags |= flag;
+    }
+
+
+    void BlendSpaceNode::BlendSpaceMotion::UnsetFlag(TypeFlags flag)
+    {
+        m_typeFlags &= ~flag;
+    }
+
+
+    bool BlendSpaceNode::BlendSpaceMotion::TestFlag(TypeFlags flag) const
+    {
+        return (m_typeFlags & flag) == flag;
+    }
+
+    //-----------------------------------------------------------------------------------------------------------------
+
+    const char* BlendSpaceNode::s_calculationModeAuto = "Automatically calculate motion coordinates";
+    const char* BlendSpaceNode::s_calculationModeManual = "Manually enter motion coordinates";
+    const char* BlendSpaceNode::s_eventModeAllActiveMotions = "All Currently Active Motions";
+    const char* BlendSpaceNode::s_eventModeMostActiveMotion = "Most Active Motion Only";
+    const char* BlendSpaceNode::s_eventModeNone = "None";
+
+
     BlendSpaceNode::MotionInfo::MotionInfo()
         : m_motionInstance(nullptr)
         , m_syncIndex(MCORE_INVALIDINDEX32)
@@ -31,78 +209,13 @@ namespace EMotionFX
     {
     }
 
-    BlendSpaceNode::BlendSpaceNode(AnimGraph* animGraph, const char* name, uint32 typeID)
-        : AnimGraphNode(animGraph, name, typeID)
-        , mInteractiveMode(false)
+    BlendSpaceNode::BlendSpaceNode() = default;
+
+    BlendSpaceNode::BlendSpaceNode(AnimGraph* animGraph, const char* name)
+        : AnimGraphNode(animGraph, name)
     {
     }
 
-    void BlendSpaceNode::RegisterCalculationMethodAttribute(const char* name, const char* internalName, const char* description)
-    {
-        MCore::AttributeSettings* attributeInfo = RegisterAttribute(name, internalName, description, MCore::ATTRIBUTE_INTERFACETYPE_COMBOBOX);
-        attributeInfo->ResizeComboValues(2);
-        attributeInfo->SetComboValue(static_cast<int>(ECalculationMethod::AUTO), "Automatically calculate motion coordinates");
-        attributeInfo->SetComboValue(static_cast<int>(ECalculationMethod::MANUAL), "Manually enter motion coordinates");
-        attributeInfo->SetDefaultValue(MCore::AttributeFloat::Create(static_cast<int>(ECalculationMethod::AUTO)));
-        attributeInfo->SetFlag(MCore::AttributeSettings::FLAGINDEX_REINIT_ATTRIBUTEWINDOW, true);
-    }
-
-    void BlendSpaceNode::RegisterBlendSpaceEvaluatorAttribute(const char* name, const char* internalName, const char* description)
-    {
-        const BlendSpaceManager* blendSpaceManager = GetAnimGraphManager().GetBlendSpaceManager();
-
-        MCore::AttributeSettings* attribute = RegisterAttribute(name, internalName, description, MCore::ATTRIBUTE_INTERFACETYPE_COMBOBOX);
-
-        const size_t evaluatorCount = blendSpaceManager->GetParameterEvaluatorCount();
-        attribute->ResizeComboValues(static_cast<uint32>(evaluatorCount));
-        for (size_t i = 0; i < evaluatorCount; ++i)
-        {
-            EMotionFX::BlendSpaceParamEvaluator* evaluator = blendSpaceManager->GetParameterEvaluator(i);
-            attribute->SetComboValue(static_cast<uint32>(i), evaluator->GetName());
-        }
-
-        attribute->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-        attribute->SetFlag(MCore::AttributeSettings::FLAGINDEX_REINIT_ATTRIBUTEWINDOW, true);
-    }
-
-    BlendSpaceNode::ECalculationMethod BlendSpaceNode::GetBlendSpaceCalculationMethod(uint32 attribIndex) const
-    {
-        return static_cast<ECalculationMethod>(GetAttributeFloatAsUint32(attribIndex));
-    }
-
-    BlendSpaceParamEvaluator* BlendSpaceNode::GetBlendSpaceParamEvaluator(uint32 attribIndex) const
-    {
-#ifdef EMFX_EMSTUDIOBUILD
-        if (GetIsAttributeDisabled(attribIndex))
-        {
-            return nullptr;
-        }
-#endif
-
-        const BlendSpaceManager* blendSpaceManager = GetAnimGraphManager().GetBlendSpaceManager();
-
-        const size_t evaluatorIndex = static_cast<size_t>(GetAttributeFloatAsUint32(attribIndex));
-        AZ_Assert(evaluatorIndex < blendSpaceManager->GetParameterEvaluatorCount(), "Invalid blend space parameter evaluator.");
-
-        return blendSpaceManager->GetParameterEvaluator(evaluatorIndex);
-    }
-
-    void BlendSpaceNode::RegisterBlendSpaceEventFilterAttribute()
-    {
-        MCore::AttributeSettings* attributeInfo = RegisterAttribute("Event Filter Mode", "eventMode", "The event filter mode, which controls which events are passed further up the hierarchy.", MCore::ATTRIBUTE_INTERFACETYPE_COMBOBOX);
-        attributeInfo->ResizeComboValues(2);
-        attributeInfo->SetComboValue(BSEVENTMODE_ALL_ACTIVE_MOTIONS, "All Currently Active Motions");
-        attributeInfo->SetComboValue(BSEVENTMODE_MOST_ACTIVE_MOTION, "Most Active Motion Only");
-        attributeInfo->SetDefaultValue(MCore::AttributeFloat::Create(BSEVENTMODE_ALL_ACTIVE_MOTIONS));
-        attributeInfo->SetFlag(MCore::AttributeSettings::FLAGINDEX_REINITGUI_ONVALUECHANGE, true);
-    }
-
-    void BlendSpaceNode::RegisterMasterMotionAttribute()
-    {
-        MCore::AttributeSettings* param = RegisterAttribute("Sync Master Motion", "masterMotion", "The master motion used for motion synchronization.", ATTRIBUTE_INTERFACETYPE_BLENDSPACEMOTIONPICKER);
-        param->SetReinitGuiOnValueChange(true);
-        param->SetDefaultValue(MCore::AttributeString::Create());
-    }
 
     void BlendSpaceNode::DoUpdate(float timePassedInSeconds, const BlendInfos& blendInfos, ESyncMode syncMode, AZ::u32 masterIdx, MotionInfos& motionInfos)
     {
@@ -117,13 +230,14 @@ namespace EMotionFX
             return;
         }
 
-        const AZ::u32 numMotions = (AZ::u32)motionInfos.size();
-        for (AZ::u32 i=0; i < numMotions; ++i)
+        const size_t numMotions = motionInfos.size();
+        for (size_t i = 0; i < numMotions; ++i)
         {
             MotionInfo& motionInfo = motionInfos[i];
             MotionInstance* motionInstance = motionInfo.m_motionInstance;
             motionInstance->SetFreezeAtLastFrame(!motionInstance->GetIsPlayingForever());
             motionInstance->SetPlaySpeed(motionInfo.m_playSpeed);
+            motionInstance->SetRetargetingEnabled(m_retarget && mAnimGraph->GetRetargetingEnabled());
             motionInfo.m_preSyncTime = motionInstance->GetCurrentTime();
 
             // If syncing is enabled, we are going to update the current play time (m_currentTime) of all motions later based
@@ -131,13 +245,7 @@ namespace EMotionFX
             if ((syncMode == SYNCMODE_DISABLED) || (i == masterIdx))
             {
                 float newTime;
-                float passedTime;
-                float totalPlayTime;
-                float timeDifToEnd;
-                uint32 numLoops;
-                bool hasLooped = false;
-                bool frozenInLastFrame;
-                motionInstance->CalcNewTimeAfterUpdate(timePassedInSeconds, &newTime, &passedTime, &totalPlayTime, &timeDifToEnd, &numLoops, &hasLooped, &frozenInLastFrame);
+                motionInstance->CalcNewTimeAfterUpdate(timePassedInSeconds, &newTime);
 
                 motionInfo.m_currentTime = newTime;
             }
@@ -174,19 +282,20 @@ namespace EMotionFX
     }
 
     void BlendSpaceNode::DoPostUpdate(AnimGraphInstance* animGraphInstance, AZ::u32 masterIdx, BlendInfos& blendInfos, MotionInfos& motionInfos,
-            EBlendSpaceEventMode eventFilterMode, AnimGraphRefCountedData* data)
+        EBlendSpaceEventMode eventFilterMode, AnimGraphRefCountedData* data, bool inPlace)
     {
         MCORE_UNUSED(animGraphInstance);
         MCORE_UNUSED(masterIdx);
 
-        const AZ::u32 numMotions = (AZ::u32)motionInfos.size();
-        for (AZ::u32 i=0; i < numMotions; ++i)
+        const size_t numMotions = motionInfos.size();
+        for (size_t i = 0; i < numMotions; ++i)
         {
             MotionInfo& motionInfo = motionInfos[i];
             MotionInstance* motionInstance = motionInfo.m_motionInstance;
+            motionInstance->SetIsInPlace(inPlace);
 
-            const AZ::u32 indexInBlendInfos = GetIndexOfMotionInBlendInfos(blendInfos, i);
-            if (indexInBlendInfos == MCORE_INVALIDINDEX32)
+            const size_t indexInBlendInfos = GetIndexOfMotionInBlendInfos(blendInfos, i);
+            if (indexInBlendInfos == MCORE_INVALIDINDEX32 || eventFilterMode == BSEVENTMODE_NONE)
             {
                 // It is not part of blend infos. Just update the time in this case without emitting events.
                 // We update the time even for these so that motions stay in sync.
@@ -206,8 +315,15 @@ namespace EMotionFX
                 }
             }
         }
- 
-        data->GetEventBuffer().UpdateEmitters(this);
+
+        if (eventFilterMode == BSEVENTMODE_NONE)
+        {
+            data->GetEventBuffer().Clear();
+        }
+        else
+        {
+            data->GetEventBuffer().UpdateEmitters(this);
+        }
 
         Transform trajectoryDelta;
         Transform trajectoryDeltaAMirrored;
@@ -271,23 +387,7 @@ namespace EMotionFX
         motionInstance->SetFreezeAtLastFrame(!motionInstance->GetIsPlayingForever());
 
         MotionEventTable* eventTable = motionInstance->GetMotion()->GetEventTable();
-        const uint32 syncTracIdx = eventTable->FindTrackIndexByName("Sync");
-        if (syncTracIdx != MCORE_INVALIDINDEX32)
-        {
-            const MotionEventTrack* eventTrack = eventTable->GetTrack(syncTracIdx);
-            if (!motionInstance->GetMirrorMotion())
-            {
-                motionInfo.m_syncTrack.InitFromEventTrack(eventTrack);
-            }
-            else
-            {
-                motionInfo.m_syncTrack.InitFromEventTrackMirrored(eventTrack);
-            }
-        }
-        else
-        {
-            motionInfo.m_syncTrack.Clear();
-        }
+        motionInfo.m_syncTrack = eventTable->GetSyncTrack();
 
         motionInfo.m_playSpeed = motionInstance->GetPlaySpeed();
     }
@@ -296,7 +396,7 @@ namespace EMotionFX
     {
         for (const MotionInfo& motionInfo : motionInfos)
         {
-            if (motionInfo.m_syncTrack.GetNumEvents() == 0)
+            if (motionInfo.m_syncTrack->GetNumEvents() == 0)
             {
                 return false;
             }
@@ -319,7 +419,7 @@ namespace EMotionFX
         }
         const float normalizedTime = masterInfo.m_currentTime / masterDuration;
 
-        for (AZ::u32 motionIdx=0; motionIdx < numMotionInfos; ++motionIdx)
+        for (AZ::u32 motionIdx = 0; motionIdx < numMotionInfos; ++motionIdx)
         {
             if (motionIdx != masterIdx)
             {
@@ -339,37 +439,38 @@ namespace EMotionFX
             return;
         }
         MotionInfo& srcMotion = motionInfos[masterIdx];
-        const AnimGraphSyncTrack& srcTrack = srcMotion.m_syncTrack;
+        const AnimGraphSyncTrack* srcTrack = srcMotion.m_syncTrack;
 
         const float srcCurrentTime = srcMotion.m_currentTime;
         const bool forward = srcMotion.m_motionInstance->GetPlayMode() != PLAYMODE_BACKWARD;
 
-        uint32 srcIndexA;
-        uint32 srcIndexB;
-        if (!srcTrack.FindEventIndices(srcCurrentTime, &srcIndexA, &srcIndexB))
+        size_t srcIndexA;
+        size_t srcIndexB;
+        if (!srcTrack->FindEventIndices(srcCurrentTime, &srcIndexA, &srcIndexB))
         {
             return;
         }
         const bool srcSyncIndexChanged = srcMotion.m_syncIndex != srcIndexA;
-        srcMotion.m_syncIndex = srcIndexA;
-        const float srcDuration = srcTrack.CalcSegmentLength(srcIndexA, srcIndexB);
+        srcMotion.m_syncIndex = static_cast<uint32>(srcIndexA);
+        const float srcDuration = srcTrack->CalcSegmentLength(srcIndexA, srcIndexB);
+
         // calculate the normalized offset inside the segment
         float normalizedOffset;
         if (srcIndexA < srcIndexB) // normal case
         {
-            normalizedOffset = (srcDuration > MCore::Math::epsilon) ? (srcCurrentTime - srcTrack.GetEvent(srcIndexA).mTime) / srcDuration : 0.0f;
+            normalizedOffset = (srcDuration > MCore::Math::epsilon) ? (srcCurrentTime - srcTrack->GetEvent(srcIndexA).GetStartTime()) / srcDuration : 0.0f;
         }
         else // looping case
         {
             float timeOffset;
-            if (srcCurrentTime > srcTrack.GetEvent(0).mTime)
+            if (srcCurrentTime > srcTrack->GetEvent(0).GetStartTime())
             {
-                timeOffset = srcCurrentTime - srcTrack.GetEvent(srcIndexA).mTime;
+                timeOffset = srcCurrentTime - srcTrack->GetEvent(srcIndexA).GetStartTime();
             }
             else
             {
                 const float srcMotionDuration = srcMotion.m_motionInstance->GetDuration();
-                timeOffset = (srcMotionDuration - srcTrack.GetEvent(srcIndexA).mTime) + srcCurrentTime;
+                timeOffset = (srcMotionDuration - srcTrack->GetEvent(srcIndexA).GetStartTime()) + srcCurrentTime;
             }
 
             normalizedOffset = (srcDuration > MCore::Math::epsilon) ? timeOffset / srcDuration : 0.0f;
@@ -382,14 +483,14 @@ namespace EMotionFX
                 continue;
             }
             MotionInfo& targetMotion = motionInfos[motionIdx];
-            const AnimGraphSyncTrack& targetTrack = targetMotion.m_syncTrack;
-            uint32 startEventIndex = targetMotion.m_syncIndex;
+            const AnimGraphSyncTrack* targetTrack = targetMotion.m_syncTrack;
+            size_t startEventIndex = targetMotion.m_syncIndex;
             if (srcSyncIndexChanged)
             {
                 if (forward)
                 {
                     startEventIndex++;
-                    if (startEventIndex >= targetTrack.GetNumEvents())
+                    if (startEventIndex >= targetTrack->GetNumEvents())
                     {
                         startEventIndex = 0;
                     }
@@ -398,7 +499,7 @@ namespace EMotionFX
                 {
                     if (startEventIndex == 0)
                     {
-                        startEventIndex = targetTrack.GetNumEvents() - 1;
+                        startEventIndex = targetTrack->GetNumEvents() - 1;
                     }
                     else
                     {
@@ -408,28 +509,28 @@ namespace EMotionFX
             }
 
             // Find the matching indices in the target track.
-            uint32 targetIndexA;
-            uint32 targetIndexB;
-            if (!targetMotion.m_syncTrack.FindMatchingEvents(startEventIndex, srcTrack.GetEvent(srcIndexA).mID, srcTrack.GetEvent(srcIndexB).mID, &targetIndexA, &targetIndexB, forward))
+            size_t targetIndexA;
+            size_t targetIndexB;
+            if (!targetMotion.m_syncTrack->FindMatchingEvents(startEventIndex, srcTrack->GetEvent(srcIndexA).HashForSyncing(srcMotion.m_motionInstance->GetMirrorMotion()), srcTrack->GetEvent(srcIndexB).HashForSyncing(srcMotion.m_motionInstance->GetMirrorMotion()), &targetIndexA, &targetIndexB, forward, targetMotion.m_motionInstance->GetMirrorMotion()))
             {
-                return;
+                continue;
             }
 
-            targetMotion.m_syncIndex = targetIndexA;
+            targetMotion.m_syncIndex = static_cast<uint32>(targetIndexA);
 
             // calculate the segment lengths
-            const float targetDuration = targetTrack.CalcSegmentLength(targetIndexA, targetIndexB);
+            const float targetDuration = targetTrack->CalcSegmentLength(targetIndexA, targetIndexB);
 
             // calculate the new time in the motion
             float newTargetTime;
             if (targetIndexA < targetIndexB) // if the second segment is a non-wrapping one, so a regular non-looping case
             {
-                newTargetTime = targetTrack.GetEvent(targetIndexA).mTime + targetDuration * normalizedOffset;
+                newTargetTime = targetTrack->GetEvent(targetIndexA).GetStartTime() + targetDuration * normalizedOffset;
             }
             else // looping case
             {
                 // calculate the new play time
-                const float unwrappedTime = targetTrack.GetEvent(targetIndexA).mTime + targetDuration * normalizedOffset;
+                const float unwrappedTime = targetTrack->GetEvent(targetIndexA).GetStartTime() + targetDuration * normalizedOffset;
 
                 // if it is past the motion duration, we need to wrap around
                 const float targetMotionDuration = targetMotion.m_motionInstance->GetDuration();
@@ -450,15 +551,12 @@ namespace EMotionFX
     }
 
 
-    uint32 BlendSpaceNode::FindBlendSpaceMotionAttributeIndexByMotionId(uint32 motionsAttributeIndex, const AZStd::string& motionId) const
+    size_t BlendSpaceNode::FindMotionIndexByMotionId(const AZStd::vector<BlendSpaceMotion>& motions, const AZStd::string& motionId) const
     {
-        const MCore::AttributeArray* attributeArray = GetAttributeArray(motionsAttributeIndex);
-
-        const uint32 numMotions = attributeArray->GetNumAttributes();
-        for (uint32 i = 0; i < numMotions; ++i)
+        const size_t motionCount = motions.size();
+        for (size_t i = 0; i < motionCount; ++i)
         {
-            const AttributeBlendSpaceMotion* attribute = static_cast<AttributeBlendSpaceMotion*>(attributeArray->GetAttribute(i));
-            if (attribute->GetMotionId() == motionId)
+            if (motions[i].GetMotionId() == motionId)
             {
                 return i;
             }
@@ -495,5 +593,63 @@ namespace EMotionFX
         }
     }
 
-} // namespace EMotionFX
 
+    void BlendSpaceNode::BlendSpaceMotion::Reflect(AZ::ReflectContext* context)
+    {
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
+        {
+            return;
+        }
+
+        serializeContext->Class<BlendSpaceMotion>()
+            ->Version(1)
+            ->Field("motionId", &BlendSpaceMotion::m_motionId)
+            ->Field("coordinates", &BlendSpaceMotion::m_coordinates)
+            ->Field("typeFlags", &BlendSpaceMotion::m_typeFlags)
+        ;
+    }
+
+
+    void BlendSpaceNode::Reflect(AZ::ReflectContext* context)
+    {
+        BlendSpaceMotion::Reflect(context);
+
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
+        {
+            return;
+        }
+
+        serializeContext->Class<BlendSpaceNode, AnimGraphNode>()
+            ->Version(2)
+            ->Field("retarget", &BlendSpaceNode::m_retarget)
+            ->Field("inPlace", &BlendSpaceNode::m_inPlace)
+        ;
+
+        AZ::EditContext* editContext = serializeContext->GetEditContext();
+        if (!editContext)
+        {
+            return;
+        }
+
+        editContext->Enum<ECalculationMethod>("", "")
+            ->Value(s_calculationModeAuto, ECalculationMethod::AUTO)
+            ->Value(s_calculationModeManual, ECalculationMethod::MANUAL)
+        ;
+
+        editContext->Enum<EBlendSpaceEventMode>("Event Filter Mode", "The event filter mode, which controls which events are passed further up the hierarchy.")
+            ->Value(s_eventModeAllActiveMotions, EBlendSpaceEventMode::BSEVENTMODE_ALL_ACTIVE_MOTIONS)
+            ->Value(s_eventModeMostActiveMotion, EBlendSpaceEventMode::BSEVENTMODE_MOST_ACTIVE_MOTION)
+            ->Value(s_eventModeNone, EBlendSpaceEventMode::BSEVENTMODE_NONE)
+        ;
+
+        editContext->Class<BlendSpaceNode>("BlendSpaceNode", "Blend space attributes")
+            ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+            ->Attribute(AZ::Edit::Attributes::AutoExpand, "")
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &BlendSpaceNode::m_retarget, "Retarget", "Are the motions allowed to be retargeted?")
+            ->DataElement(AZ::Edit::UIHandlers::Default, &BlendSpaceNode::m_inPlace, "In place", "Is the motion in place? When enabled it will stay at the same spot and motion extractio will not have any impact.")
+        ;
+    }
+} // namespace EMotionFX

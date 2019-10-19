@@ -14,6 +14,9 @@ import copy
 import os
 import json
 import re
+import boto3
+import time
+from cgf_utils import custom_resource_utils
 
 from errors import HandledError
 from botocore.exceptions import ClientError
@@ -158,12 +161,13 @@ ID_DATA_MARKER = '::'
 
 def get_data_from_custom_physical_resource_id(physical_resource_id):
     if physical_resource_id:
-        i_data_marker = physical_resource_id.find(ID_DATA_MARKER)
+        embedded_physical_resource_id = custom_resource_utils.get_embedded_physical_id(physical_resource_id)
+        i_data_marker = embedded_physical_resource_id.find(ID_DATA_MARKER)
         if i_data_marker == -1:
             id_data = {}
         else:
             try:
-                id_data = json.loads(physical_resource_id[i_data_marker+len(ID_DATA_MARKER):])
+                id_data = json.loads(embedded_physical_resource_id[i_data_marker + len(ID_DATA_MARKER):])
             except Exception as e:
                 raise HandledError('Could not parse JSON data from physical resource id {}. {}'.format(physical_resource_id, e.message))
     else:
@@ -201,9 +205,15 @@ def load_json(path, default = None, optional = True):
     try:
         if os.path.isfile(path):
             with open(path, 'r') as file:
-                return json.load(file)
+                data = file.read()
+            if len(data):
+                return json.loads(data)
+            elif not optional:
+                raise HandledError('Could not load {}. The file is empty.'.format(path))
+            else:
+                return copy.deepcopy(default)
         elif not optional:
-            raise HandledError('Cloud not load {}. The file does not exist.'.format(path))
+            raise HandledError('Could not load {}. The file does not exist.'.format(path))
         else:
             return copy.deepcopy(default)
     except Exception as e:
@@ -223,7 +233,6 @@ def json_parse(str, default):
 def delete_bucket_contents(context, stack_name, logical_bucket_id, physical_bucket_id):
 
     s3 = context.aws.client('s3')
-
     try:
         list_res = s3.list_object_versions(Bucket=physical_bucket_id, MaxKeys=500)
     except ClientError as e:
@@ -231,6 +240,7 @@ def delete_bucket_contents(context, stack_name, logical_bucket_id, physical_buck
             return
 
     total = 0
+    did_final_list = False
 
     while True:
 
@@ -243,6 +253,13 @@ def delete_bucket_contents(context, stack_name, logical_bucket_id, physical_buck
                     'VersionId': version['VersionId']
                 })
 
+        for marker in list_res.get('DeleteMarkers', []):
+            delete_list.append(
+                {
+                    'Key': marker['Key'],
+                    'VersionId': marker['VersionId']
+                })
+
         if delete_list:
 
             count = len(delete_list)
@@ -253,9 +270,19 @@ def delete_bucket_contents(context, stack_name, logical_bucket_id, physical_buck
             s3.delete_objects(Bucket=physical_bucket_id, Delete={ 'Objects': delete_list, 'Quiet': True })
 
         if 'NextKeyMarker' not in list_res or 'NextVersionIdMarker' not in list_res:
+            if total and not did_final_list:
+                # Wait for consistency issues - if we're creating delete markers above the final ones may not have propagated immediately
+                did_final_list = True
+                time.sleep(5)
+                list_res = s3.list_object_versions(Bucket=physical_bucket_id, MaxKeys=500)
+                continue
+
             break
 
         list_res = s3.list_object_versions(Bucket=physical_bucket_id, MaxKeys=500, KeyMarker=list_res['NextKeyMarker'], VersionIdMarker=list_res['NextVersionIdMarker'])
+
+
+
 
 
 

@@ -153,6 +153,10 @@ void CErrorReport::ReportError(CErrorRecord& err)
             {
                 Warning(err.error.toUtf8().data());
             }
+            else
+            {
+                m_errors.push_back(err);
+            }
         }
     }
     else
@@ -196,7 +200,7 @@ inline bool SortErrorsByModule(const CErrorRecord& e1, const CErrorRecord& e2)
 //////////////////////////////////////////////////////////////////////////
 void CErrorReport::Display()
 {
-    if (m_errors.empty() || !GetIEditor()->GetGame() || !m_bShowErrors)
+    if (m_errors.empty() || !m_bShowErrors)
     {
         SetImmidiateMode(true);
         return;

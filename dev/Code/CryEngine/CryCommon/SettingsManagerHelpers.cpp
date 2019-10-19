@@ -22,6 +22,9 @@
 #include <locale>
 #include <string>
 
+#include <AzCore/std/string/string_view.h>
+#include <AzCore/Component/ComponentApplicationBus.h>
+
 #if defined(AZ_PLATFORM_WINDOWS)
 #include <windows.h>
 #include <shellapi.h> //ShellExecuteW()
@@ -65,7 +68,7 @@ void SettingsManagerHelpers::ConvertUtf16ToUtf8(const wchar_t* src, CCharBuffer 
         }
         else
         {
-            std::strcpy(dst.getPtr(), utf8String.c_str());
+            azstrcpy(dst.getPtr(), dstsize, utf8String.c_str());
             dst[byteCount] = 0;
         }
     }
@@ -95,7 +98,7 @@ void SettingsManagerHelpers::ConvertUtf8ToUtf16(const char* src, CWCharBuffer ds
         }
         else
         {
-            std::wcscpy(dst.getPtr(), utf16String.c_str());
+            azwcscpy(dst.getPtr(), dstsize, utf16String.c_str());
             dst[charCount] = 0;
         }
     }
@@ -265,8 +268,13 @@ void CSettingsManagerTools::GetEditorExecutable(SettingsManagerHelpers::CWCharBu
     bool bFound = false;
     if (Is64bitWindows())
     {
+        AZStd::string_view binFolderName;
+        AZ::ComponentApplicationBus::BroadcastResult(binFolderName, &AZ::ComponentApplicationRequests::GetBinFolder);
+
         const size_t len = editorExe.length();
-        editorExe.appendAscii("/" BINFOLDER_NAME "/Editor.exe");
+        editorExe.appendAscii("/");
+        editorExe.appendAscii(binFolderName.data());
+        editorExe.appendAscii("/Editor.exe");
         bFound = FileExists(editorExe.c_str());
         if (!bFound)
         {

@@ -10,8 +10,6 @@
 *
 */
 
-#include "precompiled.h"
-
 #include <AzCore/Asset/AssetManager.h>
 #include <AzCore/Serialization/SerializeContext.h>
 
@@ -58,7 +56,7 @@ namespace ScriptCanvas
 
     void RuntimeAssetSystemComponent::Activate()
     {
-        m_runtimeAssetRegistry.Register();
+        m_runtimeAssetRegistry.Register<ScriptCanvas::RuntimeAsset, ScriptCanvas::RuntimeAssetHandler>();
     }
 
     void RuntimeAssetSystemComponent::Deactivate()
@@ -66,7 +64,7 @@ namespace ScriptCanvas
         m_runtimeAssetRegistry.Unregister();
     }
 
-    RuntimeAssetRegistry& RuntimeAssetSystemComponent::GetAssetRegistry()
+    AssetRegistry& RuntimeAssetSystemComponent::GetAssetRegistry()
     {
         return m_runtimeAssetRegistry;
     }

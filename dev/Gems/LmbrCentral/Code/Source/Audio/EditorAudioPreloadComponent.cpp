@@ -40,15 +40,14 @@ namespace LmbrCentral
                 editContext->Class<EditorAudioPreloadComponent>("Audio Preload", "Loads and unloads ATL Preloads containing soundbanks")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Audio")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/AudioPreload.svg")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
 
                         // Icon todo:
-                        //->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/AudioPreload.png")
                         //->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/AudioPreload.png")
 
-                        // Docs todo:
-                        //->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-audio-preload.html")
+                        ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-audio-preload.html")
 
                     ->DataElement("AudioControl", &EditorAudioPreloadComponent::m_defaultPreload, "Preload Name", "The default ATL Preload control to use")
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &EditorAudioPreloadComponent::m_loadType, "Load Type", "Automatically when the component activates/deactivates, or Manually at user's request")

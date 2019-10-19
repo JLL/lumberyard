@@ -1,58 +1,76 @@
 ﻿import { NgModule } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { AuthGuardService } from 'app/shared/service/index';
-
+import { DependencyGuard } from './module/shared/service/index'
 import { GameComponent } from './component/game.component';
 import { AdminComponent } from './module/admin/component/admin.component';
 import { ProjectLogComponent } from './module/admin/component/log.component';
 import { UserAdminComponent } from './module/admin/component/user-admin/user-admin.component';
 import { AnalyticIndex } from './module/analytic/component/analytic.component';
+import { HeatmapComponent } from './module/analytic/component/heatmap/heatmap.component';
+import { DashboardComponent } from './module/analytic/component/dashboard/dashboard.component';
 import { SupportComponent } from './module/support/component/support.component';
 import { GemIndexComponent } from './module/cloudgems/component/gem-index.component';
+import { JiraCredentialsComponent } from './module/admin/component/jira/jira-credentials.component';
 
 @NgModule({
     imports: [
         RouterModule.forChild([
             {
-                path: 'game', 
+                path: 'game',
                 component: GameComponent,
                 canActivate: [AuthGuardService],
                 children: [
                     {
                         path: 'support',
-                        canLoad: [AuthGuardService],
+                        canActivate: [AuthGuardService],
                         component: SupportComponent
                     },
                     {
                         path: 'cloudgems',
-                        canLoad: [AuthGuardService],
+                        canActivate: [AuthGuardService],
                         component: GemIndexComponent
                     },
                     {
                         path: 'cloudgems/:id',
-                        canLoad: [AuthGuardService],
+                        canActivate: [AuthGuardService],
                         component: GemIndexComponent
                     },
                     {
-                        path: 'analytics',
-                        canLoad: [AuthGuardService],
+                        path: 'analytics',                        
+                        canActivate: [AuthGuardService, DependencyGuard],
                         component: AnalyticIndex
                     },
                     {
-                        path: 'admin',
-                        canLoad: [AuthGuardService],
+                        path: 'analytics/dashboard',
+                        canActivate: [AuthGuardService, DependencyGuard],
+                        component: DashboardComponent
+                    },
+                    {
+                       path: 'analytics/heatmap',
+                       canActivate: [AuthGuardService, DependencyGuard],
+                       component: HeatmapComponent
+                    },
+                    {
+                        path: 'administration',
+                        canActivate: [AuthGuardService],
                         component: AdminComponent,
                     },
                     {
                         path: 'admin/users',
-                        canLoad: [AuthGuardService],
+                        canActivate: [AuthGuardService],
                         component: UserAdminComponent
                     },
                     {
                         path: 'admin/logs',
-                        canLoad: [AuthGuardService],
+                        canActivate: [AuthGuardService],
                         component: ProjectLogComponent
-                    }
+                    },
+                    {
+                        path: 'admin/jira',
+                        canActivate: [AuthGuardService, DependencyGuard],
+                        component: JiraCredentialsComponent
+                    },
                 ]
             }
         ])

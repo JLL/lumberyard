@@ -28,6 +28,7 @@ namespace AZStd
         typedef unsigned int            word_t;         // base type for a storage word
         typedef word_t*                 pointer;
         typedef const word_t*           const_pointer;
+        typedef AZStd::size_t           size_type;
 
         // bit reference
         class reference
@@ -77,13 +78,13 @@ namespace AZStd
             set_word();
         }
 
-        inline bitset(unsigned long value)
-        {   // construct from bits in unsigned long
+        inline bitset(unsigned long long value)
+        {   // construct from bits in unsigned long long
             set_word();
             for (int wpos = 0;; )
             {   // store to one or more words
                 m_bits[wpos] = static_cast<word_t>(value);
-                if ((int)(sizeof (unsigned long) / sizeof (word_t)) <= ++wpos || NumWords < wpos)
+                if ((int)(sizeof (unsigned long long) / sizeof (word_t)) <= ++wpos || NumWords < wpos)
                 {
                     break;
                 }
@@ -427,6 +428,7 @@ namespace AZStd
         AZ_FORCE_INLINE void trim()
         {
 #ifdef AZ_COMPILER_MSVC
+        #pragma warning(push)
         #pragma warning(disable: 4127)
 #endif
             // clear any trailing bits in last word
@@ -436,6 +438,8 @@ namespace AZStd
             }
 #ifdef AZ_COMPILER_MSVC
         #pragma warning(default: 4127)
+        #pragma warning( pop )
+
 #endif
         }
 

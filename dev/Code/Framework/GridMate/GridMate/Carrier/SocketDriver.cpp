@@ -10,21 +10,6 @@
 *
 */
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#undef AZ_RESTRICTED_SECTION
-#define SOCKETDRIVER_CPP_SECTION_1 1
-#define SOCKETDRIVER_CPP_SECTION_2 2
-#define SOCKETDRIVER_CPP_SECTION_3 3
-#define SOCKETDRIVER_CPP_SECTION_4 4
-#define SOCKETDRIVER_CPP_SECTION_5 5
-#define SOCKETDRIVER_CPP_SECTION_6 6
-#define SOCKETDRIVER_CPP_SECTION_7 7
-#define SOCKETDRIVER_CPP_SECTION_8 8
-#define SOCKETDRIVER_CPP_SECTION_9 9
-#endif
-
-#ifndef AZ_UNITY_BUILD
-
 #include <GridMate/Carrier/SocketDriver.h>
 #include <GridMate/Carrier/Utils.h>
 #include <AzCore/Socket/AzSocket.h>
@@ -38,226 +23,38 @@
 
 #include <GridMate/Containers/unordered_set.h>
 #include <GridMate/String/string.h>
+#include <GridMate/Carrier/DriverEvents.h>
 
 #include <AzCore/std/chrono/types.h>
 #include <AzCore/std/string/conversions.h>
+#include <AzCore/std/string/memorytoascii.h>
 
-#if defined(AZ_PLATFORM_WINDOWS)
-#   include <AzCore/PlatformIncl.h>
-#   include <WinSock2.h>
-#   include <ws2tcpip.h>
-#   define SO_NBIO          FIONBIO
-#   define AZ_EWOULDBLOCK   WSAEWOULDBLOCK
-#   define AZ_EINPROGRESS   WSAEINPROGRESS
-#   define AZ_ECONNREFUSED  WSAECONNREFUSED
-#   define AZ_EALREADY      WSAEALREADY
-#   define AZ_EISCONN       WSAEISCONN
-#   define AZ_ENETUNREACH   WSAENETUNREACH
-#   define AZ_ETIMEDOUT     WSAETIMEDOUT
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_ANDROID)
-#   include <sys/socket.h>
-#   include <sys/select.h>
-#   include <arpa/inet.h>
-#   include <netdb.h>
-#   include <errno.h>
-#   include <unistd.h>
-#   include <sys/ioctl.h>
+#include <AzCore/std/bind/bind.h>
 
-#   define closesocket(_s) close(_s)
-#   define AZ_EWOULDBLOCK EWOULDBLOCK
-#   define AZ_EINPROGRESS EINPROGRESS
-#   define AZ_ECONNREFUSED ECONNREFUSED
-#   define AZ_EALREADY EALREADY
-#   define AZ_EISCONN EISCONN
-#   define AZ_ENETUNREACH ENETUNREACH
-#   define AZ_ETIMEDOUT ETIMEDOUT
-#   define SO_NBIO FIONBIO
-#   define ioctlsocket  ioctl
-#else
-#error Platform not supported.
-#endif
+namespace GridMate
+{
+    namespace Platform
+    {
+        bool IsValidSocket(GridMate::SocketDriverCommon::SocketType s);
+        bool IsSocketError(AZ::s64 result);
+        GridMate::SocketDriverCommon::SocketType GetInvalidSocket();
+        int GetSocketError();
+        timeval GetTimeValue(AZStd::chrono::microseconds timeOut);
+        const char* GetSocketErrorString(int error, SockerErrorBuffer& array);
+        GridMate::Driver::ResultCode SetSocketBlockingMode(GridMate::SocketDriverCommon::SocketType sock, bool blocking);
+        GridMate::Driver::ResultCode SetFastSocketClose(GridMate::SocketDriverCommon::SocketType socket, bool isDatagram);
+        void PrepareFamilyType(int ft, bool& isIpv6);
+        int Bind(GridMate::SocketDriverCommon::SocketType socket, const sockaddr* addr, size_t addrlen);
+        int GetAddressInfo(const char* node, const char* service, const struct addrinfo* hints, struct addrinfo** res);
+        void FreeAddressInfo(struct addrinfo* res);
+    }
+}
 
 #define AZ_SOCKET_WAKEUP_MSG_TYPE   char
 #define AZ_SOCKET_WAKEUP_MSG_VALUE  'G'
 
-#if !defined(AZ_SOCKET_IPV6_SUPPORT) && !defined(AZ_PLATFORM_APPLE)
-
-#   define AI_PASSIVE                  0x00000001
-#   define AI_CANONNAME                0x00000002
-#   define AI_NUMERICHOST              0x00000004
-#   define AI_NUMERICSERV              0x00000008
-#   ifndef AF_INET6
-#       define AF_INET6             23
-#   endif
-#   ifndef AF_UNSPEC
-#       define AF_UNSPEC            0
-#   endif
-
-#   define IPPROTO_IPV6             41
-#   define IPV6_V6ONLY              27
-#   define IPV6_ADD_MEMBERSHIP      12
-
 namespace GridMate
 {
-    int getaddrinfo(const char* node, const char* service, const struct addrinfo* hints, struct addrinfo** res)
-    {
-        static addrinfo info;
-        static sockaddr_in sockAddr;
-        AZ_Assert(hints != nullptr, "Missing hints");
-        AZ_Assert(hints->ai_family == AF_UNSPEC || hints->ai_family == AF_INET, "This function supports only AF_INET or AF_UNSPEC");
-        (void)node;
-        (void)service;
-        (void)res;
-        if (res)
-        {
-            *res = &info;
-        }
-
-        memset(&info, 0, sizeof(info));
-        info.ai_family = AF_INET;
-        info.ai_addr = reinterpret_cast<sockaddr*>(&sockAddr);
-        info.ai_addrlen = sizeof(sockAddr);
-        info.ai_socktype = hints->ai_socktype;
-        info.ai_protocol = IPPROTO_UDP;
-
-        memset(&sockAddr, 0, sizeof(sockAddr));
-        sockAddr.sin_family = AF_INET;
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-        switch (hints->ai_flags)
-        {
-        case AI_PASSIVE:
-        case AI_CANONNAME:
-        {
-            if (node && strlen(node) >= 7)
-            {
-                sockAddr.sin_addr.s_addr = inet_addr(node);
-            }
-            else
-            {
-                sockAddr.sin_addr.s_addr = INADDR_ANY;
-            }
-
-            if (service)
-            {
-                sockAddr.sin_port = htons(static_cast<unsigned short>(atoi(service)));
-            }
-        } break;
-        default:
-            AZ_Assert(false, "flag %d not supported in emulation", hints->ai_flags);
-        }
-        return 0;
-    }
-
-    void freeaddrinfo(struct addrinfo* res)
-    {
-        (void)res;
-    }
-} // namespace GridMate
-#endif // AZ_SOCKET_IPV6_SUPPORT
-
-namespace GridMate
-{
-#ifdef AZ_PLATFORM_WINDOWS
-    const char* inet_ntop(int af, const void* src, char* dst, socklen_t size)
-    {
-#if (_WIN32_WINNT <  0x0600) // Windows XP
-#pragma warning(push)
-#pragma warning(disable:4996)
-        AZ_Assert(af == AF_INET6 || af == AF_INET, "This function supports only AF_INET or AF_INET6");
-        union
-        {
-            sockaddr_in     sockAddr;
-            sockaddr_in6    sockAddr6;
-        };
-        DWORD sockAddrSize;
-        if (af == AF_INET6)
-        {
-            sockAddrSize = sizeof(sockAddr6);
-            memset(&sockAddr6, 0, sockAddrSize);
-            memcpy(&(sockAddr6.sin6_addr), src, sizeof(sockAddr6.sin6_addr));
-            sockAddr6.sin6_family = static_cast<short>(af);
-        }
-        else
-        {
-            sockAddrSize = sizeof(sockAddr);
-            memset(&sockAddr, 0, sockAddrSize);
-            memcpy(&(sockAddr.sin_addr), src, sizeof(sockAddr.sin_addr));
-            sockAddr.sin_family = static_cast<short>(af);
-        }
-        if (WSAAddressToString((struct sockaddr*)&sockAddr, sockAddrSize, 0, dst, (LPDWORD)&size) != 0)
-        {
-            AZ_Error("GridMate", false, "WSAAddressToString() : %d\n", WSAGetLastError());
-            return nullptr;
-        }
-        return dst;
-#pragma warning(pop)
-#else
-        return ::inet_ntop(af, const_cast<void*>(src), dst, size);
-#endif // (_WIN32_WINNT <  0x0600) // Windows XP
-    }
-#endif // AZ_PLATFORM_WINDOWS
-
-    bool IsValidSocket(SocketDriverCommon::SocketType s)
-    {
-#if AZ_TRAIT_OS_USE_WINDOWS_SOCKETS
-        return s != INVALID_SOCKET;
-#elif AZ_TRAIT_OS_USE_POSIX_SOCKETS
-        return s >= 0;
-#else
-#   error Not implemented
-#endif
-    }
-
-    SocketDriverCommon::SocketType GetInvalidSocket()
-    {
-#if AZ_TRAIT_OS_USE_WINDOWS_SOCKETS
-        return INVALID_SOCKET;
-#elif AZ_TRAIT_OS_USE_POSIX_SOCKETS
-        return -1;
-#else
-#   error Not implemented
-#endif
-    }
-
-    bool IsSocketError(AZ::s64 result)
-    {
-#if AZ_TRAIT_OS_USE_WINDOWS_SOCKETS
-        return result == SOCKET_ERROR;
-#elif AZ_TRAIT_OS_USE_POSIX_SOCKETS
-        return result < 0;
-#else
-#   error Not implemented
-#endif
-    }
-
-    int GetSocketError()
-    {
-#if AZ_TRAIT_OS_USE_WINDOWS_SOCKETS
-        return WSAGetLastError();
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_3
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_TRAIT_OS_USE_POSIX_SOCKETS)
-        return errno;
-#else
-#   error Not implemented
-#endif
-    }
-
     namespace SocketOperations
     {
         //=========================================================================
@@ -268,7 +65,7 @@ namespace GridMate
         {
             return htonl(hstLong);
         }
-        
+
         //=========================================================================
         // NetToHostLong
         // [3/23/2017]
@@ -277,7 +74,7 @@ namespace GridMate
         {
             return ntohl(netLong);
         }
-        
+
         //=========================================================================
         // HostToNetShort
         // [3/23/2017]
@@ -337,11 +134,11 @@ namespace GridMate
                 break;
             default:
                 optionName = -1;
-                AZ_Error("GridMate", false, "Unsupported socket option: %d with error:%d", option, GetSocketError());
+                AZ_Error("GridMate", false, "Unsupported socket option: %d with error:%d", option, Platform::GetSocketError());
                 return Driver::EC_SOCKET_SOCK_OPT;
             }
             AZ::s64 sockResult = setsockopt(sock, SOL_SOCKET, optionName, optval, optlen);
-            AZ_Error("GridMate", sockResult == 0, "Socket option: %d failed to set. Error:%d", option, GetSocketError());
+            AZ_Error("GridMate", sockResult == 0, "Socket option: %d failed to set. Error:%d", option, Platform::GetSocketError());
             return (sockResult == 0) ? Driver::EC_OK : Driver::EC_SOCKET_SOCK_OPT;
         }
 
@@ -362,7 +159,7 @@ namespace GridMate
         Driver::ResultCode EnableTCPNoDelay(SocketDriverCommon::SocketType sock, bool enable)
         {
             AZ::u32 val = enable ? 1 : 0;
-            if (IsSocketError(setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&val), sizeof(val))))
+            if (Platform::IsSocketError(setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&val), sizeof(val))))
             {
                 return Driver::EC_SOCKET_SOCK_OPT;
             }
@@ -375,30 +172,7 @@ namespace GridMate
         //=========================================================================
         Driver::ResultCode SetSocketBlockingMode(SocketDriverCommon::SocketType sock, bool blocking)
         {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_4
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX)
-            AZ::s64 result = -1;
-            AZ::s32 flags = ::fcntl(sock, F_GETFL);
-            flags &= ~O_NONBLOCK;
-            flags |= (blocking ? 0 : O_NONBLOCK);
-            result = ::fcntl(sock, F_SETFL, flags);
-#elif defined(AZ_PLATFORM_WINDOWS)
-            AZ::s64 result = SOCKET_ERROR;
-            u_long val = blocking ? 0 : 1;
-            result = ioctlsocket(sock, FIONBIO, &val);
-#else
-#error Platform not supported!
-#endif
-            if (IsSocketError(result))
-            {
-                return Driver::EC_SOCKET_MAKE_NONBLOCK;
-            }
-            return Driver::EC_OK;
+            return Platform::SetSocketBlockingMode(sock, blocking);
         }
 
         //=========================================================================
@@ -407,15 +181,15 @@ namespace GridMate
         //=========================================================================
         GridMate::Driver::ResultCode SetSocketLingerTime(SocketDriverCommon::SocketType sock, bool bDoLinger, AZ::u16 timeout)
         {
-            // Indicates the state of the linger structure associated with a socket. If the l_onoff member of the linger 
-            // structure is nonzero, a socket remains open for a specified amount of time after a closesocket function call to 
-            // enable queued data to be sent. The amount of time, in seconds, to remain open is specified in the l_linger member 
+            // Indicates the state of the linger structure associated with a socket. If the l_onoff member of the linger
+            // structure is nonzero, a socket remains open for a specified amount of time after a closesocket function call to
+            // enable queued data to be sent. The amount of time, in seconds, to remain open is specified in the l_linger member
             // of the linger structure. This option is only valid for reliable, connection - oriented protocols.
             struct linger theLinger;
             theLinger.l_linger = static_cast<decltype(theLinger.l_linger)>(timeout);
             theLinger.l_onoff = static_cast<decltype(theLinger.l_onoff)>(bDoLinger);
             AZ::s64 sockResult = setsockopt(sock, SOL_SOCKET, SO_LINGER, reinterpret_cast<char*>(&theLinger), sizeof(theLinger));
-            AZ_Error("GridMate", sockResult == 0, "Socket option: %d failed to set. Error:%d", SO_LINGER, GetSocketError());
+            AZ_Error("GridMate", sockResult == 0, "Socket option: %d failed to set. Error:%d", SO_LINGER, Platform::GetSocketError());
             return (sockResult == 0) ? Driver::EC_OK : Driver::EC_SOCKET_SOCK_OPT;
         }
 
@@ -425,9 +199,9 @@ namespace GridMate
         //=========================================================================
         Driver::ResultCode CloseSocket(SocketDriverCommon::SocketType sock)
         {
-            if (IsValidSocket(sock))
+            if (Platform::IsValidSocket(sock))
             {
-                if (!IsSocketError(closesocket(sock)))
+                if (!Platform::IsSocketError(closesocket(sock)))
                 {
                     return Driver::EC_OK;
                 }
@@ -452,18 +226,10 @@ namespace GridMate
                 // is negative?
                 return Driver::EC_SEND;
             }
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_5
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#elif defined(AZ_PLATFORM_ANDROID) || defined(AZ_PLATFORM_LINUX)
-            AZ::s32 msgNoSignal = MSG_NOSIGNAL;
-#elif defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_WINDOWS)
-            AZ::s32 msgNoSignal = 0;
-#endif
-            AZ::s32 result = send(sock, buf, static_cast<AZ::u32>(bufLen), msgNoSignal);
-            if (IsSocketError(result))
+            AZ::s32 result = send(sock, buf, static_cast<AZ::u32>(bufLen), AZ_TRAIT_GRIDMATE_MESSAGE_NO_SIGNAL);
+            if (Platform::IsSocketError(result))
             {
-                AZ::s32 err = GetSocketError();
+                AZ::s32 err = Platform::GetSocketError();
                 if (err != AZ_EWOULDBLOCK)
                 {
                     AZ_TracePrintf("GridMate", "send() err:%d -> %s\n", err, AZ::AzSock::GetStringForError(err));
@@ -493,11 +259,12 @@ namespace GridMate
                 // is negative?
                 return Driver::EC_RECEIVE;
             }
+
             AZ::s32 result = recv(sock, buf, static_cast<AZ::u32>(inOutlen), 0);
-            if (IsSocketError(result))
+            if (Platform::IsSocketError(result))
             {
                 inOutlen = 0;
-                AZ::s32 err = GetSocketError();
+                AZ::s32 err = Platform::GetSocketError();
                 if (err != AZ_EWOULDBLOCK)
                 {
                     AZ_TracePrintf("GridMate", "recv() err:%d -> %s\n", err, AZ::AzSock::GetStringForError(err));
@@ -514,8 +281,8 @@ namespace GridMate
         //=========================================================================
         Driver::ResultCode Bind(SocketDriverCommon::SocketType sock, const sockaddr* sockAddr, size_t sockAddrSize)
         {
-            AZ::s32 ret = bind(sock, sockAddr, static_cast<socklen_t>(sockAddrSize));
-            if (IsSocketError(ret))
+            AZ::s32 ret = Platform::Bind(sock, sockAddr, sockAddrSize);
+            if (Platform::IsSocketError(ret))
             {
                 return Driver::EC_SOCKET_BIND;
             }
@@ -530,7 +297,7 @@ namespace GridMate
         {
             socklen_t addressSize = static_cast<socklen_t>(sockAddrSize);
             AZ::s64 err = connect(sock, socketAddress, addressSize);
-            if (!IsSocketError(err))
+            if (!Platform::IsSocketError(err))
             {
                 outConnectionResult = ConnectionResult::Okay;
                 return Driver::EC_OK;
@@ -538,7 +305,7 @@ namespace GridMate
             else
             {
                 // okay for non-blocking sockets... will take a while
-                AZ::s64 extendedErr = GetSocketError();
+                AZ::s64 extendedErr = Platform::GetSocketError();
                 if (extendedErr == static_cast<AZ::s32>(AZ_EWOULDBLOCK))
                 {
                     outConnectionResult = ConnectionResult::InProgress;
@@ -571,7 +338,7 @@ namespace GridMate
                     outConnectionResult = ConnectionResult::TimedOut;
                 }
             }
-            AZ_TracePrintf("GridMate", "Connect() error:%d\n", GetSocketError());
+            AZ_TracePrintf("GridMate", "Connect() error:%d\n", Platform::GetSocketError());
             return Driver::EC_SOCKET_CONNECT;
         }
 
@@ -596,7 +363,7 @@ namespace GridMate
         //=========================================================================
         Driver::ResultCode Listen(SocketDriverCommon::SocketType sock, AZ::s32 backlog)
         {
-            if (IsSocketError(listen(sock, backlog)))
+            if (Platform::IsSocketError(listen(sock, backlog)))
             {
                 return Driver::EC_SOCKET_LISTEN;
             }
@@ -616,10 +383,10 @@ namespace GridMate
             memset(outAddr, 0, outAddrSize);
 
             outSocket = accept(sock, outAddr, &outAddrSize);
-            if (!IsValidSocket(outSocket))
+            if (!Platform::IsValidSocket(outSocket))
             {
                 // okay for non-blocking sockets... will take a while
-                AZ::s64 extendedErr = GetSocketError();
+                AZ::s64 extendedErr = Platform::GetSocketError();
                 if (extendedErr == static_cast<AZ::s32>(AZ_EWOULDBLOCK))
                 {
                     return Driver::EC_OK;
@@ -639,22 +406,7 @@ namespace GridMate
         //=========================================================================
         timeval GetTimeValue(AZStd::chrono::microseconds timeOut)
         {
-            timeval t;
-#if defined(AZ_PLATFORM_WINDOWS)
-            t.tv_sec = static_cast<long>(timeOut.count() / 1000000);
-            t.tv_usec = static_cast<long>(timeOut.count() % 1000000);
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_6
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
-            t.tv_sec = static_cast<time_t>(timeOut.count() / 1000000);
-            t.tv_usec = static_cast<suseconds_t>(timeOut.count() % 1000000);
-#endif
-            return t;
+            return Platform::GetTimeValue(timeOut);
         }
 
         //=========================================================================
@@ -672,7 +424,7 @@ namespace GridMate
             {
                 return true;
             }
-            AZ_Warning("GridMate", result == 0, "Socket:%d select error %d\n", sock, GetSocketError());
+            AZ_Warning("GridMate", result == 0, "Socket:%d select error %d\n", sock, Platform::GetSocketError());
             return false;
         }
 
@@ -691,7 +443,7 @@ namespace GridMate
             {
                 return true;
             }
-            AZ_Warning("GridMate", result == 0, "Socket:%d select error %d\n", sock, GetSocketError());
+            AZ_Warning("GridMate", result == 0, "Socket:%d select error %d\n", sock, Platform::GetSocketError());
             return false;
         }
     }
@@ -766,12 +518,12 @@ namespace GridMate
 
             const char* address = ip.c_str();
 
-            if (address && strlen(address) == 0) // getaddrinfo doesn't accept empty string
+            if (address && strlen(address) == 0) // Platform::GetAddressInfo() doesn't accept empty string
             {
                 address = nullptr;
             }
 
-            int error = getaddrinfo(address, strPort, &hints, &addrInfo);
+            int error = Platform::GetAddressInfo(address, strPort, &hints, &addrInfo);
             if (error == 0)
             {
                 if (addrInfo->ai_family == AF_INET)
@@ -783,15 +535,13 @@ namespace GridMate
                     m_sockAddr6 = *reinterpret_cast<const sockaddr_in6*>(addrInfo->ai_addr);
                 }
 
-                freeaddrinfo(addrInfo);
+                Platform::FreeAddressInfo(addrInfo);
             }
             else
             {
-#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_ANDROID)
-                AZ_Assert(false, "SocketDriver::ResolveAddress failed '%s'!", error == EAI_SYSTEM ? strerror(GetSocketError()) : gai_strerror(error));
-#else
-                AZ_Assert(false, "SocketDriver::ResolveAddress failed with error %d!", GetSocketError());
-#endif
+                SockerErrorBuffer buffer;
+                AZ_UNUSED(buffer);
+                AZ_Assert(false, "SocketDriver::ResolveAddress failed with error %s!", Platform::GetSocketErrorString(Platform::GetSocketError(), buffer));
             }
         }
     }
@@ -911,7 +661,7 @@ namespace GridMate
     {
         if (m_addrInfo != nullptr)
         {
-            freeaddrinfo(m_addrInfo);
+            Platform::FreeAddressInfo(m_addrInfo);
             m_addrInfo = nullptr;
         }
     }
@@ -944,14 +694,12 @@ namespace GridMate
             address = nullptr;
         }
 
-        int error = getaddrinfo(address, portStr, &hints, &m_addrInfo);
+        int error = Platform::GetAddressInfo(address, portStr, &hints, &m_addrInfo);
         if (error != 0)
         {
-#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_ANDROID) // \todo We need to revisit the socket interface, too many defines
-            AZ_TracePrintf("GridMate", "SocketDriver::Initialize - getaddrinfo failed with %s!\n", error == EAI_SYSTEM ? strerror(GetSocketError()) : gai_strerror(error));
-#else
-            AZ_TracePrintf("GridMate", "SocketDriver::Initialize - getaddrinfo failed with code %d at port %d\n", GetSocketError(), port);
-#endif
+            SockerErrorBuffer buffer;
+            AZ_UNUSED(buffer);
+            AZ_TracePrintf("GridMate", "SocketDriver::Initialize - Platform::GetAddressInfo() failed with code %s at port %d\n", Platform::GetSocketErrorString(Platform::GetSocketError(), buffer), port);
             return false;
         }
         return true;
@@ -988,14 +736,29 @@ namespace GridMate
     // SocketDriverCommon
     // [10/14/2010]
     //=========================================================================
-    SocketDriverCommon::SocketDriverCommon(bool isFullPackets, bool isCrossPlatform)
+    SocketDriverCommon::SocketDriverCommon(bool isFullPackets, bool isCrossPlatform, bool isHighPerformance)
         : m_isFullPackets(isFullPackets)
         , m_isCrossPlatform(isCrossPlatform)
         , m_isIpv6(false)
         , m_isDatagram(true)
+        , m_isHighPerformance(isHighPerformance)
     {
         m_port = 0;
         m_isStoppedWaitForData = false;
+
+#ifdef AZ_SOCKET_RIO_SUPPORT
+        if (isHighPerformance && RIOPlatformSocketDriver::isSupported())
+        {
+            m_platformDriver = AZStd::make_unique<RIOPlatformSocketDriver>(*this, m_socket);
+        }
+        else
+        {
+            m_platformDriver = AZStd::make_unique<PlatformSocketDriver>(*this, m_socket);
+        }
+#else
+        m_platformDriver = AZStd::make_unique<PlatformSocketDriver>(*this, m_socket);
+#endif
+
     }
 
     //=========================================================================
@@ -1004,12 +767,6 @@ namespace GridMate
     //=========================================================================
     SocketDriverCommon::~SocketDriverCommon()
     {
-        if (IsValidSocket(m_socket))
-        {
-            //shutdown(m_socket,SD_BOTH); XBone extra line ??? Test // ACCEPTED_USE
-            closesocket(m_socket);
-            m_socket = GetInvalidSocket();
-        }
     }
 
     //=========================================================================
@@ -1019,15 +776,7 @@ namespace GridMate
     unsigned int
     SocketDriverCommon::GetMaxSendSize() const
     {
-        unsigned int maxPacketSize = 1400;  // default to reasonable max UDP packet size
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_7
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
+        unsigned int maxPacketSize = AZ_TRAIT_GRIDMATE_MAX_PACKET_SEND_SIZE;
         if(m_isCrossPlatform)
         {
             maxPacketSize = 1264;           // an obsolete platform has the lowest
@@ -1036,8 +785,6 @@ namespace GridMate
         {
             maxPacketSize = 65507;
         }
-#endif
-
         return maxPacketSize - GetPacketOverheadSize();
     }
 
@@ -1049,7 +796,7 @@ namespace GridMate
     SocketDriverCommon::GetPacketOverheadSize() const
     {
             return 8 /* standard UDP*/ + 20 /* min for IPv4 */;
-        }
+    }
 
     //=========================================================================
     // CreateSocket
@@ -1058,7 +805,7 @@ namespace GridMate
     SocketDriverCommon::SocketType
     SocketDriverCommon::CreateSocket(int af, int type, int protocol)
     {
-        return socket(af, type, protocol);
+        return m_platformDriver->CreateSocket(af, type, protocol);
     }
 
     //=========================================================================
@@ -1068,7 +815,7 @@ namespace GridMate
     int
     SocketDriverCommon::BindSocket(const sockaddr* sockAddr, size_t sockAddrSize)
     {
-        return bind(m_socket, sockAddr, static_cast<socklen_t>(sockAddrSize));
+        return Platform::Bind(m_socket, sockAddr, sockAddrSize);
     }
 
     //=========================================================================
@@ -1078,36 +825,51 @@ namespace GridMate
     Driver::ResultCode
     SocketDriverCommon::SetSocketOptions(bool isBroadcast, unsigned int receiveBufferSize, unsigned int sendBufferSize)
     {
-        int sock_opt;
-        // set nonblocking
-        unsigned long sock_ctrl = 1;
+        int sock_opt, sock_opt2 = 0;
+        socklen_t size = sizeof(sock_opt2);
+
         int sockResult = 0;
         (void)sockResult;
-        if (IsSocketError(ioctlsocket(m_socket, SO_NBIO, &sock_ctrl)))
+#if defined(AZ_SOCKET_RIO_SUPPORT)
+        if(! (m_isHighPerformance && RIOPlatformSocketDriver::isSupported()) )
+        {
+#endif
+        // set nonblocking
+        unsigned long sock_ctrl = 1;
+        if (Platform::IsSocketError(ioctlsocket(m_socket, SO_NBIO, &sock_ctrl)))
         {
             closesocket(m_socket);
-            int error = GetSocketError();
+            int error = Platform::GetSocketError();
             (void)error;
             AZ_TracePrintf("GridMate", "SocketDriver::Initialize - ioctlsocket failed with code %d\n", error);
             return EC_SOCKET_MAKE_NONBLOCK;
         }
+#if defined(AZ_SOCKET_RIO_SUPPORT)
+        }
+#endif
 
         // receive buffer size
         sock_opt = receiveBufferSize == 0 ? (1024 * 256) : receiveBufferSize;
         sockResult = setsockopt(m_socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&sock_opt), sizeof(sock_opt));
-        AZ_Error("GridMate", sockResult == 0, "Failed to set receive buffer to %d size. Error: %d", sock_opt, GetSocketError());
+        AZ_Error("GridMate", sockResult == 0, "Failed to set receive buffer to %d size. Error: %d", sock_opt, Platform::GetSocketError());
+        sockResult = getsockopt(m_socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&sock_opt2), &size);
+        AZ_Error("GridMate", sockResult == 0, "Failed to get receive buffer to size. Error: %d", Platform::GetSocketError());
+        AZ_Error("GridMate", sock_opt == sock_opt2, "Failed to set receive buffer to %d size actual %d.", sock_opt, sock_opt2);
 
         // send buffer size
         sock_opt = sendBufferSize == 0 ? (1024 * 64) : sendBufferSize;
         sockResult = setsockopt(m_socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&sock_opt), sizeof(sock_opt));
-        AZ_Error("GridMate", sockResult == 0, "Failed to set send buffer to %d size. Error: %d", sock_opt, GetSocketError());
+        AZ_Error("GridMate", sockResult == 0, "Failed to set send buffer to %d size. Error: %d", sock_opt, Platform::GetSocketError());
+        sockResult = getsockopt(m_socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&sock_opt2), &size);
+        AZ_Error("GridMate", sockResult == 0, "Failed to get send buffer to size. Error: %d", Platform::GetSocketError());
+        AZ_Error("GridMate", sock_opt == sock_opt2, "Failed to set send buffer to %d size actual %d.", sock_opt, sock_opt2);
 
         // make sure we allow both ipv4 and ipv6 (we can make this optional)
         if (m_isIpv6)
         {
             sock_opt = 0;
             sockResult = setsockopt(m_socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<char*>(&sock_opt), sizeof(sock_opt));
-            AZ_Error("GridMate", sockResult == 0, "Failed to stop using ipv6 only. Error: %d", GetSocketError());
+            AZ_Error("GridMate", sockResult == 0, "Failed to stop using ipv6 only. Error: %d", Platform::GetSocketError());
 
     #if AZ_TRAIT_OS_ALLOW_MULTICAST
             // we emulate broadcast support over ipv6 (todo enable multicast support with an address too)
@@ -1116,20 +878,20 @@ namespace GridMate
             addrinfo* multicastInfo;
             hints.ai_family = AF_INET6;
             hints.ai_flags = AI_NUMERICHOST;
-            sockResult = getaddrinfo(Utils::GetBroadcastAddress(BSD_AF_INET6), nullptr, &hints, &multicastInfo);
-            AZ_Error("GridMate", sockResult == 0, "getaddrinfo failed to get broadcast address. Error: %d", GetSocketError());
+            sockResult = Platform::GetAddressInfo(Utils::GetBroadcastAddress(BSD_AF_INET6), nullptr, &hints, &multicastInfo);
+            AZ_Error("GridMate", sockResult == 0, "Platform::GetAddressInfo() failed to get broadcast address. Error: %d", Platform::GetSocketError());
 
             ipv6_mreq multicastRequest;
             multicastRequest.ipv6mr_interface = 0;
             memcpy(&multicastRequest.ipv6mr_multiaddr, &reinterpret_cast<sockaddr_in6*>(multicastInfo->ai_addr)->sin6_addr, sizeof(multicastRequest.ipv6mr_multiaddr));
 
-            freeaddrinfo(multicastInfo);
+            Platform::FreeAddressInfo(multicastInfo);
 
             if (m_isDatagram)
             {
                 sockResult = setsockopt(m_socket, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, reinterpret_cast<char*>(&multicastRequest), sizeof(multicastRequest));
 
-                AZ_Error("GridMate", sockResult == 0, "Failed to IPV6_ADD_MEMBERSHIP. Error: %d", GetSocketError());
+                AZ_Error("GridMate", sockResult == 0, "Failed to IPV6_ADD_MEMBERSHIP. Error: %d", Platform::GetSocketError());
             }
 
     #endif
@@ -1140,46 +902,14 @@ namespace GridMate
             {
                 sock_opt = 1;
                 sockResult = setsockopt(m_socket, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<char*>(&sock_opt), sizeof(sock_opt));
-                AZ_Error("GridMate", sockResult == 0, "Failed to enable broadcast. Error: %d", GetSocketError());
+                AZ_Error("GridMate", sockResult == 0, "Failed to enable broadcast. Error: %d", Platform::GetSocketError());
             }
         }
 
-    #if AZ_TRAIT_OS_USE_FASTER_WINDOWS_SOCKET_CLOSE
-        // faster socket close
-        linger l;
-        l.l_onoff = 0;
-        l.l_linger = 0;
-        setsockopt(m_socket, SOL_SOCKET, SO_LINGER, reinterpret_cast<char*>(&l), sizeof(l));
-
-        // TODO: Remove this when when we don't support windows XP! (if fixed later)
-        // http://support.microsoft.com/?kbid=263823
-        // WinSock Recvfrom() now returns WSAECONNRESET instead of blocking or timing out
-
-        // MS Transport Provider IOCTL to control
-        // reporting PORT_UNREACHABLE messages
-        // on UDP sockets via recv/WSARecv/etc.
-        // Path TRUE in input buffer to enable (default if supported),
-        // FALSE to disable.
-    #define SIO_UDP_CONNRESET   _WSAIOW(IOC_VENDOR, 12)
-
-        if (m_isDatagram)
+        if (Platform::SetFastSocketClose(m_socket, m_isDatagram) != EC_OK)
         {
-            // disable  new behavior using
-            // IOCTL: SIO_UDP_CONNRESET
-            DWORD dwBytesReturned = 0;
-            BOOL isReportPortUnreachable = FALSE;
-            if (WSAIoctl(m_socket, SIO_UDP_CONNRESET, &isReportPortUnreachable, sizeof(isReportPortUnreachable), NULL, 0, &dwBytesReturned, NULL, NULL) == SOCKET_ERROR)
-            {
-                closesocket(m_socket);
-                int error = GetSocketError();
-                (void)error;
-                AZ_TracePrintf("GridMate", "SocketDriver::Initialize - WSAIoctl failed with code %d\n", error);
-                return EC_SOCKET_SOCK_OPT;
-            }
+            return EC_SOCKET_SOCK_OPT;
         }
-
-    #endif // AZ_TRAIT_OS_USE_FASTER_WINDOWS_SOCKET_CLOSE
-
         return EC_OK;
     }
 
@@ -1191,15 +921,7 @@ namespace GridMate
     SocketDriverCommon::Initialize(int ft, const char* address, unsigned int port, bool isBroadcast, unsigned int receiveBufferSize, unsigned int sendBufferSize)
     {
         AZ_Assert(ft == BSD_AF_INET || ft == BSD_AF_INET6, "Family type (ft) can be IPV4 or IPV6 only!");
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_8
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
-        m_isIpv6 = (ft == BSD_AF_INET6);
-#endif
+        Platform::PrepareFamilyType(ft, m_isIpv6);
 
         m_port = htons(static_cast<unsigned short>(port));
         char portStr[8];
@@ -1211,41 +933,40 @@ namespace GridMate
         hints.ai_family = m_isIpv6 ? AF_INET6 : AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
         hints.ai_flags = AI_PASSIVE;
+        hints.ai_protocol = IPPROTO_UDP;
 
         if (address && strlen(address) == 0)
         {
             address = nullptr;
         }
 
-        int error = getaddrinfo(address, portStr, &hints, &addrInfo);
+        int error = Platform::GetAddressInfo(address, portStr, &hints, &addrInfo);
         if (error != 0)
         {
-    #if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_ANDROID) // \todo We need to revisit the socket interface, too many defines
-            AZ_TracePrintf("GridMate", "SocketDriver::Initialize - getaddrinfo failed with %s!\n", error == EAI_SYSTEM ? strerror(GetSocketError()) : gai_strerror(error));
-    #else
-            AZ_TracePrintf("GridMate", "SocketDriver::Initialize - getaddrinfo failed with code %d at port %d\n", GetSocketError(), port);
-    #endif
+            SockerErrorBuffer buffer;
+            AZ_UNUSED(buffer);
+            AZ_Assert(false, "SocketDriver::Initialize - Platform::GetAddressInfo() failed with %s!", Platform::GetSocketErrorString(Platform::GetSocketError(), buffer));
             return EC_SOCKET_CREATE;
         }
 
         m_socket = CreateSocket(addrInfo->ai_family, addrInfo->ai_socktype, addrInfo->ai_protocol);
 
-        if (IsValidSocket(m_socket))
+        if (Platform::IsValidSocket(m_socket))
         {
             ResultCode res = SetSocketOptions(isBroadcast, receiveBufferSize, sendBufferSize);
             if (res != EC_OK)
             {
-                freeaddrinfo(addrInfo);
+                Platform::FreeAddressInfo(addrInfo);
                 closesocket(m_socket);
                 return res;
             }
 
-            if (IsSocketError(BindSocket(addrInfo->ai_addr, addrInfo->ai_addrlen)))
+            if (Platform::IsSocketError(BindSocket(addrInfo->ai_addr, addrInfo->ai_addrlen)))
             {
-                int socketErr = GetSocketError();
+                int socketErr = Platform::GetSocketError();
                 (void)socketErr;
                 AZ_TracePrintf("GridMate", "SocketDriver::Initialize - bind failed with code %d at port %d\n", socketErr, port);
-                freeaddrinfo(addrInfo);
+                Platform::FreeAddressInfo(addrInfo);
                 closesocket(m_socket);
                 return EC_SOCKET_BIND;
             }
@@ -1265,13 +986,13 @@ namespace GridMate
                     }
                 }
 
-                AZ_Error("GridMate", m_port != 0, "Failed to implicitly assign port (getsockname faled with %d)!", GetSocketError());
+                AZ_Error("GridMate", m_port != 0, "Failed to implicitly assign port (getsockname faled with %d)!", Platform::GetSocketError());
                 if (m_port == 0)
                 {
-                    int socketErr = GetSocketError();
+                    int socketErr = Platform::GetSocketError();
                     (void)socketErr;
                     AZ_TracePrintf("GridMate", "SocketDriver::Initialize - getsockname failed with code %d at port %d\n", socketErr, port);
-                    freeaddrinfo(addrInfo);
+                    Platform::FreeAddressInfo(addrInfo);
                     closesocket(m_socket);
                     return EC_SOCKET_BIND;
                 }
@@ -1280,13 +1001,22 @@ namespace GridMate
         else
         {
             m_port = 0;
-            int socketErr = GetSocketError();
+            int socketErr = Platform::GetSocketError();
             (void)socketErr;
             AZ_TracePrintf("GridMate", "SocketDriver::Initialize - socket failed with code %d at port %d\n", socketErr, port);
-            freeaddrinfo(addrInfo);
+            Platform::FreeAddressInfo(addrInfo);
             return EC_SOCKET_CREATE;
         }
-        freeaddrinfo(addrInfo);
+
+        Platform::FreeAddressInfo(addrInfo);
+
+        const ResultCode res = m_platformDriver->Initialize(receiveBufferSize, sendBufferSize);
+        if (res != EC_OK)
+        {
+            closesocket(m_socket);
+            m_socket = Platform::GetInvalidSocket();
+            return res;
+        }
         return EC_OK;
     }
 
@@ -1307,49 +1037,36 @@ namespace GridMate
     Driver::ResultCode
     SocketDriverCommon::Send(const AZStd::intrusive_ptr<DriverAddress>& to, const char* data, unsigned int dataSize)
     {
-        AZ_Assert(to && data, "Invalid function input!");
-        AZ_Assert(dataSize <= SocketDriverCommon::GetMaxSendSize(), "Size is too big to send! Must be less than %d bytes", SocketDriverCommon::GetMaxSendSize());
+        ResultCode rc = EC_OK;
 
-        unsigned int addressSize;
-        const sockaddr* sockAddr = reinterpret_cast<const sockaddr*>(to->GetTargetAddress(addressSize));
-        //AZ_TracePrintf("GridMate","%p Sending %d bytes to %s\n",this,dataSize, to->ToString().c_str());
-        if (sockAddr == nullptr)
+        if (m_canSend)
         {
-    #ifdef AZ_LOG_UNBOUND_SEND_RECEIVE
-            AZ_TracePrintf("GridMate", "SocketDriver::Send - address %s is not bound. This is not an error if you support unbound connectins, but data was NOT send!\n", to->ToString().c_str());
-    #endif // AZ_LOG_UNBOUND_SEND_RECEIVE
-            return /*EC_SEND_ADDRESS_NOT_BOUND*/ EC_OK;
+            AZ_Assert(to && data, "Invalid function input!");
+            AZ_Assert(dataSize <= SocketDriverCommon::GetMaxSendSize(), "Size is too big to send! Must be less than %d bytes", SocketDriverCommon::GetMaxSendSize());
+
+            unsigned int addressSize;
+            const sockaddr* sockAddr = reinterpret_cast<const sockaddr*>(to->GetTargetAddress(addressSize));
+            if (sockAddr == nullptr)
+            {
+#ifdef AZ_LOG_UNBOUND_SEND_RECEIVE
+                AZ_TracePrintf("GridMate", "SocketDriver::Send - address %s is not bound. This is not an error if you support unbound connectins, but data was NOT send!\n", to->ToString().c_str());
+#endif // AZ_LOG_UNBOUND_SEND_RECEIVE
+                return /*EC_SEND_ADDRESS_NOT_BOUND*/ EC_OK;
+            }
+
+            rc = m_platformDriver->Send(sockAddr, addressSize, data, dataSize);
+        }
+        else
+        {
+            AZ_TracePrintf("GridMate", "SocketDriver::Send - Double Send for address %s\n", to->ToString().c_str());
+            rc = EC_PLATFORM + 1;   // double send error
         }
 
-        do
+        if(rc == EC_OK)
         {
-            if (IsSocketError(sendto(m_socket, data, dataSize, 0, sockAddr, static_cast<socklen_t>(addressSize))))
-            {
-                int errorCode = GetSocketError();
-                int wouldNotBlock = AZ_EWOULDBLOCK;
-                // if a non blocking socket (todo add a quick check)
-                if (errorCode != wouldNotBlock)   // it's ok if a non blocking socket can't get the command instantly
-                {
-                    AZ_Error("GridMate", false, "SocketDriver::Send - sendto failed with code %d at address %s!", errorCode, to->ToString().c_str());
-                }
-                else
-                {
-                    // If we run out of buffer just wait for some buffer to become available
-                    fd_set fdwrite;
-                    FD_ZERO(&fdwrite);
-                    FD_SET(m_socket, &fdwrite);
-                    select(FD_SETSIZE, 0, &fdwrite, 0, 0);
-                    continue;
-                }
-
-                return EC_SEND;
-            }
-            else
-            {
-                break;
-            }
-        } while (true);
-        return EC_OK;
+            EBUS_EVENT_ID(this, DriverEventBus, OnDatagramSent, dataSize, to);
+        }
+        return rc;
     }
 
     //=========================================================================
@@ -1369,40 +1086,8 @@ namespace GridMate
         sockaddr* sockAddr = reinterpret_cast<sockaddr*>(&sockAddrIn6);
         socklen_t sockAddrLen = sizeof(sockAddrIn6);
         from = NULL;
-        AZ::s64 recvd;
-        do
-        {
-            recvd = recvfrom(m_socket, data, maxDataSize, 0, sockAddr, &sockAddrLen);
-            if (IsSocketError(recvd))
-            {
-                int error = GetSocketError();
 
-                int wouldNotBlock = AZ_EWOULDBLOCK;
-
-                // if a non blocking socket (todo add a quick check)
-                if (error == wouldNotBlock)
-                {
-                    if (resultCode)
-                    {
-                        *resultCode = EC_OK;
-                    }
-                    return 0;  // this is normal for non blocking sockets
-                }
-
-                (void)error;
-                AZ_TracePrintf("GridMate", "SocketDriver::Receive - recvfrom failed with code %d, dataSize=%d\n", error, maxDataSize);
-                if (resultCode)
-                {
-                    *resultCode = EC_RECEIVE;
-                }
-                return 0;
-            }
-
-            if (recvd != sizeof(AZ_SOCKET_WAKEUP_MSG_TYPE) || *(AZ_SOCKET_WAKEUP_MSG_TYPE*)data != AZ_SOCKET_WAKEUP_MSG_VALUE)
-            {
-                break;  // internal wake up message
-            }
-        } while (true);
+        unsigned int recvd = m_platformDriver->Receive(data, maxDataSize, sockAddr, sockAddrLen, resultCode);
 
         if (recvd)
         {
@@ -1410,7 +1095,7 @@ namespace GridMate
             if (!from)  // if we did not assign an address, ignore the data.
             {
                 recvd = 0;
-    #ifdef AZ_LOG_UNBOUND_SEND_RECEIVE
+#ifdef AZ_LOG_UNBOUND_SEND_RECEIVE
                 char ip[64];
                 unsigned short port;
                 if (sockAddrLen == sizeof(sockAddrIn6))
@@ -1425,12 +1110,9 @@ namespace GridMate
                 }
                 (void)port;
                 AZ_TracePrintf("GridMate", "Data discarded from %s|%d\n", ip, port);
-    #endif // AZ_LOG_UNBOUND_SEND_RECEIVE
+#endif // AZ_LOG_UNBOUND_SEND_RECEIVE
             }
-            /*else
-            {
-            AZ_TracePrintf("GridMate","%p Received %d bytes from %s\n",this,recvd,from->ToString().c_str());
-            }*/
+            EBUS_EVENT_ID(this, DriverEventBus, OnDatagramReceived, recvd, from);
         }
 
         if (resultCode)
@@ -1448,34 +1130,7 @@ namespace GridMate
     bool
     SocketDriverCommon::WaitForData(AZStd::chrono::microseconds timeOut)
     {
-        // If we run out of buffer just wait for some buffer to become available
-        fd_set fdread;
-        FD_ZERO(&fdread);
-        FD_SET(m_socket, &fdread);
-        timeval t;
-    #if defined(AZ_PLATFORM_WINDOWS)
-        t.tv_sec = static_cast<long>(timeOut.count() / 1000000);
-        t.tv_usec = static_cast<long>(timeOut.count() % 1000000);
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION SOCKETDRIVER_CPP_SECTION_9
-#include AZ_RESTRICTED_FILE(SocketDriver_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-    #else
-        t.tv_sec = static_cast<time_t>(timeOut.count() / 1000000);
-        t.tv_usec = static_cast<suseconds_t>(timeOut.count() % 1000000);
-    #endif
-        int result = select(FD_SETSIZE, &fdread, 0, 0, &t);
-        if (result > 0)
-        {
-            m_isStoppedWaitForData = true;
-            return true;
-        }
-        AZ_Warning("GridMate", result >= 0, "Socket select error %d\n", GetSocketError());
-        m_isStoppedWaitForData = false;
-        return false;
+        return m_platformDriver->WaitForData(timeOut);
     }
 
     //=========================================================================
@@ -1485,28 +1140,7 @@ namespace GridMate
     void
     SocketDriverCommon::StopWaitForData()
     {
-        // This is a little tricky we just send one byte of data on a loopback
-        // so we unlock the select function. Data will be discarded.
-        if (IsValidSocket(m_socket))
-        {
-            const AZ_SOCKET_WAKEUP_MSG_TYPE data = AZ_SOCKET_WAKEUP_MSG_VALUE;
-            if (m_isIpv6)
-            {
-                sockaddr_in6 sockAddr;
-                sockAddr.sin6_family = AF_INET6;
-                sockAddr.sin6_addr = in6addr_loopback;
-                sockAddr.sin6_port = m_port;
-                sendto(m_socket, (const char*)&data, sizeof(data), 0, (const sockaddr*)&sockAddr, sizeof(sockAddr)); // if an error occurs we don't care as we will wake up anyway
-            }
-            else
-            {
-                sockaddr_in sockAddr;
-                sockAddr.sin_family = AF_INET;
-                sockAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-                sockAddr.sin_port = m_port;
-                sendto(m_socket, (const char*)&data, sizeof(data), 0, (const sockaddr*)&sockAddr, sizeof(sockAddr)); // if an error occurs we don't care as we will wake up anyway
-            }
-        }
+        m_platformDriver->StopWaitForData();
     }
 
     //=========================================================================
@@ -1623,7 +1257,7 @@ namespace GridMate
             hints.ai_family = (familyType == Driver::BSD_AF_INET6) ? AF_INET6 : AF_INET;
             hints.ai_flags = AI_CANONNAME;
 
-            int result = getaddrinfo(hostName, nullptr, &hints, &addrInfo);
+            int result = Platform::GetAddressInfo(hostName, nullptr, &hints, &addrInfo);
             if (result)
             {
                 return false;
@@ -1638,10 +1272,710 @@ namespace GridMate
                 ip = inet_ntop(hints.ai_family, &reinterpret_cast<sockaddr_in*>(addrInfo->ai_addr)->sin_addr, ipBuf, AZ_ARRAY_SIZE(ipBuf));
             }
 
-            freeaddrinfo(addrInfo);
+            Platform::FreeAddressInfo(addrInfo);
             return true;
         }
     } //namespace Utils
-} //namesapce GridMae
 
-#endif // #ifndef AZ_UNITY_BUILD
+    SocketDriverCommon::PlatformSocketDriver::PlatformSocketDriver(SocketDriverCommon &parent, SocketType &socket)
+    : m_parent(parent), m_socket(socket) {}
+
+    SocketDriverCommon::PlatformSocketDriver::~PlatformSocketDriver()
+    {
+        if (Platform::IsValidSocket(m_socket))
+        {
+            closesocket(m_socket);
+            m_socket = Platform::GetInvalidSocket();
+        }
+    }
+    Driver::ResultCode SocketDriverCommon::PlatformSocketDriver::Initialize(unsigned int /*receiveBufferSize*/, unsigned int /*sendBufferSize*/)
+    {
+        return EC_OK;
+    }
+
+    SocketDriverCommon::SocketType SocketDriverCommon::PlatformSocketDriver::CreateSocket(int af, int type, int protocol)
+    {
+        return socket(af, type, protocol);
+    }
+
+    Driver::ResultCode SocketDriverCommon::PlatformSocketDriver::Send(const sockaddr* sockAddr, unsigned int addressSize, const char* data, unsigned int dataSize)
+    {
+        do
+        {
+            if (Platform::IsSocketError(sendto(m_socket, data, dataSize, 0, sockAddr, static_cast<socklen_t>(addressSize))))
+            {
+                int errorCode = Platform::GetSocketError();
+                int wouldNotBlock = AZ_EWOULDBLOCK;
+                // if a non blocking socket (todo add a quick check)
+                if (errorCode != wouldNotBlock)   // it's ok if a non blocking socket can't get the command instantly
+                {
+                    AZ_Error("GridMate", false, "SocketDriver::Send - sendto failed with code %d!", errorCode);
+                }
+                else
+                {
+                    // If we run out of buffer just wait for some buffer to become available
+                    fd_set fdwrite;
+                    FD_ZERO(&fdwrite);
+                    FD_SET(m_socket, &fdwrite);
+                    select(FD_SETSIZE, 0, &fdwrite, 0, 0);
+                    continue;
+                }
+
+                return EC_SEND;
+            }
+            else
+            {
+                break;
+            }
+
+        } while (true);
+
+        return EC_OK;
+    }
+
+    unsigned int SocketDriverCommon::PlatformSocketDriver::Receive(char* data, unsigned maxDataSize, sockaddr* sockAddr, socklen_t sockAddrLen, ResultCode* resultCode)
+    {
+        AZ::s64 recvd;
+        do
+        {
+            recvd = recvfrom(m_socket, data, maxDataSize, 0, sockAddr, &sockAddrLen);
+            if (Platform::IsSocketError(recvd))
+            {
+                int error = Platform::GetSocketError();
+
+                int wouldNotBlock = AZ_EWOULDBLOCK;
+
+                // if a non blocking socket (todo add a quick check)
+                if (error == wouldNotBlock)
+                {
+                    if (resultCode)
+                    {
+                        *resultCode = EC_OK;
+                    }
+                    return 0;  // this is normal for non blocking sockets
+                }
+
+                (void)error;
+                AZ_TracePrintf("GridMate", "SocketDriver::Receive - recvfrom failed with code %d, dataSize=%d\n", error, maxDataSize);
+                if (resultCode)
+                {
+                    *resultCode = EC_RECEIVE;
+                }
+                return 0;
+            }
+            if (recvd != sizeof(AZ_SOCKET_WAKEUP_MSG_TYPE) || *(AZ_SOCKET_WAKEUP_MSG_TYPE*)data != AZ_SOCKET_WAKEUP_MSG_VALUE)
+            {
+                break;  // internal wake up message
+            }
+        } while (true);
+
+        return static_cast<unsigned int>(recvd);
+    }
+
+    bool SocketDriverCommon::PlatformSocketDriver::WaitForData(AZStd::chrono::microseconds timeOut)
+    {
+        // If we run out of buffer just wait for some buffer to become available
+        fd_set fdread;
+        FD_ZERO(&fdread);
+        FD_SET(m_socket, &fdread);
+        timeval t = Platform::GetTimeValue(timeOut);
+
+        int result = select(FD_SETSIZE, &fdread, 0, 0, &t);
+        if (result > 0)
+        {
+            m_parent.m_isStoppedWaitForData = true;
+            return true;
+        }
+        AZ_Warning("GridMate", result >= 0, "Socket select error %d\n", Platform::GetSocketError());
+        m_parent.m_isStoppedWaitForData = false;
+        return false;
+    }
+
+    void SocketDriverCommon::PlatformSocketDriver::StopWaitForData()
+    {
+        // This is a little tricky we just send one byte of data on a loopback
+        // so we unlock the select function. Data will be discarded.
+        if (Platform::IsValidSocket(m_socket))
+        {
+            const AZ_SOCKET_WAKEUP_MSG_TYPE data = AZ_SOCKET_WAKEUP_MSG_VALUE;
+            if (m_parent.m_isIpv6)
+            {
+                sockaddr_in6 sockAddr;
+                sockAddr.sin6_family = AF_INET6;
+                sockAddr.sin6_addr = in6addr_loopback;
+                sockAddr.sin6_port = m_parent.m_port;
+                sendto(m_socket, (const char*)&data, sizeof(data), 0, (const sockaddr*)&sockAddr, sizeof(sockAddr)); // if an error occurs we don't care as we will wake up anyway
+            }
+            else
+            {
+                sockaddr_in sockAddr;
+                sockAddr.sin_family = AF_INET;
+                sockAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                sockAddr.sin_port = m_parent.m_port;
+                sendto(m_socket, (const char*)&data, sizeof(data), 0, (const sockaddr*)&sockAddr, sizeof(sockAddr)); // if an error occurs we don't care as we will wake up anyway
+            }
+        }
+    }
+
+    bool SocketDriverCommon::PlatformSocketDriver::isSupported()
+    {
+        return true;    //Generic driver always supported
+    };
+
+#ifdef AZ_SOCKET_RIO_SUPPORT
+    SocketDriverCommon::RIOPlatformSocketDriver::RIOPlatformSocketDriver(SocketDriverCommon &parent, SocketType &socket)
+        : PlatformSocketDriver(parent, socket)
+        , m_workerBufferCount(0)
+    { }
+
+    SocketDriverCommon::RIOPlatformSocketDriver::~RIOPlatformSocketDriver()
+    {
+        const auto DeregisterAndFreeBuffer = [&](RIO_BUFFERID& id, char* rawBuffer)
+        {
+            m_RIO_FN_TABLE.RIODeregisterBuffer(id);
+            FreeRIOBuffer(rawBuffer);
+        };
+
+        if (m_isInitialized)
+        {
+            //Worker thread
+            m_workersQuit = true;
+            m_triggerWorkerSend.notify_all();
+            if (m_workerSendThread.joinable())
+            {
+                m_workerSendThread.join();
+            }
+
+            if (Platform::IsValidSocket(m_socket))
+            {
+                closesocket(m_socket);
+                m_socket = Platform::GetInvalidSocket();
+            }
+
+            //Completion Queues
+            m_RIO_FN_TABLE.RIOCloseCompletionQueue(m_RIORecvQueue);
+            m_RIO_FN_TABLE.RIOCloseCompletionQueue(m_RIOSendQueue);
+
+            //Events
+            for (auto& ev : m_events)
+            {
+                WSACloseEvent(ev);
+            }
+
+            //Buffers
+            //Note: each set of RIO buffers share the same buffer ID so only deregister the first
+            DeregisterAndFreeBuffer(m_RIORecvBuffer[0].BufferId, m_rawRecvBuffer);
+            DeregisterAndFreeBuffer(m_RIORecvAddressBuffer[0].BufferId, m_rawRecvAddressBuffer);
+            DeregisterAndFreeBuffer(m_RIOSendBuffer[0].BufferId, m_rawSendBuffer);
+            DeregisterAndFreeBuffer(m_RIOSendAddressBuffer[0].BufferId, m_rawSendAddressBuffer);
+        }
+    }
+
+    bool SocketDriverCommon::RIOPlatformSocketDriver::isSupported()
+    {
+        //Requires Windows 8 / Server 2012 or newer
+        if(!IsWindows8OrGreater())
+        {
+            const auto err = GetLastError();
+            if(err != ERROR_OLD_WIN_VERSION)
+            {
+                AZ_Error("GridMate", false, "Failed to Verify OS Version: %d", err);
+            }
+
+            AZ_TracePrintf("GridMate", "RIO not supported on this platform\n");
+            return false;
+        }
+        return true;
+    }
+
+    SocketDriverCommon::SocketType SocketDriverCommon::RIOPlatformSocketDriver::CreateSocket(int af, int type, int protocol)
+    {
+        SocketType s = ::WSASocketW(af, type, protocol, NULL, 0, WSA_FLAG_REGISTERED_IO);
+
+        AZ_Error("GridMate", s != INVALID_SOCKET, "Invalid create socket\n");
+
+        return s;
+    }
+
+    Driver::ResultCode SocketDriverCommon::RIOPlatformSocketDriver::Initialize(unsigned int receiveBufferSize, unsigned int sendBufferSize)
+    {
+        if(m_isInitialized)
+        {
+            AZ_Error("GridMate", !m_isInitialized, "PlatformSocketDriver double Initialize!\n");
+            return EC_SOCKET_CREATE;
+        }
+
+        AZ_TracePrintf("GridMate", "SocketDriver RIO (%p) starting up.\n", this);
+
+        //
+        // We have to make a system call here and we need to know our page size. Needs to happen
+        // before call to AllocRIOBuffer.
+        //
+
+        SYSTEM_INFO systemInfo;
+        ::GetSystemInfo(&systemInfo);
+        m_pageSize = systemInfo.dwPageSize;
+
+        GUID functionTableId = WSAID_MULTIPLE_RIO;
+        DWORD dwBytes = 0;
+        if (sendBufferSize)
+        {
+            m_RIOSendBufferCount = sendBufferSize / m_RIOBufferSize + ((sendBufferSize%m_RIOBufferSize) ? 1 : 0);
+        }
+        if (receiveBufferSize)
+        {
+            m_RIORecvBufferCount = receiveBufferSize / m_RIOBufferSize + ((receiveBufferSize%m_RIOBufferSize) ? 1 : 0);
+        }
+
+        //runtime check
+        if (0 != WSAIoctl( m_socket, SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER, &functionTableId,
+            sizeof(GUID), (void**)&m_RIO_FN_TABLE,  sizeof(m_RIO_FN_TABLE), &dwBytes, 0, 0))
+        {
+            AZ_Error("GridMate", false, "Could not initialize RIO: %u\n", ::WSAGetLastError());
+            return EC_SOCKET_CREATE;
+        }
+        else
+        {
+            //RIO
+            const ULONG maxOutstandingReceive = m_RIORecvBufferCount;
+            const ULONG maxReceiveDataBuffers = 1; //Must be 1.
+            const ULONG maxOutstandingSend = m_RIOSendBufferCount;
+            const ULONG maxSendDataBuffers = 1; //Must be 1.
+
+            void *pContext = 0;
+
+            if ((m_events[WakeupOnSend] = WSACreateEvent()) == WSA_INVALID_EVENT)
+            {
+                AZ_Error("GridMate", false, "Failed WSACreateEvent(): %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            if ((m_events[ReceiveEvent] = WSACreateEvent()) == WSA_INVALID_EVENT)
+            {
+                AZ_Error("GridMate", false, "Failed WSACreateEvent(): %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+            RIO_NOTIFICATION_COMPLETION typeRecv;
+            typeRecv.Type = RIO_EVENT_COMPLETION;
+            typeRecv.Event.EventHandle = m_events[ReceiveEvent];
+            typeRecv.Event.NotifyReset = TRUE; //causes the event to be automatically reset by the RIONotify function when the notification occurs
+            m_RIORecvQueue = m_RIO_FN_TABLE.RIOCreateCompletionQueue(maxOutstandingReceive, &typeRecv);
+            if (m_RIORecvQueue == RIO_INVALID_CQ)
+            {
+                AZ_Error("GridMate", false, "Could not RIOCreateCompletionQueue: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            if ((m_events[SendEvent] = WSACreateEvent()) == WSA_INVALID_EVENT)
+            {
+                AZ_Error("GridMate", false, "Failed WSACreateEvent(): %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+            RIO_NOTIFICATION_COMPLETION typeSend;
+            typeSend.Type = RIO_EVENT_COMPLETION;
+            typeSend.Event.EventHandle = m_events[SendEvent];
+            typeSend.Event.NotifyReset = TRUE; //causes the event to be automatically reset by the RIONotify function when the notification occurs
+            m_RIOSendQueue = m_RIO_FN_TABLE.RIOCreateCompletionQueue(maxOutstandingSend, &typeSend);
+            if (m_RIOSendQueue == RIO_INVALID_CQ)
+            {
+                AZ_Error("GridMate", false, "Could not RIOCreateCompletionQueue: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            m_requestQueue = m_RIO_FN_TABLE.RIOCreateRequestQueue( m_socket, maxOutstandingReceive,
+                maxReceiveDataBuffers, maxOutstandingSend, maxSendDataBuffers, m_RIORecvQueue,  m_RIOSendQueue, pContext);
+            if (m_requestQueue == RIO_INVALID_RQ)
+            {
+                AZ_Error("GridMate", m_requestQueue != NULL, "Could not RIOCreateRequestQueue: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            //Setup buffers
+            AZ::u64 recvAllocated = 0, recvAddrsAllocated = 0;
+            AZ::u64 sendAllocated = 0, sendAddrsAllocated = 0;
+            const DWORD bufferSize = m_RIOBufferSize;
+            RIO_BUFFERID recvBufferId, recvAddressBufferId;
+
+            //Setup Recv raw buffer and RIO record
+            if (nullptr == (m_rawRecvBuffer = AllocRIOBuffer(bufferSize, m_RIORecvBufferCount, &recvAllocated)))
+            {
+                AZ_Error("GridMate", false, "Could not allocate buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+            if (RIO_INVALID_BUFFERID == (recvBufferId = m_RIO_FN_TABLE.RIORegisterBuffer(m_rawRecvBuffer, bufferSize * m_RIORecvBufferCount)))
+            {
+                AZ_Error("GridMate", false, "Could not register buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            //Setup Recv address raw buffer and RIO record
+            if (nullptr == (m_rawRecvAddressBuffer = AllocRIOBuffer(sizeof(SOCKADDR_INET), m_RIORecvBufferCount, &recvAddrsAllocated)))
+            {
+                AZ_Error("GridMate", false, "Could not allocate buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+            if (RIO_INVALID_BUFFERID == (recvAddressBufferId = m_RIO_FN_TABLE.RIORegisterBuffer(m_rawRecvAddressBuffer, sizeof(SOCKADDR_INET) * m_RIORecvBufferCount)))
+            {
+                AZ_Error("GridMate", false, "Could not register buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            //Init RIO Recv buffers
+            m_RIORecvBuffer.reserve(m_RIORecvBufferCount);
+            m_RIORecvAddressBuffer.reserve(m_RIORecvBufferCount);
+            for (int i = 0; i < m_RIORecvBufferCount; ++i)
+            {
+                char *pBuffer = m_rawRecvAddressBuffer + i * bufferSize;
+                RIO_BUF buf;
+
+                buf.BufferId    = recvBufferId;
+                buf.Offset      = i * bufferSize;
+                buf.Length      = bufferSize;
+
+                m_RIORecvBuffer.push_back(buf);
+
+                buf.BufferId    = recvAddressBufferId;
+                buf.Offset      = i * sizeof(SOCKADDR_INET);
+                buf.Length      = sizeof(SOCKADDR_INET);
+
+                m_RIORecvAddressBuffer.push_back(buf);
+
+                //Start Receive Handler
+                if (false == m_RIO_FN_TABLE.RIOReceiveEx(m_requestQueue, &m_RIORecvBuffer[i], 1, NULL, &m_RIORecvAddressBuffer[i], NULL, NULL, 0, pBuffer))
+                {
+                    AZ_Error("GridMate", false, "Could not RIOReceive: %u\n", ::WSAGetLastError());
+                    return EC_SOCKET_CREATE;
+                }
+            }
+
+            RIO_BUFFERID sendBufferId, sendAddressBufferId;
+
+            //setup send raw buffer and RIO record
+            if (nullptr == (m_rawSendBuffer = AllocRIOBuffer(bufferSize, m_RIOSendBufferCount, &sendAllocated)))
+            {
+                AZ_Error("GridMate", false, "Could not allocate buffer: %u", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+            if (RIO_INVALID_BUFFERID == (sendBufferId = m_RIO_FN_TABLE.RIORegisterBuffer(m_rawSendBuffer, m_RIOSendBufferCount * bufferSize)))
+            {
+                AZ_Error("GridMate", false, "Could not register buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            //setup send address raw buffer and RIO record
+            if (nullptr == (m_rawSendAddressBuffer = AllocRIOBuffer(sizeof(SOCKADDR_INET), m_RIOSendBufferCount, &sendAddrsAllocated)))
+            {
+                AZ_Error("GridMate", false, "Could not allocate send address buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            if (RIO_INVALID_BUFFERID == (sendAddressBufferId = m_RIO_FN_TABLE.RIORegisterBuffer(m_rawSendAddressBuffer, m_RIOSendBufferCount * sizeof(SOCKADDR_INET))))
+            {
+                AZ_Error("GridMate", false, "Could not register buffer: %u\n", ::WSAGetLastError());
+                return EC_SOCKET_CREATE;
+            }
+
+            //Init RIO Send buffers
+            m_RIOSendBuffer.reserve(m_RIOSendBufferCount);
+            m_RIOSendAddressBuffer.reserve(m_RIOSendBufferCount);
+            for (int i = 0; i < m_RIOSendBufferCount; ++i)
+            {
+                RIO_BUF buf;
+                buf.BufferId    = sendBufferId;
+                buf.Offset      = i * bufferSize;
+                buf.Length      = bufferSize;
+
+                m_RIOSendBuffer.push_back(buf);
+
+                buf.BufferId    = sendAddressBufferId;
+                buf.Offset      = i * sizeof(SOCKADDR_INET);
+                buf.Length      = sizeof(SOCKADDR_INET);
+
+                m_RIOSendAddressBuffer.push_back(buf);
+            }
+        }
+
+        //worker packet send thread
+        AZStd::thread_desc workerSendThreadDesc;
+        workerSendThreadDesc.m_name = "GridMate-Carrier Packet Send Thread";
+        m_workerSendThread = AZStd::thread(AZStd::bind(&SocketDriverCommon::RIOPlatformSocketDriver::WorkerSendThread, this), &workerSendThreadDesc);
+        if (m_workerSendThread.get_id() == AZStd::native_thread_invalid_id)
+        {
+            AZ_Error("GridMate", false, "Could not create worker thread.");
+            return EC_SOCKET_CREATE;
+        }
+
+        AZ_TracePrintf("GridMate", "SocketDriver RIO (%p) startup successful.\n", this);
+        m_isInitialized = true;
+        return EC_OK;
+    }
+
+    void SocketDriverCommon::RIOPlatformSocketDriver::WorkerSendThread()
+    {
+        const auto workerHasDatagramsToSend = [&] { return m_workerBufferCount > 0 || m_workersQuit;  };
+        while(!m_workersQuit)
+        {
+            {
+                AZStd::unique_lock<AZStd::mutex> l(m_WorkerSendMutex);
+                m_triggerWorkerSend.wait(l, workerHasDatagramsToSend);
+                //m_workerBufferCount is the only shared atomic so release the lock
+            }
+
+            while (workerHasDatagramsToSend() && !m_workersQuit)
+            {
+                for (;;)
+                {
+                    static const int bufferCount = 1;
+                    if (!m_RIO_FN_TABLE.RIOSendEx(m_requestQueue, &m_RIOSendBuffer[m_workerNextSendBuffer],
+                        bufferCount, NULL, &m_RIOSendAddressBuffer[m_workerNextSendBuffer], NULL, NULL, 0, 0))
+                    {
+                        const DWORD lastError = ::WSAGetLastError();
+                        if (lastError == WSAENOBUFS)
+                        {
+                            continue;   //spin until free
+                        }
+                        else if (lastError == WSA_IO_PENDING)
+                        {
+                            break;
+                        }
+
+                        const RIO_BUF *rioBuf = &m_RIOSendBuffer[m_workerNextSendBuffer];
+                        const void *data = reinterpret_cast<const void*>(&m_rawSendBuffer[rioBuf->Offset]);
+                        (void)data;
+                        const SOCKADDR_INET *adrs = reinterpret_cast<const SOCKADDR_INET*>(&m_rawSendAddressBuffer[m_RIOSendAddressBuffer[m_workerNextSendBuffer].Offset]);
+                        (void)adrs;
+
+                        AZ_TracePrintf("SocketDriver-RIO",
+                            "RIOSendEX failed! Buffer/Length/Offset:%u/%u/%u WSAError=%u\n"
+                            "Adrs: %u.%u.%u.%u:%u\n"
+                            "%s\n",
+                            m_workerNextSendBuffer, rioBuf->Length, rioBuf->Offset, lastError,
+                            adrs->Ipv4.sin_addr.S_un.S_un_b.s_b1, adrs->Ipv4.sin_addr.S_un.S_un_b.s_b3, adrs->Ipv4.sin_addr.S_un.S_un_b.s_b3, adrs->Ipv4.sin_addr.S_un.S_un_b.s_b4, adrs->Ipv4.sin_port,
+                            AZStd::MemoryToASCII::ToString(data, rioBuf->Length, m_RIOBufferSize).c_str());
+                        break;
+                    }
+                    else
+                    {
+                        AZStd::lock_guard<AZStd::mutex> l(m_RIOSendQueueMutex);
+                        m_RIO_FN_TABLE.RIONotify(m_RIOSendQueue);
+                        break;
+                    }
+                }
+                --m_workerBufferCount;
+                if (++m_workerNextSendBuffer == m_RIOSendBufferCount)
+                {
+                    m_workerNextSendBuffer = 0;
+                }
+            }
+        }
+    }
+    Driver::ResultCode SocketDriverCommon::RIOPlatformSocketDriver::Send(const sockaddr* sockAddr, unsigned int /*addressSize*/, const char* data, unsigned int dataSize)
+    {
+        if( dataSize > m_RIOBufferSize)
+        {
+            AZ_TracePrintf("GridMateSecure", "Buffer too large to send! Size=%u\n", dataSize);
+            return EC_BUFFER_TOOLARGE;
+        }
+
+        memcpy(m_rawSendAddressBuffer + m_RIONextSendBuffer * sizeof(SOCKADDR_INET), reinterpret_cast<const char*>(sockAddr), /* addressSize */sizeof(SOCKADDR_INET));
+        memcpy(m_rawSendBuffer + m_RIONextSendBuffer * m_RIOBufferSize, data, dataSize);
+        m_RIOSendBuffer[m_RIONextSendBuffer].Length = dataSize;
+
+        ++m_workerBufferCount;      //update shared atomic
+        ++m_RIOSendBuffersInUse;
+        ++m_RIONextSendBuffer;
+        if (m_RIONextSendBuffer == m_RIOSendBufferCount)
+        {
+            m_RIONextSendBuffer = 0;
+        }
+
+        if (m_RIOSendBuffersInUse == m_RIOSendBufferCount)
+        {
+            m_parent.m_canSend = false;  //wait for completion
+        }
+
+        m_triggerWorkerSend.notify_one();   //signal worker thread
+
+        return EC_OK;
+    }
+    unsigned int SocketDriverCommon::RIOPlatformSocketDriver::Receive(char* data, unsigned maxDataSize, sockaddr* sockAddr, socklen_t sockAddrLen, ResultCode* resultCode)
+    {
+        AZ::s64 recvd = 0;
+        static const int bufferCount = 1;
+        do
+        {
+            (void)maxDataSize;
+            (void)sockAddrLen;
+            recvd = 0;
+
+            RIORESULT result;
+            const int resultsRequested = 1;
+            memset(reinterpret_cast<void*>(&result), 0, sizeof(result));
+            ULONG numResults = m_RIO_FN_TABLE.RIODequeueCompletion(m_RIORecvQueue, &result, resultsRequested);
+
+            AZ_Error("GridMate", RIO_CORRUPT_CQ != numResults, "RIO Queue corrupted during RIODequeueCompletion()");
+
+            if (numResults == 0)
+            {
+                if (resultCode)
+                {
+                    *resultCode = EC_OK;
+                }
+                m_RIO_FN_TABLE.RIONotify(m_RIORecvQueue);
+
+                return 0;
+            }
+            if (numResults != resultsRequested)
+            {
+                AZ_Error("GridMate", resultsRequested == numResults, "Too many results returned: %d/%d", numResults, resultsRequested);
+            }
+            recvd = result.BytesTransferred;
+            AZ_Error("GridMate", recvd <= maxDataSize, "Recvd too many bytes %d > %d\n", recvd, maxDataSize);
+
+            memcpy(data, m_rawRecvBuffer + m_RIONextRecvBuffer * m_RIOBufferSize, recvd);
+            memcpy(sockAddr, m_rawRecvAddressBuffer + m_RIONextRecvBuffer * sizeof(SOCKADDR_INET), m_RIORecvAddressBuffer[m_RIONextRecvBuffer].Length); //TODO length check?
+
+            //Resetup to handle a receive event
+            if (false == m_RIO_FN_TABLE.RIOReceiveEx(m_requestQueue, &m_RIORecvBuffer[m_RIONextRecvBuffer],
+                bufferCount, NULL, &m_RIORecvAddressBuffer[m_RIONextRecvBuffer], NULL, NULL, 0, 0))
+            {
+                AZ_Error("GridMate", false, "Could not RIOReceive: %u\n", ::WSAGetLastError());
+            }
+
+            if (recvd)
+            {
+                m_RIONextRecvBuffer++;  //move to the next buffer
+                if (m_RIONextRecvBuffer == m_RIORecvBufferCount)
+                {
+                    m_RIONextRecvBuffer = 0;
+                }
+                break;
+            }
+        } while (true);
+
+        return static_cast<unsigned int>(recvd);
+    }
+    bool SocketDriverCommon::RIOPlatformSocketDriver::WaitForData(AZStd::chrono::microseconds timeOut)
+    {
+        DWORD Index = 0;
+        const auto start = AZStd::chrono::system_clock::now();
+        auto remainingWaitTime = timeOut.count() / 1000;
+
+        const auto isWakeOnSend = [](DWORD Index) { return WakeupOnSend == Index - WSA_WAIT_EVENT_0; };
+        const auto isSend = [](DWORD Index) { return SendEvent == Index - WSA_WAIT_EVENT_0; };
+        const auto isReceive = [](DWORD Index) { return ReceiveEvent == Index - WSA_WAIT_EVENT_0; };
+        const auto isTimeout = [](DWORD Index) { return WSA_WAIT_TIMEOUT == Index; };
+        const auto isFailed = [](DWORD Index) { return WSA_WAIT_FAILED == Index; };
+        const auto resetSignalEvent = [&](DWORD Index)
+        {
+            if (!WSAResetEvent(m_events[Index - WSA_WAIT_EVENT_0]))
+            {
+                AZ_Assert(false, "WSAResetEvent failed with error = %d\n", ::WSAGetLastError());
+            }
+        };
+
+        bool loop = true;
+        do
+        {
+            Index = WSAWaitForMultipleEvents(NumberOfEvents, m_events, FALSE, static_cast<DWORD>(remainingWaitTime), FALSE);
+            loop = isWakeOnSend(Index) && !m_parent.m_canSend;
+            if (loop)
+            {
+                resetSignalEvent(Index);
+                const auto duration = AZStd::chrono::milliseconds(AZStd::chrono::system_clock::now() - start).count();
+                if (duration < remainingWaitTime)
+                {
+                    remainingWaitTime -= duration;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        } while (loop);
+
+        bool rtrn = false;
+
+        if (isWakeOnSend(Index))
+        {
+            rtrn = m_parent.m_canSend;   //Send if we can otherwise perform a receive loop
+        }
+        else if (isSend(Index))
+        {
+            RIORESULT* result = new RIORESULT[m_RIOSendBufferCount];
+            //memset(reinterpret_cast<void*>(&result), 0, sizeof(result));
+            ULONG numResults;
+            {
+                AZStd::lock_guard<AZStd::mutex> l(m_RIOSendQueueMutex);
+                numResults = m_RIO_FN_TABLE.RIODequeueCompletion(m_RIOSendQueue, result, m_RIOSendBufferCount);
+            }
+            if (1 > numResults)    //cleanup completion queue
+            {
+                AZ_Assert(false, "dequeue failed");
+            }
+            m_RIOSendBuffersInUse -= numResults;
+            m_parent.m_canSend = true;
+            rtrn = true;
+            delete [] result;
+        }
+        else if (isReceive(Index))
+        {
+            rtrn = false;
+        }
+        else if (isTimeout(Index))
+        {
+            m_parent.m_isStoppedWaitForData = false;
+            return false;
+        }
+        else if (isFailed(Index))
+        {
+            AZ_Assert(false, "WSAWaitForMultipleEvents failed with error = %d\n", ::WSAGetLastError());
+            return false;
+        }
+        else
+        {
+            AZ_Assert(false, "Unsupported WSAWaitForMultipleEvents() return %d", Index);
+        }
+
+        m_parent.m_isStoppedWaitForData = true; //Did not timeout
+
+        resetSignalEvent(Index);
+
+        return rtrn;
+    }
+
+    void SocketDriverCommon::RIOPlatformSocketDriver::StopWaitForData()
+    {
+        if (!SetEvent(m_events[WakeupOnSend])) //Wake thread
+        {
+            AZ_Assert(false, "SetEvent failed with error = %d\n", ::WSAGetLastError());
+        }
+    }
+
+    char *SocketDriverCommon::RIOPlatformSocketDriver::AllocRIOBuffer(AZ::u64 bufferSize, AZ::u64 numBuffers, AZ::u64* amountAllocated /*=nullptr*/)
+    {
+        // calculate how much memory we are really asking for, and this must be page aligned.
+        AZ::u64 totalBufferSize = RoundUp(bufferSize * numBuffers, m_pageSize);
+
+        if (amountAllocated != nullptr)
+        {
+            *amountAllocated = totalBufferSize;
+        }
+
+        // By using VirtualAlloc, we guarantee that our memory will be paged aligned.
+        return reinterpret_cast<char *>(::VirtualAlloc(nullptr, totalBufferSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    }
+
+    bool SocketDriverCommon::RIOPlatformSocketDriver::FreeRIOBuffer(char *buffer)
+    {
+        bool success = false;
+
+        if (buffer != nullptr)
+        {
+            success = (::VirtualFree(buffer, 0, MEM_RELEASE) == TRUE);
+        }
+
+        return success;
+    }
+#endif
+}

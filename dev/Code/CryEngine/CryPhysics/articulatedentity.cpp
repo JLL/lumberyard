@@ -118,7 +118,7 @@ int CArticulatedEntity::AddGeometry(phys_geometry* pgeom, pe_geomparams* _params
     if (pgeom && fabs_tpl(_params->mass) + fabs_tpl(_params->density) != 0 && (pgeom->V <= 0 || pgeom->Ibody.x < 0 || pgeom->Ibody.y < 0 || pgeom->Ibody.z < 0))
     {
         char errmsg[256];
-        _snprintf(errmsg, 256, "CArticulatedEntity::AddGeometry: (%s at %.1f,%.1f,%.1f) Trying to add bad geometry",
+        azsnprintf(errmsg, 256, "CArticulatedEntity::AddGeometry: (%s at %.1f,%.1f,%.1f) Trying to add bad geometry",
             m_pWorld->m_pRenderer ? m_pWorld->m_pRenderer->GetForeignName(m_pForeignData, m_iForeignData, m_iForeignFlags) : "", m_pos.x, m_pos.y, m_pos.z);
         VALIDATOR_LOG(m_pWorld->m_pLog, errmsg);
         return -1;
@@ -186,8 +186,7 @@ int CArticulatedEntity::AddGeometry(phys_geometry* pgeom, pe_geomparams* _params
             delete[] pInfos;
         }
     }
-    MEMSTAT_USAGE(m_infos, sizeof(ae_part_info) * m_nParts);
-
+    
     for (i = 0; i < m_nJoints && m_joints[i].idbody != params->idbody; i++)
     {
         ;
@@ -1113,10 +1112,7 @@ int CArticulatedEntity::SetParams(const pe_params* _params, int bThreadSafe)
                 }
                 m_nPartsAlloc = params->nJointsAlloc;
                 m_parts = pNewParts;
-                if (m_nPartsAlloc != 1)
-                {
-                    MEMSTAT_USAGE(m_parts, sizeof(geom) * m_nParts);
-                }
+                
                 // Reallocate infos
                 ReallocateList(m_infos, m_nParts, m_nPartsAlloc, true);
                 for (int i = m_nParts; i < m_nPartsAlloc; i++)

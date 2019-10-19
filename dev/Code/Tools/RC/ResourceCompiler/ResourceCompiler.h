@@ -26,9 +26,11 @@
 #include "CryVersion.h"
 #include "IProgress.h"
 #include <ISystem.h>
+#include "Codec.h"
 
 #include <map>                 // stl multimap<>
 #include <AzCore/std/parallel/mutex.h>
+#include <AzCore/std/smart_ptr/unique_ptr.h>
 
 class CPropertyVars;
 class XmlNodeRef;
@@ -42,6 +44,28 @@ class ResourceCompiler
     , public IConfigKeyRegistry
 {
 public:
+    struct FilesToConvert
+    {
+        std::vector<RcFile> m_allFiles;
+        std::vector<RcFile> m_inputFiles;
+        std::vector<RcFile> m_outOfMemoryFiles;
+        std::vector<RcFile> m_failedFiles;
+        std::vector<RcFile> m_convertedFiles;
+    };
+
+    struct RcCompileFileInfo
+    {
+        ResourceCompiler* rc;
+        FilesToConvert* pFilesToConvert;
+        IConvertor* convertor;
+        ICompiler* compiler;
+
+        bool bLogMemory;
+        bool bWarningHeaderLine;
+        bool bErrorHeaderLine;
+        string logHeaderLine;
+    };
+
     ResourceCompiler();
     virtual ~ResourceCompiler();
 
@@ -107,6 +131,11 @@ public:
         return m_verbosityLevel;
     }
 
+    virtual bool UseFastestDecompressionCodec() const
+    {
+        return m_bUseFastestDecompressionCodec;
+    }
+
     virtual const SFileVersion& GetFileVersion() const
     {
         return m_fileVersion;
@@ -145,8 +174,7 @@ public:
 
     MultiplatformConfig& GetMultiplatformConfig();
 
-    void SetupMaxThreads();
-    int  GetMaxThreads() const;
+    void SetComplilingFileInfo(RcCompileFileInfo* compileFileInfo);
 
     bool CollectFilesToCompile(const string& filespec, std::vector<RcFile>& files);
     bool CompileFilesBySingleProcess(const std::vector<RcFile>& files);
@@ -154,7 +182,7 @@ public:
     void RemoveOutputFiles();     // to remove old files for less confusion
     void CleanTargetFolder(bool bUseOnlyInputFiles);
 
-    bool CompileFile(const char* sourceFullFileName, const char* targetLeftPath, const char* sourceInnerPath, ICompiler* compiler);
+    bool CompileFile();
 
     const char* GetLogPrefix() const;
 
@@ -195,7 +223,21 @@ public:
 private:
     void FilterExcludedFiles(std::vector<RcFile>& files);
 
-    void CopyFiles(const std::vector<RcFile>& files, bool bNoOverwrite = false);
+    void CopyFiles(const std::vector<RcFile>& files, bool bNoOverwrite = false, bool recompress = false);
+    /*!
+      Files discovered at the \p directory node will be added to \p filenames with full path, if other
+      directories are found inside \p directory then more files will be added recursively.
+      \param directory The input directory node
+      \param directoryName Full directory name of \p directory starting from the root directory.
+                           It is expected that only for the root directory this string is "".
+                           This function assumes that if this string is NOT empty, it includes the trailing "\\".
+      \param filenames Output vector where filepaths will be added as files are recursively discovered.
+      \returns void
+    */
+    void GetFileListRecursively(const ZipDir::FileEntryTree* directory, const AZStd::string& directoryName, AZStd::vector<AZStd::string>& filenames) const;
+    bool RecompressFiles(const string& sourceFileName, const string& destinationFileName);
+
+    bool    m_bUseFastestDecompressionCodec;
 
     void ExtractJobDefaultProperties(std::vector<string>& properties, const XmlNodeRef& jobNode);
     int  EvaluateJobXmlNode(CPropertyVars& properties, XmlNodeRef& jobNode, bool runJobs);
@@ -204,14 +246,10 @@ private:
     void ScanForAssetReferences(std::vector<string>& outReferences, const string& refsRoot);
     void SaveAssetReferences(const std::vector<string>& references, const string& filename, const string& includeMasks, const string& excludeMasks);
 
-    void InitializeThreadIds();
-
     void LogLine(const IRCLog::EType eType, const char* szText);
 
     // to log multiple lines (\n separated) with padding before
     void LogMultiLine(const char* szText);
-
-    virtual SSystemGlobalEnvironment* GetSystemEnvironment() override;
 
     // -----------------------------------------------------------------------
 public:
@@ -273,11 +311,7 @@ private:
     bool                    m_bErrorHeaderLine;     //!< true= header was already printed, false= header needs to be printed
     bool                    m_bWarningsAsErrors;    //!< true= treat any warning as error.
 
-    int                     m_systemCpuCoreCount;
-    int                     m_processCpuCoreCount;
-    int                     m_systemLogicalProcessorCount;
-    int                     m_processLogicalProcessorCount;
-    int                     m_maxThreads;           //!< max number of threads (set by /threads command-line option)
+    RcCompileFileInfo*      m_currentRcCompileFileInfo;
 
     SFileVersion            m_fileVersion;
     string                  m_exePath;
@@ -295,11 +329,7 @@ private:
     int                     m_numWarnings;
     int                     m_numErrors;
 
-    unsigned long           m_tlsIndex_pThreadData;
-
     std::vector<FnRunUnitTests> m_unitTestFunctions;
-    std::unique_ptr<ISystem> m_pSystem;
-    void* m_systemDll;
 
     std::vector<HMODULE> m_loadedPlugins;
 };

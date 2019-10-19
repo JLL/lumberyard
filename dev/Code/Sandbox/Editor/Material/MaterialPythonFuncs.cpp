@@ -988,6 +988,8 @@ namespace
                 propertyName == "No Shadow" ||
                 propertyName == "Use Scattering" ||
                 propertyName == "Hide After Breaking" ||
+                propertyName == "Fog Volume Shading Quality High" ||
+                propertyName == "Blend Terrain Color" ||
                 propertyName == "Propagate Material Settings" ||
                 propertyName == "Propagate Opacity Settings" ||
                 propertyName == "Propagate Lighting Settings" ||
@@ -1046,7 +1048,7 @@ namespace
             DynArray<SShaderParam>& shaderParams = pMaterial->GetShaderResources().m_ShaderParams;
             for (int i = 0; i < shaderParams.size(); i++)
             {
-                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script))
+                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script.c_str()))
                 {
                     if (shaderParams[i].m_Type == eType_FLOAT)
                     {
@@ -1055,7 +1057,7 @@ namespace
                         {
                             throw std::runtime_error(errorMsgInvalidDataType.toUtf8().data());
                         }
-                        std::map<QString, float> range = ParseValidRangeFromPublicParamsScript(shaderParams[i].m_Script);
+                        std::map<QString, float> range = ParseValidRangeFromPublicParamsScript(shaderParams[i].m_Script.c_str());
                         if (value.property.floatValue < range["UIMin"] ||  value.property.floatValue > range["UIMax"])
                         {
                             QString errorMsg;
@@ -1268,6 +1270,16 @@ namespace
             {
                 value.type = SPyWrappedProperty::eType_Bool;
                 value.property.boolValue = pMaterial->GetFlags() & MTL_FLAG_HIDEONBREAK;
+            }
+            else if (propertyName == "Fog Volume Shading Quality High")
+            {
+                value.type = SPyWrappedProperty::eType_Bool;
+                value.property.boolValue = pMaterial->GetFlags() & MTL_FLAG_FOG_VOLUME_SHADING_QUALITY_HIGH;
+            }
+            else if (propertyName == "Blend Terrain Color")
+            {
+                value.type = SPyWrappedProperty::eType_Bool;
+                value.property.boolValue = pMaterial->GetFlags() & MTL_FLAG_BLEND_TERRAIN;
             }
             else if (propertyName == "Voxel Coverage")
             {
@@ -1556,7 +1568,7 @@ namespace
 
             for (int i = 0; i < shaderParams.size(); i++)
             {
-                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script))
+                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script.c_str()))
                 {
                     if (shaderParams[i].m_Type == eType_FLOAT)
                     {
@@ -1622,21 +1634,6 @@ namespace
                     value.type = SPyWrappedProperty::eType_Float;
                     value.property.floatValue = pMaterial->GetShaderResources().m_DeformInfo.m_fDividerX;
                 }
-                else if (propertyName == "Wave Length Y")
-                {
-                    value.type = SPyWrappedProperty::eType_Float;
-                    value.property.floatValue = pMaterial->GetShaderResources().m_DeformInfo.m_fDividerY;
-                }
-                else if (propertyName == "Wave Length Z")
-                {
-                    value.type = SPyWrappedProperty::eType_Float;
-                    value.property.floatValue = pMaterial->GetShaderResources().m_DeformInfo.m_fDividerZ;
-                }
-                else if (propertyName == "Wave Length W")
-                {
-                    value.type = SPyWrappedProperty::eType_Float;
-                    value.property.floatValue = pMaterial->GetShaderResources().m_DeformInfo.m_fDividerW;
-                }
                 else if (propertyName == "Noise Scale")
                 {
                     value.type = SPyWrappedProperty::eType_Vec3;
@@ -1649,27 +1646,15 @@ namespace
                     throw std::runtime_error((QString("\"") + propertyName + "\" is an invalid property.").toUtf8().data());
                 }
             }
-            // ########## Vertex Deformation / [ Wave X | Wave Y | Wave Z | Wave W ] ##########
+            // ########## Vertex Deformation / [ Wave X ] ##########
             else if (splittedPropertyPath.size() == 3)
             {
-                if (subCategoryName == "Wave X" || subCategoryName == "Wave Y" || subCategoryName == "Wave Z" || subCategoryName == "Wave W")
+                if (subCategoryName == "Wave X")
                 {
                     SWaveForm2 currentWaveForm;
                     if (subCategoryName == "Wave X")
                     {
                         currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveX;
-                    }
-                    else if (subCategoryName == "Wave Y")
-                    {
-                        currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveY;
-                    }
-                    else if (subCategoryName == "Wave Z")
-                    {
-                        currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveZ;
-                    }
-                    else if (subCategoryName == "Wave W")
-                    {
-                        currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveW;
                     }
 
                     if (propertyName == "Type")
@@ -1939,9 +1924,13 @@ namespace
             {
                 SetMaterialFlag(pMaterial, MTL_FLAG_HIDEONBREAK, value.property.boolValue);
             }
-            else if (propertyName == "Hide After Breaking")
+            else if (propertyName == "Fog Volume Shading Quality High")
             {
-                SetMaterialFlag(pMaterial, MTL_FLAG_HIDEONBREAK, value.property.boolValue);
+                SetMaterialFlag(pMaterial, MTL_FLAG_FOG_VOLUME_SHADING_QUALITY_HIGH, value.property.boolValue);
+            }
+            else if (propertyName == "Blend Terrain Color")
+            {
+                SetMaterialFlag(pMaterial, MTL_FLAG_BLEND_TERRAIN, value.property.boolValue);
             }
             else if (propertyName == "Voxel Coverage")
             {
@@ -2148,7 +2137,7 @@ namespace
 
             for (int i = 0; i < shaderParams.size(); i++)
             {
-                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script))
+                if (propertyName == ParseUINameFromPublicParamsScript(shaderParams[i].m_Script.c_str()))
                 {
                     if (shaderParams[i].m_Type == eType_FLOAT)
                     {
@@ -2204,18 +2193,6 @@ namespace
                 {
                     pMaterial->GetShaderResources().m_DeformInfo.m_fDividerX = value.property.floatValue;
                 }
-                else if (propertyName == "Wave Length Y")
-                {
-                    pMaterial->GetShaderResources().m_DeformInfo.m_fDividerY = value.property.floatValue;
-                }
-                else if (propertyName == "Wave Length Z")
-                {
-                    pMaterial->GetShaderResources().m_DeformInfo.m_fDividerZ = value.property.floatValue;
-                }
-                else if (propertyName == "Wave Length W")
-                {
-                    pMaterial->GetShaderResources().m_DeformInfo.m_fDividerW = value.property.floatValue;
-                }
                 else if (propertyName == "Noise Scale")
                 {
                     pMaterial->GetShaderResources().m_DeformInfo.m_vNoiseScale[0] = value.property.vecValue.x;
@@ -2223,87 +2200,12 @@ namespace
                     pMaterial->GetShaderResources().m_DeformInfo.m_vNoiseScale[2] = value.property.vecValue.z;
                 }
             }
-            // ########## Vertex Deformation / [ Wave X | Wave Y | Wave Z | Wave W ] ##########
+            // ########## Vertex Deformation / [ Wave X ] ##########
             else if (splittedPropertyPath.size() == 3)
             {
                 if (subCategoryName == "Wave X")
                 {
                     SWaveForm2& currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveX;
-
-                    if (propertyName == "Type")
-                    {
-                        currentWaveForm.m_eWFType = TryConvertingCStringToEWaveForm(value.stringValue);
-                    }
-                    else if (propertyName == "Level")
-                    {
-                        currentWaveForm.m_Level = value.property.floatValue;
-                    }
-                    else if (propertyName == "Amplitude")
-                    {
-                        currentWaveForm.m_Amp = value.property.floatValue;
-                    }
-                    else if (propertyName == "Phase")
-                    {
-                        currentWaveForm.m_Phase = value.property.floatValue;
-                    }
-                    else if (propertyName == "Frequency")
-                    {
-                        currentWaveForm.m_Freq = value.property.floatValue;
-                    }
-                }
-                else if (subCategoryName == "Wave Y")
-                {
-                    SWaveForm2& currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveY;
-
-                    if (propertyName == "Type")
-                    {
-                        currentWaveForm.m_eWFType = TryConvertingCStringToEWaveForm(value.stringValue);
-                    }
-                    else if (propertyName == "Level")
-                    {
-                        currentWaveForm.m_Level = value.property.floatValue;
-                    }
-                    else if (propertyName == "Amplitude")
-                    {
-                        currentWaveForm.m_Amp = value.property.floatValue;
-                    }
-                    else if (propertyName == "Phase")
-                    {
-                        currentWaveForm.m_Phase = value.property.floatValue;
-                    }
-                    else if (propertyName == "Frequency")
-                    {
-                        currentWaveForm.m_Freq = value.property.floatValue;
-                    }
-                }
-                else if (subCategoryName == "Wave Z")
-                {
-                    SWaveForm2& currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveZ;
-
-                    if (propertyName == "Type")
-                    {
-                        currentWaveForm.m_eWFType = TryConvertingCStringToEWaveForm(value.stringValue);
-                    }
-                    else if (propertyName == "Level")
-                    {
-                        currentWaveForm.m_Level = value.property.floatValue;
-                    }
-                    else if (propertyName == "Amplitude")
-                    {
-                        currentWaveForm.m_Amp = value.property.floatValue;
-                    }
-                    else if (propertyName == "Phase")
-                    {
-                        currentWaveForm.m_Phase = value.property.floatValue;
-                    }
-                    else if (propertyName == "Frequency")
-                    {
-                        currentWaveForm.m_Freq = value.property.floatValue;
-                    }
-                }
-                else if (subCategoryName == "Wave W")
-                {
-                    SWaveForm2& currentWaveForm = pMaterial->GetShaderResources().m_DeformInfo.m_WaveW;
 
                     if (propertyName == "Type")
                     {
@@ -2416,7 +2318,7 @@ REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyMaterialSelectObjectsWithCurrent, materia
 REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyMaterialSetCurrentFromObject, material, set_current_from_object,
     "Sets the current material to the material of a selected object.",
     "material.set_current_from_object()");
-REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyGetSubMaterial, material, get_submaterial,
+REGISTER_ONLY_PYTHON_COMMAND_WITH_EXAMPLE(PyGetSubMaterial, material, get_submaterial,
     "Gets sub materials of an material.",
     "material.get_submaterial()");
 REGISTER_ONLY_PYTHON_COMMAND_WITH_EXAMPLE(PyGetProperty, material, get_property,

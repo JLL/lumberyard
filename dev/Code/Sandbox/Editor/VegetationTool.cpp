@@ -27,7 +27,7 @@
 #include "Material/Material.h"
 #include "Include/ITransformManipulator.h"
 #include "QtUI/WaitCursor.h"
-#include "I3dEngine.h"
+#include "I3DEngine.h"
 #include "IPhysics.h"
 #include "MainWindow.h"
 
@@ -400,7 +400,11 @@ bool CVegetationTool::MouseCallback(CViewport* view, EMouseEvent event, QPoint& 
     }
     else
     {
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+        GetIEditor()->SetStatusText("Shift: Place New  ⌘: Add To Selection  ⌥: Scale Selected  ⌥⌘: Rotate Selected DEL: Delete Selected");
+#else
         GetIEditor()->SetStatusText("Shift: Place New  Ctrl: Add To Selection  Alt: Scale Selected  Alt+Ctrl: Rotate Selected DEL: Delete Selected");
+#endif
     }
 
     m_prevMousePos = point;
@@ -818,7 +822,8 @@ void CVegetationTool::Clear()
     {
         int numInstances = m_selectedObjects[i]->GetNumInstances();
 
-        QRect rc(0, 0, m_vegetationMap->GetSize(), m_vegetationMap->GetSize());
+        // use size + 1 to make sure we cover the edges properly
+        QRect rc(0, 0, m_vegetationMap->GetSize() + 1, m_vegetationMap->GetSize() + 1);
         m_vegetationMap->ClearBrush(rc, false, m_selectedObjects[i]);
 
         if (numInstances != m_selectedObjects[i]->GetNumInstances() && m_panel)

@@ -20,32 +20,35 @@
 namespace ScriptCanvasEditor
 {
     class EBusHandlerEventNodeDescriptorComponent
-        : public NodeDescriptorComponent
-        , protected GraphCanvas::NodeNotificationBus::Handler
+        : public NodeDescriptorComponent        
         , public EBusHandlerEventNodeDescriptorRequestBus::Handler
         , public GraphCanvas::ForcedWrappedNodeRequestBus::Handler
+        , public GraphCanvas::SceneMemberNotificationBus::Handler
     {
     public:
         AZ_COMPONENT(EBusHandlerEventNodeDescriptorComponent, "{F08F673C-0815-4CCA-AB9D-21965E9A14F2}", NodeDescriptorComponent);
         static void Reflect(AZ::ReflectContext* reflectContext);
         
         EBusHandlerEventNodeDescriptorComponent();
-        EBusHandlerEventNodeDescriptorComponent(const AZStd::string& busName, const AZStd::string& methodName);
+        EBusHandlerEventNodeDescriptorComponent(const AZStd::string& busName, const AZStd::string& methodName, ScriptCanvas::EBusEventId eventId);
         ~EBusHandlerEventNodeDescriptorComponent() = default;
 
         void Activate() override;
         void Deactivate() override;
 
         // EBusHandlerEventNodeDescriptorRequestBus
-        AZStd::string GetBusName() const override;
-        AZStd::string GetEventName() const override;
+        AZStd::string_view GetBusName() const override;
+        AZStd::string_view GetEventName() const override;
+
+        ScriptCanvas::EBusEventId GetEventId() const override;
         ////
 
-        // NodeNotificationBus::Handler
-        void OnAddedToScene(const AZ::EntityId& sceneId) override;
-
-        void OnNodeAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization) override;
+        // NodeNotificationBus::Handler          
         void OnNodeWrapped(const AZ::EntityId& wrappingNode) override;
+        ////
+
+        // SceneMemberNotifications
+        void OnSceneMemberAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization) override;
         ////
 
         // ForcedWrappedNodeRequestBus
@@ -55,11 +58,16 @@ namespace ScriptCanvasEditor
         AZ::EntityId CreateWrapperNode(const AZ::EntityId& sceneId, const AZ::Vector2& nodePosition) override;
         ////
 
-    private:
+    protected:
+
+        void OnAddedToGraphCanvasGraph(const GraphCanvas::GraphId& sceneId, const AZ::EntityId& scriptCanvasNodeId) override;
+
+    private:        
 
         NodeIdPair    m_ebusWrapper;
     
         AZStd::string m_busName;
         AZStd::string m_eventName;
+        ScriptCanvas::EBusEventId m_eventId;
     };
 }

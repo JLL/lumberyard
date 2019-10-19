@@ -41,6 +41,8 @@
 
 #include <QMessageBox>
 
+#include <CryCommon/HeightmapUpdateNotificationBus.h>
+
 #ifndef VERIFY
 #define VERIFY(EXPRESSION) { auto e = EXPRESSION; assert(e); }
 #endif
@@ -459,15 +461,59 @@ void CHeightmap::Resize(int iWidth, int iHeight, int unitSize, bool bCleanOld, b
             if (!bNoReentrant)
             {
                 bNoReentrant = true;
-                // This will reload the level with the new terrain size.
-                GetIEditor()->GetDocument()->Hold("_tmpResize");
-                GetIEditor()->GetDocument()->Fetch("_tmpResize", false, true);
+
+                /*
+                    Note: Don't create and lo temporary directory, and load that level.
+                    Instead, reload the existing level to apply chagnes.
+                */
+                constexpr bool showMessages = false;
+                constexpr bool deleteHoldFolder = false;
+                GetIEditor()->GetDocument()->Hold(".");
+                GetIEditor()->GetDocument()->Fetch(".", showMessages, deleteHoldFolder);
+
                 bNoReentrant = false;
             }
         }
     }
 
     NotifyModified();
+}
+
+void CHeightmap::RefreshTerrain()
+{
+    GetIEditor()->SetModifiedFlag();
+    GetIEditor()->SetModifiedModule(eModifiedTerrain);
+    UpdateEngineTerrain(true);
+    GetIEditor()->Notify(eNotify_OnTerrainRebuild);
+}
+
+// Note that the RGB layer is stored with a 90 degree rotation, so the X texture tile index actually
+// maps to the Y world axis, and the Y texture tile index maps to the X world axis.
+void CHeightmap::RefreshTextureTile(uint32 xIndex, uint32 yIndex)
+{
+    int terrainSize = GetIEditor()->Get3DEngine()->GetTerrainSize();
+    int texSectorSize = GetIEditor()->Get3DEngine()->GetTerrainTextureNodeSizeMeters();
+    uint32 tileCountX = GetRGBLayer()->GetTileCountX();
+    uint32 tileCountY = GetRGBLayer()->GetTileCountY();
+
+    if (!texSectorSize || !terrainSize || !tileCountX)
+    {
+        return;
+    }
+
+    // Get the number of sector textures in each direction that we need to update in order to refresh the 
+    // entire texture tile.
+    int numTexSectors = terrainSize / texSectorSize;
+    int sectorsPerTileX = numTexSectors / tileCountX;
+    int sectorsPerTileY = numTexSectors / tileCountY;
+
+    for (int y = 0; y < sectorsPerTileY; ++y)
+    {
+        for (int x = 0; x < sectorsPerTileX; ++x)
+        {
+            UpdateSectorTexture(QPoint(x + xIndex * sectorsPerTileX, y + yIndex * sectorsPerTileY), 0, 0, 1, 1);
+        }
+    }
 }
 
 
@@ -624,7 +670,7 @@ void CHeightmap::SetMaxHeight(float fMaxHeight, bool scaleHeightmap)
     }
 }
 
-void CHeightmap::LoadASC(const QString& fileName)
+void CHeightmap::LoadASC(const QString& fileName, HeightmapImportTechnique importType)
 {
     CFloatImage tmpImage;
 
@@ -634,7 +680,7 @@ void CHeightmap::LoadASC(const QString& fileName)
         return;
     }
 
-    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate270);
+    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate270, importType);
 }
 
 void CHeightmap::SaveASC(const QString& fileName)
@@ -644,7 +690,7 @@ void CHeightmap::SaveASC(const QString& fileName)
     CImageASC().Save(fileName, *image);
 }
 
-void CHeightmap::LoadBT(const QString& fileName)
+void CHeightmap::LoadBT(const QString& fileName, HeightmapImportTechnique importType)
 {
     CFloatImage tmpImage;
 
@@ -654,7 +700,7 @@ void CHeightmap::LoadBT(const QString& fileName)
         return;
     }
 
-    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate0);
+    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate0, importType);
 }
 
 void CHeightmap::SaveBT(const QString& fileName)
@@ -664,7 +710,7 @@ void CHeightmap::SaveBT(const QString& fileName)
     CImageBT().Save(fileName, *image);
 }
 
-void CHeightmap::LoadTIF(const QString& fileName)
+void CHeightmap::LoadTIF(const QString& fileName, HeightmapImportTechnique importType)
 {
     CFloatImage tmpImage;
 
@@ -674,7 +720,7 @@ void CHeightmap::LoadTIF(const QString& fileName)
         return;
     }
 
-    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate270);
+    ProcessLoadedImage(fileName, tmpImage, false, ImageRotationDegrees::Rotate270, importType);
 }
 
 void CHeightmap::SaveTIF(const QString& fileName)
@@ -684,7 +730,38 @@ void CHeightmap::SaveTIF(const QString& fileName)
     CImageTIF().SaveRAW(fileName, image->GetData(), image->GetWidth(), image->GetHeight(), sizeof(float), 1, true, NULL);
 }
 
-void CHeightmap::LoadImage(const QString& fileName)
+void CHeightmap::ImportHeightmap(const QString& fileName, HeightmapImportTechnique importType)
+{
+    QFileInfo info(fileName);
+    const QString ext = info.completeSuffix().toLower();
+
+    if (ext == "asc")
+    {
+        // Treat 32-bit formats special to make sure we preserve full data precision
+        LoadASC(fileName, importType);
+    }
+    else if (ext == "bt")
+    {
+        // Treat 32-bit formats special to make sure we preserve full data precision
+        LoadBT(fileName, importType);
+    }
+    else if (ext == "tif")
+    {
+        // Treat 32-bit formats special to make sure we preserve full data precision
+        LoadTIF(fileName, importType);
+    }
+    else if (ext == "raw" || ext == "r16")
+    {
+        LoadRAW(fileName, importType);
+    }
+    else
+    {
+        // Assumes the input format is in 8-bit or 16-bit height values.  Not recommended, but supported.
+        LoadImage(fileName, importType);
+    }
+}
+
+void CHeightmap::LoadImage(const QString& fileName, HeightmapImportTechnique importType)
 {
     // Load either 8-bit or 16-bit images (BMP, TIF, PGM, ASC) into the heightmap.
 
@@ -703,10 +780,10 @@ void CHeightmap::LoadImage(const QString& fileName)
         return;
     }
 
-    ProcessLoadedImage(fileName, floatImage, false, ImageRotationDegrees::Rotate270);
+    ProcessLoadedImage(fileName, floatImage, false, ImageRotationDegrees::Rotate270, importType);
 }
 
-bool CHeightmap::ProcessLoadedImage(const QString& fileName, const CFloatImage& tmpImage, bool atWorldScale, ImageRotationDegrees rotationAmount)
+bool CHeightmap::ProcessLoadedImage(const QString& fileName, const CFloatImage& tmpImage, bool atWorldScale, ImageRotationDegrees rotationAmount, HeightmapImportTechnique importType)
 {
     CFloatImage image;
     CFloatImage hmap;
@@ -718,28 +795,43 @@ bool CHeightmap::ProcessLoadedImage(const QString& fileName, const CFloatImage& 
 
     if (image.GetWidth() != m_iWidth || image.GetHeight() != m_iHeight)
     {
-        // If our width / height doesn't match, find out if the user would rather clip the rectangle or scale it.
-        QString str = QObject::tr("Image dimensions do not match dimensions of heightmap.\nImage size is %1x%2,\nHeightmap size is %3x%4.\nWould you like to clip the image, resize it, or cancel?")
+        if (importType == HeightmapImportTechnique::PromptUser)
+        {
+            // If our width / height doesn't match, find out if the user would rather clip the rectangle or scale it.
+            QString str = QObject::tr("Image dimensions do not match dimensions of heightmap.\nImage size is %1x%2,\nHeightmap size is %3x%4.\nWould you like to clip the image, resize it, or cancel?")
                 .arg(image.GetWidth()).arg(image.GetHeight()).arg(m_iWidth).arg(m_iHeight);
 
-        QMessageBox userPrompt(AzToolsFramework::GetActiveWindow());
-        userPrompt.setWindowTitle(QObject::tr("Warning"));
-        userPrompt.setText(str);
+            QMessageBox userPrompt(AzToolsFramework::GetActiveWindow());
+            userPrompt.setWindowTitle(QObject::tr("Warning"));
+            userPrompt.setText(str);
 
-        QAbstractButton* clipButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Clip"), QMessageBox::YesRole);
-        QAbstractButton* resizeButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Resize"), QMessageBox::YesRole);
-        QAbstractButton* cancelButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Cancel"), QMessageBox::RejectRole);
+            QAbstractButton* clipButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Clip"), QMessageBox::YesRole);
+            QAbstractButton* resizeButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Resize"), QMessageBox::YesRole);
+            QAbstractButton* cancelButton = (QAbstractButton*)userPrompt.addButton(QObject::tr("Cancel"), QMessageBox::RejectRole);
 
-        userPrompt.exec();
+            userPrompt.exec();
+            if (userPrompt.clickedButton() == clipButton)
+            {
+                importType = HeightmapImportTechnique::Clip;
+            }
+            else if (userPrompt.clickedButton() == resizeButton)
+            {
+                importType = HeightmapImportTechnique::Resize;
+            }
+            else
+            {
+                return false;
+            }
+        }
 
         // If clip, just use the values as-is.  If the image boundary is larger, extra pixels will be dropped.  If the heightmap boundary is larger,
         // values outside the image bounds will be set to 0.
-        if (userPrompt.clickedButton() == clipButton)
+        if (importType == HeightmapImportTechnique::Clip)
         {
             hmap.Attach(image);
         }
         // If resize, we'll stretch or shrink the image to fit.  Note that this will cause stairstep artifacts.
-        else if (userPrompt.clickedButton() == resizeButton)
+        else if (importType == HeightmapImportTechnique::Resize)
         {
             hmap.Allocate(m_iWidth, m_iHeight);
             hmap.ScaleToFit(image);
@@ -748,6 +840,7 @@ bool CHeightmap::ProcessLoadedImage(const QString& fileName, const CFloatImage& 
         }
         else
         {
+            AZ_Assert(false, "Unknown heightmap import type: %d", static_cast<int>(importType));
             return false;
         }
     }
@@ -788,6 +881,38 @@ bool CHeightmap::ProcessLoadedImage(const QString& fileName, const CFloatImage& 
         (resizedImage ? "resized" : "copied"),
         m_iWidth, m_iHeight);
     return true;
+}
+
+void CHeightmap::ExportHeightmap(const QString& fileName)
+{
+    QFileInfo info(fileName);
+    const QString ext = info.completeSuffix().toLower();
+
+    if (ext == "asc")
+    {
+        SaveASC(fileName);
+    }
+    else if (ext == "bt")
+    {
+        SaveBT(fileName);
+    }
+    else if (ext == "tif")
+    {
+        SaveTIF(fileName);
+    }
+    else if (ext == "pgm")
+    {
+        SaveImage16Bit(fileName);
+    }
+    else if (ext == "raw" || ext == "r16")
+    {
+        SaveRAW(fileName);
+    }
+    else
+    {
+        // BMP or others
+        SaveImage(fileName.toUtf8().data());
+    }
 }
 
 void CHeightmap::SaveImage(LPCSTR pszFileName) const
@@ -831,7 +956,8 @@ void CHeightmap::SaveImage16Bit(const QString& fileName)
 //! Save heightmap in RAW format.
 void CHeightmap::SaveRAW(const QString& rawFile)
 {
-    FILE* file = fopen(rawFile.toUtf8().data(), "wb");
+    FILE* file = nullptr;
+    azfopen(&file, rawFile.toUtf8().data(), "wb");
     if (!file)
     {
         QMessageBox::warning(AzToolsFramework::GetActiveWindow(), QObject::tr("Warning"), QObject::tr("Error saving file %1").arg(rawFile));
@@ -865,9 +991,10 @@ void CHeightmap::SaveRAW(const QString& rawFile)
 }
 
 //! Load heightmap from RAW format.
-void    CHeightmap::LoadRAW(const QString& rawFile)
+void    CHeightmap::LoadRAW(const QString& rawFile, HeightmapImportTechnique importType)
 {
-    FILE* file = fopen(rawFile.toUtf8().data(), "rb");
+    FILE* file = nullptr;
+    azfopen(&file, rawFile.toUtf8().data(), "rb");
     if (!file)
     {
         QMessageBox::warning(AzToolsFramework::GetActiveWindow(), QObject::tr("Warning"), QObject::tr("Error loading file %1").arg(rawFile));
@@ -900,7 +1027,7 @@ void    CHeightmap::LoadRAW(const QString& rawFile)
 
     fclose(file);
 
-    ProcessLoadedImage(rawFile, tmpImage, false, ImageRotationDegrees::Rotate270);
+    ProcessLoadedImage(rawFile, tmpImage, false, ImageRotationDegrees::Rotate270, importType);
 }
 
 void CHeightmap::Noise()
@@ -1864,7 +1991,7 @@ void CHeightmap::DrawSpot(unsigned long iX, unsigned long iY,
         }
     }
 
-    NotifyModified(iX - iWidth, iY - iWidth, iX + iWidth, iY + iWidth);
+    NotifyModified(iX - iWidth, iY - iWidth, iWidth * 2, iWidth * 2);
 }
 
 void CHeightmap::DrawSpot2(int iX, int iY, int radius, float insideRadius, float fHeight, float fHardness, bool bAddNoise, float noiseFreq, float noiseScale)
@@ -1945,7 +2072,7 @@ void CHeightmap::DrawSpot2(int iX, int iY, int radius, float insideRadius, float
     }
 
     // We modified the heightmap.
-    NotifyModified(iX - radius, iY - radius, iX + radius, iY + radius);
+    NotifyModified(iX - radius, iY - radius, radius * 2, radius * 2);
 }
 
 void CHeightmap::RiseLowerSpot(int iX, int iY, int radius, float insideRadius, float fHeight, float fHardness, bool bAddNoise, float noiseFreq, float noiseScale)
@@ -2025,7 +2152,7 @@ void CHeightmap::RiseLowerSpot(int iX, int iY, int radius, float insideRadius, f
     }
 
     // We modified the heightmap.
-    NotifyModified(iX - radius, iY - radius, iX + radius, iY + radius);
+    NotifyModified(iX - radius, iY - radius, radius * 2, radius * 2);
 }
 
 void CHeightmap::SmoothSpot(int iX, int iY, int radius, float fHeight, float fHardness)
@@ -2091,7 +2218,7 @@ void CHeightmap::SmoothSpot(int iX, int iY, int radius, float fHeight, float fHa
     }
 
     // We modified the heightmap.
-    NotifyModified(iX - radius, iY - radius, iX + radius, iY + radius);
+    NotifyModified(iX - radius, iY - radius, radius * 2, radius * 2);
 }
 
 void CHeightmap::Hold()
@@ -2118,7 +2245,8 @@ void CHeightmap::Hold()
     qApp->setOverrideCursor(Qt::WaitCursor);
 
     // Open the hold / fetch file
-    hFile = fopen(HEIGHTMAP_HOLD_FETCH_FILE, "wb");
+    hFile = nullptr;
+    azfopen(&hFile, HEIGHTMAP_HOLD_FETCH_FILE, "wb");
     assert(hFile);
     if (hFile)
     {
@@ -2180,7 +2308,8 @@ bool CHeightmap::Read(QString strFileName)
     }
 
     // Open the hold / fetch file
-    hFile = fopen(strFileName.toUtf8().data(), "rb");
+    hFile = nullptr;
+    azfopen(&hFile, strFileName.toUtf8().data(), "rb");
 
     if (!hFile)
     {
@@ -2393,12 +2522,22 @@ void CHeightmap::UpdateEngineTerrain(int left, int bottom, int areaSize, int _he
         p3DEngine->GetITerrain()->SetTerrainElevation(bottom, left, areaSize, m_pHeightmap.data(), WeightmapSize, surfaceWeights);
     }
 
-    const Vec2 worldModPosition(
-        originalInputY1* nHeightMapUnitSize + originalInputAreaSize* nHeightMapUnitSize / 2,
-        originalInputX1* nHeightMapUnitSize + originalInputAreaSize* nHeightMapUnitSize / 2);
     const float areaRadius = originalInputAreaSize * nHeightMapUnitSize / 2;
+    const Vec2 worldModPosition(
+        originalInputY1 * nHeightMapUnitSize + areaRadius,
+        originalInputX1 * nHeightMapUnitSize + areaRadius);
 
     GetIEditor()->GetGameEngine()->OnTerrainModified(worldModPosition, areaRadius, (originalInputAreaSize == m_iWidth));
+
+    int x1 = originalInputX1 * nHeightMapUnitSize;
+    int y1 = originalInputY1 * nHeightMapUnitSize;
+    int x2 = x1 + originalInputAreaSize * nHeightMapUnitSize;
+    int y2 = y1 + originalInputAreaSize * nHeightMapUnitSize;
+
+    // Y and X switched by historical reasons.
+    const AZ::Vector3 min = AZ::Vector3(y1, x1, -AZ_FLT_MAX);
+    const AZ::Vector3 max = AZ::Vector3(y2, x2, AZ_FLT_MAX);
+    AZ::HeightmapUpdateNotificationBus::Broadcast(&AZ::HeightmapUpdateNotificationBus::Events::HeightmapModified, AZ::Aabb::CreateFromMinMax(min, max));
 }
 
 
@@ -2415,7 +2554,7 @@ void CHeightmap::Serialize(CXmlArchive& xmlAr)
         // Loading
         XmlNodeRef heightmap = xmlAr.root;
 
-        if (_stricmp(heightmap->getTag(), "Heightmap"))
+        if (azstricmp(heightmap->getTag(), "Heightmap"))
         {
             heightmap = xmlAr.root->findChild("Heightmap"); // load old version
             if (!heightmap)
@@ -3280,15 +3419,20 @@ t_hmap CHeightmap::GetSafeXY(const uint32 dwX, const uint32 dwY) const
 
 void CHeightmap::RecordUndo(int x1, int y1, int width, int height, bool bInfo)
 {
-    if (!m_standaloneMode && GetIEditor()->IsUndoRecording())
+    AzToolsFramework::UndoSystem::URSequencePoint* undoOperation = nullptr;
+    AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(undoOperation, &AzToolsFramework::ToolsApplicationRequests::GetCurrentUndoBatch);
+
+    if (!m_standaloneMode && undoOperation)
     {
         if (bInfo)
         {
-            GetIEditor()->RecordUndo(new CUndoHeightmapInfo(x1, y1, width, height, this));
+            auto undoCommand = aznew AzToolsFramework::LegacyCommand<IUndoObject>("Modify Terrain Command", AZStd::make_unique<CUndoHeightmapInfo>(x1, y1, width, height, this));
+            undoCommand->SetParent(undoOperation);
         }
         else
         {
-            GetIEditor()->RecordUndo(new CUndoHeightmapModify(x1, y1, width, height, this));
+            auto undoCommand = aznew AzToolsFramework::LegacyCommand<IUndoObject>("Modify Terrain Command", AZStd::make_unique<CUndoHeightmapModify>(x1, y1, width, height, this));
+            undoCommand->SetParent(undoOperation);
         }
     }
 }
@@ -3302,7 +3446,7 @@ void CHeightmap::RecordAzUndoBatchTerrainModify(AZ::u32 x, AZ::u32 y, AZ::u32 wi
     ToolsApplicationRequests::Bus::BroadcastResult(undoOperation, &ToolsApplicationRequests::BeginUndoBatch, "Modify Terrain");
     if (undoOperation != nullptr)
     {
-        auto undoCommand = new LegacyCommand<IUndoObject>("Modify Terrain Command", AZStd::make_unique<CUndoHeightmapModify>(x, y, width, height, this));
+        auto undoCommand = aznew LegacyCommand<IUndoObject>("Modify Terrain Command", AZStd::make_unique<CUndoHeightmapModify>(x, y, width, height, this));
         // ToolsApplication takes care of memory deallocation for undoCommand
         undoCommand->SetParent(undoOperation);
     }
@@ -3389,7 +3533,7 @@ void CHeightmap::UpdateLayerTexture(const QRect& rect)
                     (iSectY + (float)iLocalOutMinY / dwNeededResolution) / iTexSectorsNum,
                     (iSectX + (float)iLocalOutMaxX / dwNeededResolution) / iTexSectorsNum,
                     (iSectY + (float)iLocalOutMaxY / dwNeededResolution) / iTexSectorsNum,
-                    imageBGR);
+                    imageBGR, true);
 
                 {
                     uint32 dwWidth = imageBGR.GetWidth();
@@ -3532,7 +3676,7 @@ void CHeightmap::UpdateSectorTexture(const QPoint& texsector,
                 fMinY + fInvSectorCnt / dwNeededResolution * iLocalOutMinY,
                 fMinX + fInvSectorCnt / dwNeededResolution * iLocalOutMaxX,
                 fMinY + fInvSectorCnt / dwNeededResolution * iLocalOutMaxY,
-                imageBGR);
+                imageBGR, true);
 
             // convert RGB colour into format that has less compression artifacts for brightness variations
 #if TERRAIN_USE_CIE_COLORSPACE
@@ -3755,7 +3899,7 @@ std::shared_ptr<CFloatImage> CHeightmap::GetHeightmapFloatImage(bool scaleValues
     return rotatedImage;
 }
 
-void CHeightmap::NotifyModified(int x, int y, int width, int height)
+void CHeightmap::NotifyModified(int x /*= 0*/, int y /*= 0*/, int width /*= 0*/, int height /*= 0*/)
 {
     // TODO: Make this a generic delegate (not hardcoded to the global Editor instance...)
     if (!m_standaloneMode)

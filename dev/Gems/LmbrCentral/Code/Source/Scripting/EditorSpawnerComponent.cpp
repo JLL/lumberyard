@@ -38,7 +38,7 @@ namespace LmbrCentral
                 editContext->Class<EditorSpawnerComponent>("Spawner", "The Spawner component allows an entity to spawn a design-time or run-time dynamic slice (*.dynamicslice) at the entity's location with an optional offset")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                     ->Attribute(AZ::Edit::Attributes::Category, "Gameplay")
-                    ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Spawner.png")
+                    ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Spawner.svg")
                     ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Spawner.png")
                     ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                     ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -73,10 +73,10 @@ namespace LmbrCentral
         // If we are set to spawn on activate, then we need to make sure we don't point to ourself or we create an infinite spawn loop
         AZ::SliceComponent::SliceInstanceAddress sliceInstanceAddress;
         AzFramework::EntityIdContextQueryBus::EventResult(sliceInstanceAddress, GetEntityId(), &AzFramework::EntityIdContextQueryBus::Events::GetOwningSlice);
-        if (m_spawnOnActivate && sliceInstanceAddress.first)
+        if (m_spawnOnActivate && sliceInstanceAddress.GetReference())
         {
             // Compare the ids because one is source and the other is going to be the dynamic slice
-            return m_sliceAsset.GetId().m_guid == sliceInstanceAddress.first->GetSliceAsset().GetId().m_guid;
+            return m_sliceAsset.GetId().m_guid == sliceInstanceAddress.GetReference()->GetSliceAsset().GetId().m_guid;
         }
 
         return false;

@@ -77,6 +77,16 @@ void DisplayContext::DrawTri(const Vec3& p1, const Vec3& p2, const Vec3& p3)
     pRenderAuxGeom->DrawTriangle(ToWorldSpacePosition(p1), m_color4b, ToWorldSpacePosition(p2), m_color4b, ToWorldSpacePosition(p3), m_color4b);
 }
 
+void DisplayContext::DrawTriangles(const AZStd::vector<Vec3>& vertices, const ColorB& color)
+{
+    pRenderAuxGeom->DrawTriangles(vertices.begin(), vertices.size(), color);
+}
+
+void DisplayContext::DrawTrianglesIndexed(const AZStd::vector<Vec3>& vertices, const AZStd::vector<vtx_idx>& indices, const ColorB& color)
+{
+    pRenderAuxGeom->DrawTriangles(vertices.begin(), vertices.size(), indices.begin(), indices.size(), color);
+}
+
 //////////////////////////////////////////////////////////////////////////
 void DisplayContext::DrawQuad(const Vec3& p1, const Vec3& p2, const Vec3& p3, const Vec3& p4)
 {
@@ -814,12 +824,18 @@ void DisplayContext::DrawLine(const Vec3& p1, const Vec3& p2, const QColor& rgb1
 }
 
 //////////////////////////////////////////////////////////////////////////
+void DisplayContext::DrawLines(const AZStd::vector<Vec3>& points, const ColorF& color)
+{
+    pRenderAuxGeom->DrawLines(points.begin(), points.size(), color, m_thickness);
+}
+
+//////////////////////////////////////////////////////////////////////////
 // Vera, Confetti
 void DisplayContext::DrawDottedLine(const Vec3& p1, const Vec3& p2, const ColorF& col1, const ColorF& col2, const float numOfSteps)
 {
     Vec3 direction =  Vec3(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
     //We only draw half of a step and leave the other half empty to make it a dotted line.
-    Vec3 halfstep = (direction / numOfSteps) * 0.5f; 
+    Vec3 halfstep = (direction / numOfSteps) * 0.5f;
     Vec3 startPoint = p1;
 
     for (int stepCount = 0; stepCount < numOfSteps; stepCount++)
@@ -860,8 +876,15 @@ const Matrix34& DisplayContext::GetMatrix()
 //////////////////////////////////////////////////////////////////////////
 void DisplayContext::DrawBall(const Vec3& pos, float radius)
 {
+    // get the max scaled radius in case the transform on the stack is scaled non-uniformly
+    const float transformedRadiusX = ToWorldSpaceVector(Vec3(radius, 0.0f, 0.0f)).GetLength();
+    const float transformedRadiusY = ToWorldSpaceVector(Vec3(0.0f, radius, 0.0f)).GetLength();
+    const float transformedRadiusZ = ToWorldSpaceVector(Vec3(0.0f, 0.0f, radius)).GetLength();
+    const float maxTransformedRadius =
+        AZ::GetMax(transformedRadiusX, AZ::GetMax(transformedRadiusY, transformedRadiusZ));
+
     pRenderAuxGeom->DrawSphere(
-        ToWorldSpacePosition(pos), ToWorldSpaceVector(Vec3(radius, 0.0f, 0.0f)).GetLength(), m_color4b);
+        ToWorldSpacePosition(pos), maxTransformedRadius, m_color4b);
 }
 
 //////////////////////////////////////////////////////////////////////////

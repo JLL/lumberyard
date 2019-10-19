@@ -24,10 +24,6 @@
 
 #include <GridMate/Serialize/UtilityMarshal.h>
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(Session_h, AZ_RESTRICTED_PLATFORM)
-#endif
-
 namespace GridMate
 {
     class ReplicaManager;
@@ -194,6 +190,7 @@ namespace GridMate
             , m_numFreePrivateSlots(0)
             , m_numUsedPublicSlots(0)
             , m_numUsedPrivateSlots(0)
+            , m_numPlayers(0)
             , m_numParams(0)
         { }
         SessionID m_sessionId;

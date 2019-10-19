@@ -88,6 +88,14 @@ namespace AzFramework
 {
     namespace StringFunc
     {
+        /*! Checks if the string begins with the given prefix
+        */
+        bool StartsWith(AZStd::string_view searchValue, AZStd::string_view suffixValue, bool bCaseSensitive = false);
+
+        /*! Checks if the string ends with the given suffix
+        */
+        bool EndsWith(AZStd::string_view searchValue, AZStd::string_view suffixValue, bool bCaseSensitive = false);
+
         //! Equal
         /*! Equality for non AZStd::strings.
         Ease of use to compare c-strings with case sensitivity.
@@ -112,7 +120,7 @@ namespace AzFramework
         StringFunc::Find("Well Hello", "Hello", false, true) == 5
         */
         size_t Find(const char* in, char c, size_t pos = 0, bool bReverse = false, bool bCaseSensitive = false);
-        size_t Find(const char* in, const char* str, size_t pos = 0, bool bReverse = false, bool bCaseSensitive = false);
+        size_t Find(AZStd::string_view in, AZStd::string_view str, size_t pos = 0, bool bReverse = false, bool bCaseSensitive = false);
 
         // Inlined ease of use / increased readability / increased error checking for AZStd::strings.
 
@@ -295,17 +303,17 @@ namespace AzFramework
         /*! Strip away the first, last or all character(s) or substring(s) in a AZStd::string with
         *! case sensitivity.
         Example: Case Insensitive Strip all 'l' characters
-        StringFunc::Stip(s = "Hello World", 'l'); s == "Heo Word"
+        StringFunc::Strip(s = "Hello World", 'l'); s == "Heo Word"
         Example: Case Insensitive Strip first 'l' character
-        StringFunc::Stip(s = "Hello World", 'l', false, true); s == "Helo World"
+        StringFunc::Strip(s = "Hello World", 'l', false, true); s == "Helo World"
         Example: Case Insensitive Strip last 'l' character
-        StringFunc::Stip(s = "Hello World", 'l', false, false, true); s == "Hello Word"
+        StringFunc::Strip(s = "Hello World", 'l', false, false, true); s == "Hello Word"
         Example: Case Insensitive Strip first and last 'l' character
-        StringFunc::Stip(s = "Hello World", 'l', false, true, true); s == "Helo Word"
+        StringFunc::Strip(s = "Hello World", 'l', false, true, true); s == "Helo Word"
         Example: Case Sensitive Strip first and last 'l' character
-        StringFunc::Stip(s = "HeLlo HeLlo HELlO", 'l', true, true, true); s == "HeLo HeLlo HELO"
+        StringFunc::Strip(s = "HeLlo HeLlo HELlO", 'l', true, true, true); s == "HeLo HeLlo HELO"
         Example: Case Insensitive Strip first and last "hello" character
-        StringFunc::Stip(s = "HeLlo HeLlo HELlO", "hello", false, true, true); s == " HeLlo "
+        StringFunc::Strip(s = "HeLlo HeLlo HELlO", "hello", false, true, true); s == " HeLlo "
         */
         bool Strip(AZStd::string& inout, const char stripCharacter = ' ', bool bCaseSensitive = false, bool bStripBeginning = false, bool bStripEnding = false);
         bool Strip(AZStd::string& inout, const char* stripCharacters = " ", bool bCaseSensitive = false, bool bStripBeginning = false, bool bStripEnding = false);

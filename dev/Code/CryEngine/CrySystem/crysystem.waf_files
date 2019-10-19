@@ -16,13 +16,13 @@
             "CryAsyncMemcpy.cpp",
             "CryPak.cpp",
             "CrySizerStats.cpp",
+            "CryTomcrypt.cpp",
             "DebugCallStack.cpp",
             "DllMain.cpp",
             "GeneralMemoryHeap.cpp",
             "HandlerBase.cpp",
             "IDebugCallStack.cpp",
             "AsyncPakManager.cpp",
-            "LevelHeap.cpp",
             "Log.cpp",
             "BootProfiler.cpp",
             "../CryCommon/EngineSettingsManager.cpp",
@@ -68,7 +68,8 @@
             "ServerThrottle.h",
             "SyncLock.h",
             "SystemScheduler.h",
-            "UnixConsole.h"
+            "UnixConsole.h",
+            "../CryCommon/ThermalInfo.h"
         ],
         "Header Files": [
             "SystemInit.h",
@@ -92,6 +93,7 @@
             "CryPak.h",
             "CryPakHandleCache.h",
             "CrySizerStats.h",
+            "CryTomcrypt.h",
             "CryWaterMark.h",
             "DebugCallStack.h",
             "GeneralMemoryHeap.h",
@@ -119,6 +121,8 @@
         "FileIO": [
             "RemoteFileIO.cpp",
             "RemoteFileIO.h",
+            "RemoteStorageDrive.h",
+            "RemoteStorageDrive.cpp",
             "CryPakFileIO.cpp",
             "CryPakFileIO.h"
         ],
@@ -133,7 +137,6 @@
             "DefragAllocator.cpp",
             "MemoryAddressRange.cpp",
             "PageMappingHeap.cpp",
-            "CryMemoryManager.cpp",
             "CustomMemoryHeap.cpp",
             "MemoryManager.cpp",
             "MTSafeAllocator.cpp",
@@ -254,12 +257,7 @@
             "Statistics/LocalMemoryUsage.cpp"
         ],
         "PlatformOS": [
-            "PlatformOS/SaveReaderWriter_CryPak.cpp",
-            "PlatformOS/SaveReaderWriter_Memory.cpp",
-            "PlatformOS/SaveReaderWriter_CryPak.h",
-            "PlatformOS/SaveReaderWriter_Memory.h",
-            "PlatformOS/PlatformOS_Base.h",
-            "PlatformOS/PlatformOS_Base.cpp"
+            "PlatformOS/PlatformOS_Base.h"
         ],
         "CodeCoverage": [
             "CodeCoverage/CodeCheckpointMgr.cpp",
@@ -296,19 +294,6 @@
             "Cryptography/StreamCipher.h",
             "Cryptography/Whirlpool.h"
         ],
-        "JobManager": [
-            "JobManager/JobManager.cpp",
-            "JobManager/JobManager.h",
-            "JobManager/JobStructs.h"
-        ],
-        "JobManager/FallbackBackend": [
-            "JobManager/FallbackBackend/FallbackBackend.cpp",
-            "JobManager/FallbackBackend/FallBackBackend.h"
-        ],
-        "JobManager/ThreadBackEnd": [
-            "JobManager/PCBackEnd/ThreadBackEnd.cpp",
-            "JobManager/PCBackEnd/ThreadBackEnd.h"
-        ],
         "SoftCode": [
             "SoftCode/SoftCodeMgr.cpp",
             "SoftCode/SoftCodeMgr.h"
@@ -323,7 +308,9 @@
         ],
         "RemoteConsole": [
             "RemoteConsole/RemoteConsole.cpp",
-            "RemoteConsole/RemoteConsole.h"
+            "RemoteConsole/RemoteConsole.h",
+            "RemoteConsole/RemoteConsole_impl.inl",
+            "RemoteConsole/RemoteConsole_none.inl"
         ],
         "Services": [
             "ServiceNetwork.cpp",
@@ -343,6 +330,24 @@
             "LZ4Decompressor.h",
             "LZ4Decompressor.cpp"
         ],
+        "LevelSystem":
+        [
+            "LevelSystem/LevelSystem.cpp",
+            "LevelSystem/LevelSystem.h"
+        ],
+        "View System":
+        [
+            "ViewSystem/DebugCamera.cpp",
+            "ViewSystem/DebugCamera.h",
+            "ViewSystem/View.cpp",
+            "ViewSystem/View.h",
+            "ViewSystem/ViewSystem.cpp",
+            "ViewSystem/ViewSystem.h"
+        ],
+        "ZStdDecompressor": [
+            "ZStdDecompressor.h",
+            "ZStdDecompressor.cpp"
+        ],
         "Serialization": [
             "Serialization/ArchiveHost.cpp",
             "Serialization/BinArchive.cpp",
@@ -356,7 +361,7 @@
             "Serialization/XmlOArchive.cpp",
             "Serialization/XmlOArchive.h"
         ],
-        "VR": 
+        "VR":
         [
             "HMDCVars.h",
             "HMDCVars.cpp"
@@ -371,10 +376,12 @@
             "StreamEngine/StreamEngine.cpp",
             "StreamEngine/StreamIOThread.cpp",
             "StreamEngine/StreamReadStream.cpp",
+            "StreamEngine/AZRequestReadStream.cpp",
             "StreamEngine/StreamAsyncFileRequest.h",
             "StreamEngine/StreamEngine.h",
             "StreamEngine/StreamIOThread.h",
-            "StreamEngine/StreamReadStream.h"
+            "StreamEngine/StreamReadStream.h",
+            "StreamEngine/AZRequestReadStream.h"
         ]
     },
     "CrySystem_Tests_uber.cpp":
@@ -388,7 +395,7 @@
             "TestSystemLegacy.h",
             "VisRegTest.h"
         ]
-    },    
+    },
     "none":
     {
         "Root":
@@ -406,15 +413,8 @@
             "CPUDetect.cpp",
             "CPUDetect.h",
             "CryDLMalloc.c",
-            "MemReplay.cpp",
-            "MemReplay.h",
             "CrySizerImpl.cpp",
             "CrySizerImpl.h"
-        ],
-        "JobManager/BlockingBackend":
-        [
-            "JobManager/BlockingBackend/BlockingBackEnd.cpp",
-            "JobManager/BlockingBackend/BlockingBackEnd.h"
         ],
         "HTTPDownloader":
         [

@@ -10,31 +10,26 @@
 *
 */
 
-#ifndef __EMSTUDIO_DOCKWIDGETPLUGIN_H
-#define __EMSTUDIO_DOCKWIDGETPLUGIN_H
+#pragma once
 
-// include MCore
 #include <MCore/Source/StandardHeaders.h>
 #include "EMStudioConfig.h"
 #include "EMStudioPlugin.h"
 #include <MysticQt/Source/DockWidget.h>
 #include <QPointer>
 
+
 namespace EMStudio
 {
-    /**
-     *
-     *
-     */
     class EMSTUDIO_API DockWidgetPlugin
         : public EMStudioPlugin
     {
-        Q_OBJECT
+        Q_OBJECT // AUTOMOC
         MCORE_MEMORYOBJECTCATEGORY(DockWidgetPlugin, MCore::MCORE_DEFAULT_ALIGNMENT, MEMCATEGORY_EMSTUDIOSDK)
 
     public:
         DockWidgetPlugin();
-        virtual ~DockWidgetPlugin();
+         ~DockWidgetPlugin() override;
 
         EMStudioPlugin::EPluginType GetPluginType() const override              { return EMStudioPlugin::PLUGINTYPE_DOCKWIDGET; }
 
@@ -46,20 +41,20 @@ namespace EMStudio
         virtual bool GetIsMovable() const                                   { return true;  }
 
         virtual void SetInterfaceTitle(const char* name);
-        virtual void CreateBaseInterface(const char* objectName) override;
+        void CreateBaseInterface(const char* objectName) override;
 
-        virtual QString GetObjectName() const override                      { AZ_Assert(mDock, "mDock is null"); return mDock->objectName(); }
-        virtual void SetObjectName(const QString& name) override            { GetDockWidget()->setObjectName(name); }
+        QString GetObjectName() const override                      { AZ_Assert(mDock, "mDock is null"); return mDock->objectName(); }
+        void SetObjectName(const QString& name) override            { GetDockWidget()->setObjectName(name); }
 
         virtual QSize GetInitialWindowSize() const                          { return QSize(500, 650); }
 
-        virtual bool GetHasWindowWithObjectName(const AZStd::string& objectName) override;
+        bool GetHasWindowWithObjectName(const AZStd::string& objectName) override;
 
         MysticQt::DockWidget* GetDockWidget();
 
     protected:
-        QPointer<MysticQt::DockWidget>   mDock;
+        QWidget* CreateErrorContentWidget(const char* errorMessage) const;
+
+        QPointer<MysticQt::DockWidget> mDock;
     };
 }   // namespace EMStudio
-
-#endif

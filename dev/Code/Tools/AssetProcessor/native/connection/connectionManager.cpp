@@ -71,6 +71,7 @@ void ConnectionManager::UpdateWhiteListFromBootStrap()
     Q_EMIT SyncWhiteListAndRejectedList(m_whiteListedAddresses, m_rejectedAddresses);
 }
 
+
 ConnectionManager::~ConnectionManager()
 {
     s_singleton = nullptr;
@@ -103,29 +104,55 @@ ConnectionMap& ConnectionManager::getConnectionMap()
 
 unsigned int ConnectionManager::addConnection(qintptr socketDescriptor)
 {
-    beginResetModel();
+    const bool isUserConnection = false;
 
-    Connection* connection = new Connection(m_platformConfig, socketDescriptor, this);
+    return internalAddConnection(isUserConnection, socketDescriptor);
+}
+
+unsigned int ConnectionManager::internalAddConnection(bool isUserConnection, qintptr socketDescriptor)
+{
+    auto connectionId = m_nextConnectionId++;
+
+    // If the connectionId grows, we are appending, otherwise we're inserting at the front
+    if (connectionId < m_nextConnectionId)
+    {
+        beginInsertRows(QModelIndex(), m_connectionMap.count(), m_connectionMap.count());
+    }
+    else
+    {
+        beginInsertRows(QModelIndex(), 0, 0);
+    }
+
+    Connection* connection = new Connection(isUserConnection, m_platformConfig, socketDescriptor, this);
     connect(connection, &Connection::IsAddressWhiteListed, this, &ConnectionManager::IsAddressWhiteListed);
     connect(this, &ConnectionManager::AddressIsWhiteListed, connection, &Connection::AddressIsWhiteListed);
   
-    connection->SetConnectionId(m_nextConnectionId);
+    connection->SetConnectionId(connectionId);
     connect(connection, &Connection::StatusChanged, this, &ConnectionManager::OnStatusChanged);
     connect(connection, &Connection::DeliverMessage, this, &ConnectionManager::RouteIncomingMessage);
     connect(connection, SIGNAL(DisconnectConnection(unsigned int)), this, SIGNAL(ConnectionDisconnected(unsigned int)));
     connect(connection, SIGNAL(ConnectionDestroyed(unsigned int)), this, SLOT(RemoveConnectionFromMap(unsigned int)));
     connect(connection, SIGNAL(Error(unsigned int, QString)), this, SIGNAL(ConnectionError(unsigned int, QString)));
 
-    m_connectionMap.insert(m_nextConnectionId, connection);
-    Q_EMIT connectionAdded(m_nextConnectionId, connection);
+    m_connectionMap.insert(connectionId, connection);
+    Q_EMIT connectionAdded(connectionId, connection);
 
-    m_nextConnectionId++;
-
-    endResetModel();
+    endInsertRows();
 
     connection->Activate(socketDescriptor);
 
-    return m_nextConnectionId - 1;
+    return connectionId;
+}
+
+unsigned int ConnectionManager::addUserConnection()
+{
+    const bool isUserConnection = true;
+
+    unsigned int newConnectionId = internalAddConnection(isUserConnection);
+
+    SaveConnections();
+
+    return newConnectionId;
 }
 
 void ConnectionManager::OnStatusChanged(unsigned int connId)
@@ -210,18 +237,17 @@ int ConnectionManager::rowCount(const QModelIndex& parent) const
 }
 
 
-QVariant ConnectionManager::data(const QModelIndex& index, int role) const
+Connection* ConnectionManager::FindConnection(const QModelIndex& index) const
 {
     if (!index.isValid())
     {
-        return QVariant();
+        return nullptr;
     }
 
     if (index.row() >= m_connectionMap.count())
     {
-        return QVariant();
+        return nullptr;
     }
-
 
     QList<unsigned int> keys = m_connectionMap.keys();
     int key = keys[index.row()];
@@ -230,15 +256,40 @@ QVariant ConnectionManager::data(const QModelIndex& index, int role) const
 
     if (connectionIter == m_connectionMap.end())
     {
+        return nullptr;
+    }
+
+    return connectionIter.value();
+}
+
+QVariant ConnectionManager::data(const QModelIndex& index, int role) const
+{
+    Connection* connection = FindConnection(index);
+    if (!connection)
+    {
         return QVariant();
     }
 
-    Connection* connection = connectionIter.value();
+    bool isUserConnection = connection->UserCreatedConnection();
 
     switch (role)
     {
+    case UserConnectionRole:
+        return isUserConnection;
+
+    case Qt::ToolTipRole:
+        switch (index.column())
+        {
+        case IdColumn:
+            if (!isUserConnection)
+            {
+                return QObject::tr("This connection was triggered automatically by another process connecting to the Asset Processor and can not be edited");
+            }
+            break;
+        }
+        break;
     case Qt::CheckStateRole:
-        if (index.column() == AutoConnectColumn)
+        if (index.column() == AutoConnectColumn && isUserConnection)
         {
             return connection->AutoConnect() ? Qt::Checked : Qt::Unchecked;
         }
@@ -258,6 +309,11 @@ QVariant ConnectionManager::data(const QModelIndex& index, int role) const
         case PlatformColumn:
             return connection->AssetPlatform();
         case AutoConnectColumn:
+            if (!isUserConnection)
+            {
+                return tr("Auto");
+            }
+
             return QVariant();
         }
         break;
@@ -268,22 +324,31 @@ QVariant ConnectionManager::data(const QModelIndex& index, int role) const
 
 Qt::ItemFlags ConnectionManager::flags(const QModelIndex& index) const
 {
-    if (!index.isValid())
+    Connection* connection = FindConnection(index);
+    if (!connection)
     {
         return QAbstractItemModel::flags(index);
     }
 
-    if (index.column() == IdColumn || index.column() == IpColumn || index.column() == PortColumn)
+    bool isUserConnection = connection->UserCreatedConnection();
+
+    if ((index.column() == IdColumn || index.column() == IpColumn || index.column() == PortColumn) && isUserConnection)
     {
-        return QAbstractItemModel::flags(index) | Qt::ItemIsEditable;
+        return Qt::ItemFlags(Qt::ItemIsSelectable) | Qt::ItemIsEnabled;
     }
 
     if (index.column() == AutoConnectColumn)
     {
-        return QAbstractItemModel::flags(index) | Qt::ItemIsUserCheckable;
+        Qt::ItemFlags autoConnectFlags = Qt::ItemFlags(Qt::ItemIsSelectable) | Qt::ItemIsEnabled;
+        if (isUserConnection)
+        {
+            autoConnectFlags |= (Qt::ItemIsUserCheckable);
+        }
+        
+        return autoConnectFlags;
     }
 
-    return QAbstractItemModel::flags(index);
+    return Qt::ItemIsSelectable | Qt::ItemIsEnabled;
 }
 
 
@@ -304,7 +369,7 @@ QVariant ConnectionManager::headerData(int section, Qt::Orientation orientation,
         case PlatformColumn:
             return tr("Platform");
         case AutoConnectColumn:
-            return tr("Auto Connect");
+            return tr("Enabled");
         default:
             break;
         }
@@ -345,6 +410,11 @@ bool ConnectionManager::setData(const QModelIndex& index, const QVariant& value,
 
     Q_EMIT dataChanged(index, index);
 
+    if (connection->UserCreatedConnection())
+    {
+        SaveConnections();
+    }
+
     return true;
 }
 
@@ -378,27 +448,32 @@ void ConnectionManager::removeConnection(const QModelIndex& index)
     int key = keys[index.row()];
 
     removeConnection(key);
+
+    SaveConnections();
 }
 
 
-void ConnectionManager::SaveConnections()
+void ConnectionManager::SaveConnections(QString settingPrefix)
 {
     QSettings settings;
-    settings.beginWriteArray("Connections");
+    settings.beginWriteArray(QStringLiteral("%1Connections").arg(settingPrefix));
     int idx = 0;
     for (auto iter = m_connectionMap.begin(); iter != m_connectionMap.end(); iter++)
     {
-        settings.setArrayIndex(idx);
-        iter.value()->SaveConnection(settings);
-        idx++;
+        if (iter.value()->UserCreatedConnection())
+        {
+            settings.setArrayIndex(idx);
+            iter.value()->SaveConnection(settings);
+            idx++;
+        }
     }
     settings.endArray();
 }
 
-void ConnectionManager::LoadConnections()
+void ConnectionManager::LoadConnections(QString settingPrefix)
 {
     QSettings settings;
-    int numElement = settings.beginReadArray("Connections");
+    int numElement = settings.beginReadArray(QStringLiteral("%1Connections").arg(settingPrefix));
     for (int idx = 0; idx < numElement; ++idx)
     {
         settings.setArrayIndex(idx);
@@ -504,20 +579,31 @@ void ConnectionManager::IsAddressWhiteListed(QHostAddress incominghostaddr, void
     for (const AZStd::string& whitelistaddress : whitelistaddressList)
     {
         //address range matching
-        if (whitelistaddress.find('/') != AZStd::string::npos)
+        size_t maskLocation = whitelistaddress.find('/');
+        if (maskLocation != AZStd::string::npos)
         {
-            //If we successfully convert to an ipv4 address then the incominghostaddr MAY have been in an ipv6 representation of
-            //an ipv4 address. If this is the case the protocol of the incominghostaddr will be ipv6, this will cause the isInSubnet call
-            //to fail even it correctly matches because of mismatching protocols. To get around this create a new host address from the incomingIpAddress
-            //so that if it was an ipv6 representation of ipv4, then creating it directly from the ipv4 will allow the protocol check to pass
-            //and wont fail the subnet check just because the ipv4 was represented in ipv6 format. This is due to an early out check QT does for protocol and in my opinion,
-            //QT should first do a check and see if we are comparing convertible protocols before just early outing.
-            //If it wasn't convertible to ipv4 then we know it is ipv6 in which case the protocols will match which make this unnecessary, but still correct.
-            QHostAddress ha(incomingIpAddress);
-            if(ha.isInSubnet(QHostAddress::parseSubnet(whitelistaddress.c_str())))
+            //x.x.x.x/0 is all addresses
+            int mask = atoi(whitelistaddress.substr(maskLocation + 1).c_str());
+            if (mask == 0)
             {
                 Q_EMIT AddressIsWhiteListed(token, true);
                 return;
+            }
+            else
+            {
+                //If we successfully convert to an ipv4 address then the incominghostaddr MAY have been in an ipv6 representation of
+                //an ipv4 address. If this is the case the protocol of the incominghostaddr will be ipv6, this will cause the isInSubnet call
+                //to fail even it correctly matches because of mismatching protocols. To get around this create a new host address from the incomingIpAddress
+                //so that if it was an ipv6 representation of ipv4, then creating it directly from the ipv4 will allow the protocol check to pass
+                //and wont fail the subnet check just because the ipv4 was represented in ipv6 format. This is due to an early out check QT does for protocol and in my opinion,
+                //QT should first do a check and see if we are comparing convertible protocols before just early outing.
+                //If it wasn't convertible to ipv4 then we know it is ipv6 in which case the protocols will match which make this unnecessary, but still correct.
+                QHostAddress ha(incomingIpAddress);
+                if (ha.isInSubnet(QHostAddress::parseSubnet(whitelistaddress.c_str())))
+                {
+                    Q_EMIT AddressIsWhiteListed(token, true);
+                    return;
+                }
             }
         }
         else//direct address matching
@@ -1038,16 +1124,19 @@ void ConnectionManager::removeConnection(unsigned int connectionId)
 
 void ConnectionManager::RemoveConnectionFromMap(unsigned int connectionId)
 {
-    beginResetModel();
-
     auto iter = m_connectionMap.find(connectionId);
     if (iter != m_connectionMap.end())
     {
+        QList<unsigned int> keys = m_connectionMap.keys();
+        int row = keys.indexOf(connectionId);
+
+        beginRemoveRows(QModelIndex(), row, row);
+
         m_connectionMap.erase(iter);
         Q_EMIT ConnectionRemoved(connectionId);
-    }
 
-    endResetModel();
+        endRemoveRows();
+    }
 }
 
 void ConnectionManager::QuitRequested()

@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "MemoryDataAggregator.hxx"
 #include <Woodpecker/Driller/Memory/MemoryDataAggregator.moc>
@@ -40,7 +40,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<MemoryDataAggregatorSavedState, AZ::UserSettings>()
+                serialize->Class<MemoryDataAggregatorSavedState>()
                     ->Field("m_activeViewCount", &MemoryDataAggregatorSavedState::m_activeViewCount)
                     ->Version(2);
             }
@@ -271,7 +271,7 @@ namespace Driller
 
             serialize->Class<MemoryDataAggregator>()
                 ->Version(1)
-                ->SerializerForEmptyClass();
+                ->SerializeWithNoData();
         }
     }
 } // namespace Driller

@@ -14,7 +14,10 @@
 
 #include <AzCore/std/function/function_fwd.h>
 #include <AzToolsFramework/Thumbnails/Thumbnail.h>
+AZ_PUSH_DISABLE_WARNING(4251 4800, "-Wunknown-warning-option") // 4251: class 'QScopedPointer<QBrushData,QBrushDataPointerDeleter>' needs to have dll-interface to be used by clients of class 'QBrush'
+                                                               // 4800: 'uint': forcing value to bool 'true' or 'false' (performance warning)
 #include <QStyledItemDelegate>
+AZ_POP_DISABLE_WARNING
 
 class QWidget;
 class QPainter;
@@ -44,18 +47,11 @@ namespace AzToolsFramework
             void SetShowSourceControlIcons(bool showSourceControl);
 
         protected:
-            //! Distance between UI elements 
-            static const int SPACING_PIXELS;
-            //! Left and right margins
-            static const int MARGIN_PIXELS;
-
             int m_iconSize;
             AZStd::string m_thumbnailContext;
             bool m_showSourceControl = false;
             //! Draw a thumbnail and return its width
             int DrawThumbnail(QPainter* painter, const QPoint& point, const QSize& size, Thumbnailer::SharedThumbnailKey thumbnailKey) const;
-            //! Draw text (culled by maxWidth) and return its width
-            int DrawText(QPainter* painter, const QPoint& point, int maxWidth, const char* text) const;
         };
     } // namespace AssetBrowser
 } // namespace AzToolsFramework

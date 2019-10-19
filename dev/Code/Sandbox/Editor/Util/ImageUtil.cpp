@@ -14,7 +14,7 @@
 // Description : Image utilities implementation.
 
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "ImageUtil.h"
 #include "ImageGif.h"
 #include "ImageTIF.h"
@@ -31,6 +31,16 @@ bool CImageUtil::Save(const QString& strFileName, CImageEx& inImage)
     QImage imgBitmap;
 
     ImageToQImage(inImage, imgBitmap);
+
+    // Explicitly set the pixels per meter in our images to a consistent default.
+    // The normal default is 96 pixels per inch, or 3780 pixels per meter.
+    // However, the Windows scaling display setting can cause these numbers to vary
+    // on different machines, producing output files that have slightly different
+    // headers from machine to machine, which often isn't desirable.
+    const int defaultPixelsPerMeter = 3780;
+    imgBitmap.setDotsPerMeterX(defaultPixelsPerMeter);
+    imgBitmap.setDotsPerMeterY(defaultPixelsPerMeter);
+    
     return imgBitmap.save(strFileName);
 }
 
@@ -93,7 +103,8 @@ bool CImageUtil::SavePGM(const QString& fileName, const CImageEx& image)
         "65535\n"
         , width, height);
 
-    FILE* file = fopen(fileName.toUtf8().data(), "wt");
+    FILE* file = nullptr;
+    azfopen(&file, fileName.toUtf8().data(), "wt");
     if (!file)
     {
         return false;
@@ -119,13 +130,14 @@ bool CImageUtil::SavePGM(const QString& fileName, const CImageEx& image)
 //////////////////////////////////////////////////////////////////////////
 bool CImageUtil::LoadPGM(const QString& fileName, CImageEx& image)
 {
-    FILE* file = fopen(fileName.toUtf8().data(), "rt");
+    FILE* file = nullptr;
+    azfopen(&file, fileName.toUtf8().data(), "rt");
     if (!file)
     {
         return false;
     }
 
-    const char seps[] = " \n\t";
+    const char seps[] = " \n\t\r";
     char* token;
 
 
@@ -141,17 +153,18 @@ bool CImageUtil::LoadPGM(const QString& fileName, CImageEx& image)
     char* str = new char[fileSize];
     fread(str, fileSize, 1, file);
 
-    token = strtok(str, seps);
+    char* nextToken = nullptr;
+    token = azstrtok(str, 0, seps, &nextToken);
 
     while (token != NULL && token[0] == '#')
     {
         if (token != NULL && token[0] == '#')
         {
-            strtok(NULL, "\n");
+            azstrtok(NULL, 0, "\n", &nextToken);
         }
-        token = strtok(NULL, seps);
+        token = azstrtok(NULL, 0, seps, &nextToken);
     }
-    if (_stricmp(token, "P2") != 0)
+    if (azstricmp(token, "P2") != 0)
     {
         // Bad file. not supported pgm.
         delete[]str;
@@ -161,30 +174,30 @@ bool CImageUtil::LoadPGM(const QString& fileName, CImageEx& image)
 
     do
     {
-        token = strtok(NULL, seps);
+        token = azstrtok(NULL, 0, seps, &nextToken);
         if (token != NULL && token[0] == '#')
         {
-            strtok(NULL, "\n");
+            azstrtok(NULL, 0, "\n", &nextToken);
         }
     } while (token != NULL && token[0] == '#');
     width = atoi(token);
 
     do
     {
-        token = strtok(NULL, seps);
+        token = azstrtok(NULL, 0, seps, &nextToken);
         if (token != NULL && token[0] == '#')
         {
-            strtok(NULL, "\n");
+            azstrtok(NULL, 0, "\n", &nextToken);
         }
     } while (token != NULL && token[0] == '#');
     height = atoi(token);
 
     do
     {
-        token = strtok(NULL, seps);
+        token = azstrtok(NULL, 0, seps, &nextToken);
         if (token != NULL && token[0] == '#')
         {
-            strtok(NULL, "\n");
+            azstrtok(NULL, 0, "\n", &nextToken);
         }
     } while (token != NULL && token[0] == '#');
     numColors = atoi(token);
@@ -198,7 +211,7 @@ bool CImageUtil::LoadPGM(const QString& fileName, CImageEx& image)
     {
         do
         {
-            token = strtok(NULL, seps);
+            token = azstrtok(NULL, 0, seps, &nextToken);
         } while (token != NULL && token[0] == '#');
         *p++ = atoi(token);
         i++;
@@ -236,15 +249,15 @@ bool CImageUtil::LoadImage(const QString& fileName, CImageEx& image, bool* pQual
     // Only DDS has explicit sRGB flag - we'll assume by default all formats are stored in gamma space
     image.SetSRGB(true);
 
-    if (_stricmp(ext, ".bmp") == 0)
+    if (azstricmp(ext, ".bmp") == 0)
     {
         return LoadBmp(fileName, image);
     }
-    else if (_stricmp(ext, ".tif") == 0)
+    else if (azstricmp(ext, ".tif") == 0)
     {
         return CImageTIF().Load(fileName, image);
     }
-    else if (_stricmp(ext, ".jpg") == 0)
+    else if (azstricmp(ext, ".jpg") == 0)
     {
         if (pQualityLoss)
         {
@@ -252,23 +265,23 @@ bool CImageUtil::LoadImage(const QString& fileName, CImageEx& image, bool* pQual
         }
         return LoadJPEG(fileName, image);
     }
-    else if (_stricmp(ext, ".gif") == 0)
+    else if (azstricmp(ext, ".gif") == 0)
     {
         return CImageGif().Load(fileName, image);
     }
-    else if (_stricmp(ext, ".pgm") == 0)
+    else if (azstricmp(ext, ".pgm") == 0)
     {
         return LoadPGM(fileName, image);
     }
-    else if (_stricmp(ext, ".dds") == 0)
+    else if (azstricmp(ext, ".dds") == 0)
     {
         return CImage_DXTC().Load(fileName.toUtf8().data(), image, pQualityLoss);
     }
-    else if (_stricmp(ext, ".png") == 0)
+    else if (azstricmp(ext, ".png") == 0)
     {
         return CImageUtil::Load(fileName, image);
     }
-    else if (stricmp(ext, ".hdr") == 0)
+    else if (azstricmp(ext, ".hdr") == 0)
     {
         return CImageHDR().Load(fileName, image);
     }
@@ -285,22 +298,22 @@ bool CImageUtil::SaveImage(const QString& fileName, CImageEx& image)
     char ext[_MAX_EXT];
 
     // Remove the read-only attribute so the file can be overwritten.
-    QFile(fileName).setPermissions(QFile::ReadOther | QFile::WriteOther);
+    QFile(fileName).setPermissions(QFile::ReadUser | QFile::WriteUser);
 
     _splitpath(fileName.toUtf8().data(), drive, dir, fname, ext);
-    if (_stricmp(ext, ".bmp") == 0)
+    if (azstricmp(ext, ".bmp") == 0)
     {
         return SaveBitmap(fileName, image);
     }
-    else if (_stricmp(ext, ".jpg") == 0)
+    else if (azstricmp(ext, ".jpg") == 0)
     {
         return SaveJPEG(fileName, image);
     }
-    else if (_stricmp(ext, ".pgm") == 0)
+    else if (azstricmp(ext, ".pgm") == 0)
     {
         return SavePGM(fileName, image);
     }
-    else if (_stricmp(ext, ".png") == 0)
+    else if (azstricmp(ext, ".png") == 0)
     {
         return Save(fileName, image);
     }
@@ -513,7 +526,7 @@ bool CImageUtil::QImageToImage(const QImage& bitmap, CImageEx& image)
         return false;
     }
 
-    std::copy(srcBitmap->bits(), srcBitmap->bits() + (srcBitmap->width() * srcBitmap->height() * sizeof(uint32)), reinterpret_cast<uint8*>(image.GetData()));
+    AZStd::copy(srcBitmap->bits(), srcBitmap->bits() + (srcBitmap->width() * srcBitmap->height() * sizeof(uint32)), reinterpret_cast<uint8*>(image.GetData()));
 
     return true;
 }
@@ -521,7 +534,7 @@ bool CImageUtil::QImageToImage(const QImage& bitmap, CImageEx& image)
 bool CImageUtil::ImageToQImage(const CImageEx& image, QImage& bitmapObj)
 {
     bitmapObj = QImage(image.GetWidth(), image.GetHeight(), QImage::Format_RGBA8888);
-    std::copy(image.GetData(), image.GetData() + image.GetWidth() * image.GetHeight(), reinterpret_cast<uint32*>(bitmapObj.bits()));
+    AZStd::copy(image.GetData(), image.GetData() + image.GetWidth() * image.GetHeight(), reinterpret_cast<uint32*>(bitmapObj.bits()));
 
     return true;
 }

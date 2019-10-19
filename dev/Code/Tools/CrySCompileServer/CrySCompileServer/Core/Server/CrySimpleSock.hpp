@@ -20,7 +20,7 @@
 #include <Core/Common.h>
 #include <Core/STLHelper.hpp>
 
-#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_MAC)
 typedef int SOCKET;
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
@@ -30,7 +30,9 @@ typedef int SOCKET;
 #include <errno.h>
 #define closesocket close
 #else
+#ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _WINSOCK_DEPRECATED_NO_WARNINGS // till we swtich to in inet_pton and getaddrinfo
+#endif
 #include <WinSock2.h>
 #endif
 
@@ -45,6 +47,7 @@ enum EProtocolVersion
     EPV_V002,
     EPV_V0021,
     EPV_V0022,
+    EPV_V0023,
 };
 
 class CCrySimpleSock

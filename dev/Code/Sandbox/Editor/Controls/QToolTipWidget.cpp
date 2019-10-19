@@ -173,11 +173,11 @@ QToolTipWidget::QToolTipWidget(QWidget* parent)
     m_specialContent = nullptr;
     setWindowTitle("ToolTip");
     setObjectName("ToolTip");
-    setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground, true);
     m_layout = new QVBoxLayout(this);
     m_normalPos = QPoint(0, 0);
     m_arrow = new QArrow(m_background);
+    setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
     m_arrow->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
     m_arrow->setAttribute(Qt::WA_TranslucentBackground, true);
     m_background->setLayout(m_layout);
@@ -380,7 +380,7 @@ bool QToolTipWidget::IsValid()
 
 void QToolTipWidget::KeepTipOnScreen(QRect targetRect, ArrowDirection preferredArrowDir)
 {
-    QRect desktop = QApplication::desktop()->rect();
+    QRect desktop = QApplication::desktop()->availableGeometry(this);
 
     if (this->isHidden())
     {

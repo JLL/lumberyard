@@ -20,7 +20,7 @@
 #include "RCCommon.h"
 #include "native/utilities/PlatformConfiguration.h"
 #include <AzCore/Math/Uuid.h>
-#include <AssetBuilderSDk/AssetBuilderSDK.h>
+#include <AssetBuilderSDK/AssetBuilderSDK.h>
 #include "native/assetprocessor.h"
 #include <AzToolsFramework/AssetDatabase/AssetDatabaseConnection.h>
 #include <QFileInfoList>
@@ -71,12 +71,16 @@ namespace AssetProcessor
     {
         AssetBuilderSDK::ProcessJobRequest m_processJobRequest;
         AssetBuilderSDK::AssetBuilderDesc  m_assetBuilderDesc;
+        QString m_serverKey;
 
         BuilderParams(AssetProcessor::RCJob* job = nullptr)
             : Params(job)
         {}
 
         BuilderParams(const BuilderParams&) = default;
+
+        AZStd::string GetTempJobDirectory() const;
+        QString GetServerKey() const;
     };
 
     //! JobOutputInfo is used to store job related messages.
@@ -143,9 +147,7 @@ namespace AssetProcessor
         JobState GetState() const;
         void SetState(const JobState& state);
 
-        QString GetInputFileAbsolutePath() const;
         const AZ::Uuid& GetInputFileUuid() const;
-        QString GetInputFileRelativePath() const;
 
         QString GetDestination() const;
 
@@ -171,7 +173,6 @@ namespace AssetProcessor
 
         void SetJobEscalation(int jobEscalation);
 
-        void SetInputFileAbsolutePath(QString absolutePath);
         void SetCheckExclusiveLock(bool value);
 
     Q_SIGNALS:
@@ -185,23 +186,29 @@ namespace AssetProcessor
     public:
         static QString GetStateDescription(const JobState& state);
         static void ExecuteBuilderCommand(BuilderParams builderParams);
+        static void AutoFailJob(BuilderParams& builderParams);
         static bool CopyCompiledAssets(BuilderParams& params, AssetBuilderSDK::ProcessJobResponse& response);
+        //! This method will save the processJobResponse and the job log to the temp directory as xml files.
+        //! We will be modifying absolute paths in processJobResponse before saving it to the disk.
+        static bool BeforeStoringJobResult(const BuilderParams& builderParams, AssetBuilderSDK::ProcessJobResponse jobResponse);
+        //! This method will retrieve the processJobResponse and the job log from the temp directory.
+        //! This method is also responsible for emitting the server job logs to the local job log file.
+        static bool AfterRetrievingJobResult(const BuilderParams& builderParams, AssetUtilities::JobLogTraceListener& jobLogTraceListener, AssetBuilderSDK::ProcessJobResponse& jobResponse);
 
         QString GetJobKey() const;
-        QString GetWatchFolder() const;
         AZ::Uuid GetBuilderGuid() const;
         bool IsCritical() const;
         bool IsAutoFail() const;
         int GetPriority() const;
+        const AZStd::vector<JobDependencyInternal>& GetJobDependencies();
 
     protected:
         //! DoWork ensure that the job is ready for being processing and than makes the actual builder call   
         virtual void DoWork(AssetBuilderSDK::ProcessJobResponse& result, BuilderParams& builderParams, AssetUtilities::QuitListener& listener);
+        void PopulateProcessJobRequest(AssetBuilderSDK::ProcessJobRequest& processJobRequest);
 
     private:
-
         JobDetails m_jobDetails;
-        void PopulateProcessJobRequest(AssetBuilderSDK::ProcessJobRequest& processJobRequest);
         JobState m_jobState;
 
         QueueElementID m_queueElementID; // cached to prevent lots of construction of this all over the place

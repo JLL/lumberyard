@@ -26,6 +26,7 @@ namespace AssetProcessor
     class QueueElementID;
 }
 
+class RCcontrollerUnitTests;
 
 namespace AssetProcessor
 {
@@ -35,6 +36,7 @@ namespace AssetProcessor
     class RCJobListModel
         : public QAbstractItemModel
     {
+        friend class ::RCcontrollerUnitTests;
         Q_OBJECT
 
     public:
@@ -89,7 +91,8 @@ namespace AssetProcessor
         RCJob* getItem(int index) const;
         int GetIndexOfProcessingJob(const QueueElementID& elementId);
 
-        void EraseJobs(QString sourceFile, QVector<RCJob*>& pendingJobs);
+        ///! EraseJobs expects the database name of the source file.  (So with outputprefix)
+        void EraseJobs(QString sourceFileDatabaseName, QVector<RCJob*>& pendingJobs);
 
     private:
 

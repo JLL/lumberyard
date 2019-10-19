@@ -14,7 +14,9 @@
 #include "PropertyQTConstants.h"
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QLineEdit>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 
 #include "../UICore/ColorPickerDelegate.hxx"
 
@@ -118,6 +120,8 @@ namespace AzToolsFramework
 
     void PropertyColorCtrl::openColorDialog()
     {
+        m_originalColor = m_color;
+
         CreateColorDialog();
 
         if (m_pColorDialog != nullptr)
@@ -136,8 +140,15 @@ namespace AzToolsFramework
         }
 
         m_pColorDialog = new QColorDialog(m_color, this);
-        m_pColorDialog->setOption(QColorDialog::NoButtons);
+        m_pColorDialog->setOption(QColorDialog::DontUseNativeDialog);
         connect(m_pColorDialog, SIGNAL(currentColorChanged(QColor)), this, SLOT(onSelected(QColor)));
+
+        connect(m_pColorDialog, &QDialog::rejected, this,
+            [this]()
+        {
+            onSelected(m_originalColor);
+        });
+
 
         // Position the picker around cursor.
         QLayout* layout = m_pColorDialog->layout();

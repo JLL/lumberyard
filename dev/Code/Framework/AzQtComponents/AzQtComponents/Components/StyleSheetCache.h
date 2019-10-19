@@ -20,40 +20,45 @@
 #include <QSet>
 #include <QStack>
 
-class QApplication;
-class QProxyStyle;
 class QFileSystemWatcher;
 class QRegExp;
 
 namespace AzQtComponents
 {
+    class StyleManager;
+
     class AZ_QT_COMPONENTS_API StyleSheetCache
         : public QObject
     {
         Q_OBJECT
 
-    public:
-        explicit StyleSheetCache(QApplication* application, QObject* parent);
+        friend StyleManager;
+
+        explicit StyleSheetCache(QObject* parent);
         ~StyleSheetCache();
 
-        bool isUI10() const;
-        void setIsUI10(bool isUI10);
+    public:
+        static const QString& styleSheetExtension();
+
+        void addSearchPaths(const QString& searchPrefix, const QString& pathOnDisk, const QString& qrcPrefix);
+        void setFallbackSearchPaths(const QString& fallbackPrefix, const QString& pathOnDisk, const QString& qrcPrefix);
 
         QString loadStyleSheet(QString styleFileName);
 
     public Q_SLOTS:
-        void reloadStyleSheets();
+        void clearCache();
+
+    Q_SIGNALS:
+        void styleSheetsChanged();
+
+    private Q_SLOTS:
         void fileOnDiskChanged(const QString& filePath);
 
     private:
         QString preprocess(QString styleFileName, QString loadedStyleSheet);
-        QString findStyleSheetPath(QString styleFileName);
-        void applyGlobalStyleSheet();
-
+        QString findStyleSheetPath(const QString& styleFileName);
+        AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'AzQtComponents::StyleSheetCache::m_styleSheetCache': class 'QHash<QString,QString>' needs to have dll-interface to be used by clients of class 'AzQtComponents::StyleSheetCache'
         QHash<QString, QString> m_styleSheetCache;
-        bool m_isUI10 = false;
-        QApplication* m_application;
-        QString m_rootDir;
 
         QSet<QString> m_processingFiles;
         QStack<QString> m_processingStack;
@@ -61,6 +66,11 @@ namespace AzQtComponents
         QFileSystemWatcher* m_fileWatcher;
 
         QScopedPointer<QRegExp> m_importExpression;
+
+        QSet<QString> m_prefixes;
+
+        QString m_fallbackPrefix;
+        AZ_POP_DISABLE_WARNING
 };
 
 } // namespace AzQtComponents

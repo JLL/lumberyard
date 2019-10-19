@@ -10,29 +10,20 @@
 #
 # Original file Copyright Crytek GMBH or its affiliates, used under license.
 #
-# Description: Central configuration file for a branch, should never be
-#              integrated since it is unique for each branch
-#
-########### Below are various getter to expose the global values ############
-from waflib.Configure import conf, ConfigurationContext
-from waflib import Context, Utils, Logs
-from cry_utils import append_to_unique_list, split_comma_delimited_string
 
-from waf_branch_spec import BINTEMP_FOLDER
-
-from waf_branch_spec import PLATFORMS
-from waf_branch_spec import CONFIGURATIONS
-from waf_branch_spec import MONOLITHIC_BUILDS
-from waf_branch_spec import AVAILABLE_LAUNCHERS
-from waf_branch_spec import LUMBERYARD_VERSION
-from waf_branch_spec import LUMBERYARD_BUILD
-from waf_branch_spec import CONFIGURATION_SHORTCUT_ALIASES
-from waf_branch_spec import PLATFORM_CONFIGURATION_FILTER
-from waf_branch_spec import ADDITIONAL_COPYRIGHT_TABLE
-import json
 import os
 import subprocess
 
+from waflib import Context, Utils, Logs, Errors
+from waflib.Configure import conf, ConfigurationContext
+from cry_utils import append_to_unique_list, split_comma_delimited_string
+
+from waf_branch_spec import BINTEMP_FOLDER
+from waf_branch_spec import CACHE_FOLDER
+from waf_branch_spec import AVAILABLE_LAUNCHERS
+from waf_branch_spec import LUMBERYARD_VERSION
+from waf_branch_spec import LUMBERYARD_BUILD
+from waf_branch_spec import ADDITIONAL_COPYRIGHT_TABLE
 
 
 # Copyright table lookup by copyright organization ( copyright_org for the wscript keyword. )
@@ -50,115 +41,52 @@ for additional_copyright_org in ADDITIONAL_COPYRIGHT_TABLE:
     COPYRIGHT_TABLE[additional_copyright_org] = COPYRIGHT_TABLE[additional_copyright_org]
 
 
-# To handle platform aliases that can map to one or more actual platforms (Above).
-# Make sure to maintain and update the alias based on updates to the PLATFORMS
-# dictionary
-PLATFORM_SHORTCUT_ALIASES = {
-    'win': [
-        'win_x64_vs2017',
-        'win_x64_vs2015',
-        'win_x64_vs2013',
-    ],
-    'darwin': [
-        'darwin_x64',
-    ],
-    'android': [
-        'android_armv7_gcc',
-        'android_armv7_clang',
-        'android_armv8_clang',
-    ],
-    'linux': [
-        'linux_x64',
-    ],
-    'all': [
-        'darwin_x64',
-        'ios',
-        'appletv',
-        'win_x64_vs2017',
-        'win_x64_vs2015',
-        'win_x64_vs2013',
-        'android_armv7_gcc',
-        'android_armv7_clang',
-        'android_armv8_clang',
-    ],
-
-    # Compilers
-    'msvc': [
-        'win_x64_vs2017',
-        'win_x64_vs2015',
-        'win_x64_vs2013',
-    ],
-    'clang': [
-        'darwin_x64',
-        'ios',
-        'appletv',
-        'android_armv7_clang',
-        'android_armv8_clang',
-    ],
-    'gcc': [
-        'android_armv7_gcc'
-    ],
-}
-
-
-# Only allow specific build platforms to be included in specific versions of MSVS since not all target platforms are
-# compatible with all MSVS version
-MSVS_PLATFORM_VERSION = {
-    'win_x64_vs2017'     : ['15'],
-    'win_x64_vs2015'     : ['14'],
-    'win_x64_vs2013'     : ['2013'],
-    'android_armv7_clang': ['2013', '14']
-}
-
-# Table of mapping between WAF target platforms and MSVS target platforms
-WAF_PLATFORM_TO_VS_PLATFORM_PREFIX_AND_TOOL_SET_DICT = {
-    'win_x86'               :   ('Win32', 'win', ['v120'], 'Win32'),
-    'win_x64_vs2017'        :   ('x64 vs2017', 'win', ['v141'], 'Win32'),
-    'win_x64_vs2015'        :   ('x64 vs2015', 'win', ['v140'], 'Win32'),
-    'win_x64_vs2013'        :   ('x64 vs2013', 'win', ['v120'], 'Win32'),
-    'android_armv7_clang'   :   ('ARM', 'android', ['v120', 'v140'], 'ARM'),
-}
-
-# Helper method to reverse the waf platform to vs platform and prefix dict (WAF_PLATFORM_TO_VS_PLATFORM_AND_PREFIX_DICT)
-# to a vs to waf platform and prefix dict dictionary.
-def _waf_platform_dict_to_vs_dict(src_dict):
-
-    dict_result = {}
-    src_keys = src_dict.viewkeys()
-
-    for src_key in src_keys:
-        src_value_tuple = src_dict[src_key]
-
-        if not isinstance(src_value_tuple, tuple):
-            raise ValueError('Value of key entry {} must be a tuple'.format(src_key))
-
-        src_value = src_value_tuple[0]
-        if not isinstance(src_value, str):
-            raise ValueError('Tuple value(0) of key entry {} must be a string'.format(src_key))
-        prefix_value = src_value_tuple[1]
-        if not isinstance(prefix_value, str):
-            raise ValueError('Tuple value(1) of key entry {} must be a string'.format(src_key))
-        toolset_value = src_value_tuple[2]
-        if not isinstance(toolset_value, list):
-            raise ValueError('Tuple value(2) of key entry {} must be a list'.format(src_key))
-
-        if src_value in dict_result:
-            raise ValueError('Duplicate value of {} found in source dictionary'.format(src_value))
-        dict_result[src_value] = (src_key, prefix_value, list(toolset_value))
-
-    return dict_result
-
-
-# Table of MSVS target platforms to WAF platforms.  This is a reverse list of WAF_PLATFORM_TO_VS_PLATFORM_PREFIX_AND_TOOL_SET_DICT
-VS_PLATFORM_TO_WAF_PLATFORM_PREFIX_AND_TOOL_SET_DICT = _waf_platform_dict_to_vs_dict(WAF_PLATFORM_TO_VS_PLATFORM_PREFIX_AND_TOOL_SET_DICT)
-
-
-
-#############################################################################
-#############################################################################
 @conf
-def get_bintemp_folder_node(self):
-    return self.root.make_node(Context.launch_dir).make_node(BINTEMP_FOLDER)
+def get_bintemp_folder_node(ctx):
+    """
+    Get the Node for BinTemp. The location of BinTemp relative to the context depends on the context type and if it has a build variant:
+    
+    1. If ctx is a ConfigurationContext (ie lmbr_waf configure), then there is no bldnode set in the context, so we will derive the BinTemp
+       location from the 'path' attribute, which should be the root of the project
+    2. If ctx is a BuildContext, but has no variant (ie it is a 'project_generator' platform like msvs, android_studio, etc), then the 'bldnode'
+       will be the BinTemp folder
+    3. If ctx is a BuildContext and has a build variant, then it is a build_ command. The BinTemp folder should be the parent folder of the
+       variant folder.
+    """
+    try:
+        return ctx.bintemp_node
+    except AttributeError:
+        if hasattr(ctx, 'bldnode'):
+            # If this build context has no variant (ie project generator tasks), then the bldnode will point
+            # directly to BinTemp
+            if str(ctx.bldnode) == BINTEMP_FOLDER:
+                check_bintemp = ctx.bldnode
+            else:
+                check_bintemp = ctx.bldnode.parent
+
+            if str(check_bintemp) != BINTEMP_FOLDER:
+                raise Errors.WafError("[ERROR] Expected BinTemp for bldnode but found {}".format(os.path.dirname(ctx.bldnode.abspath())))
+
+            ctx.bintemp_node = check_bintemp
+        else:
+            # If the current context does not have a 'bldnode' setup, that means it is not setup yet. We can still
+            # derive the location based on the 'path' attribute which should the project root
+            ctx.bintemp_node = ctx.path.make_node(BINTEMP_FOLDER)
+        return ctx.bintemp_node
+
+
+@conf
+def get_cache_folder_node(ctx):
+    """
+    Get the Node for the Cache folder
+    """
+    try:
+        return ctx.cache_folder_node
+    except AttributeError:
+        # The cache folder node will always be at the same level as BinTemp
+        bintemp_node = ctx.get_bintemp_folder_node()
+        ctx.cache_folder_node = bintemp_node.parent.make_node(CACHE_FOLDER)
+        return ctx.cache_folder_node
 
 #############################################################################
 @conf
@@ -168,7 +96,7 @@ def get_dep_proj_folder_name(self, msvs_ver):
     else:
         return self.options.visual_studio_solution_name + '_vs' + msvs_ver + '.depproj'
 
-#############################################################################
+
 @conf
 def get_project_output_folder(self, msvs_ver):
     project_folder_node = self.root.make_node(Context.launch_dir).make_node(self.options.visual_studio_solution_folder).make_node(self.get_dep_proj_folder_name(msvs_ver))
@@ -198,22 +126,12 @@ def get_appletv_project_name(self):
 def get_ios_project_name(self):
     return self.options.ios_project_folder + '/' + self.options.ios_project_name
 
+
 @conf
 def get_mac_project_name(self):
     return self.options.mac_project_folder + '/' + self.options.mac_project_name
 
-@conf
-def get_platform_alias(self, platform_key):
-    """
-    Return the expanded value of a (target) platform alias if any.  If no alias, return None
-    """
-    if platform_key in PLATFORM_SHORTCUT_ALIASES:
-        return PLATFORM_SHORTCUT_ALIASES[platform_key]
-    else:
-        return None
 
-#############################################################################
-#############################################################################
 @conf
 def get_company_name(self, project, copyright_org):
 
@@ -249,25 +167,12 @@ def get_copyright(self, project, copyright_org):
     else:
         return COPYRIGHT_TABLE['Amazon']
 
+@conf
+def _get_valid_platform_info_filename(self):
+    return "valid_configuration_platforms.json"
 
 #############################################################################
 #############################################################################
-
-
-@conf
-def get_supported_platforms(self):
-    """
-    Deprecated in favor of get_available_platforms()
-    """
-    return self.get_available_platforms()
-
-
-@conf
-def mark_supported_platform_for_removal(conf, platform_to_remove):
-    """
-    Deprecated in favor of remove_platform_from_available_platforms()
-    """
-    conf.remove_platform_from_available_platforms(platform_to_remove)
 
 
 # Attempt to import the winregistry module.
@@ -309,8 +214,20 @@ def check_cpp_platform_tools(toolsetVer, platform_tool_name, vs2017vswhereOption
             vswhere_exe = find_vswhere()
             if vswhere_exe == '':
                 return False
+
             installation_path = subprocess.check_output([vswhere_exe, '-property', 'installationPath'] + vs2017vswhereOptions)
+            if not installation_path:
+                try:
+                    version_arg_index = vs2017vswhereOptions.index('-version')
+                    Logs.warn('[WARN] VSWhere could not find an installed version of Visual Studio matching the version requirements provided (-version {}). Attempting to fall back on any available installed version.'.format(vs2017vswhereOptions[version_arg_index + 1]))
+                    Logs.warn('[WARN] Lumberyard defaults the version range to the maximum version tested against before each release. You can modify the version range in the WAF user_settings\' option win_vs2017_vswhere_args under [Windows Options].')
+                    del vs2017vswhereOptions[version_arg_index : version_arg_index + 2]
+                    installation_path = subprocess.check_output([vswhere_exe, '-property', 'installationPath'] + vs2017vswhereOptions)
+                except ValueError:
+                    pass
+
             installation_path = installation_path[:len(installation_path)-2]
+            Logs.info('[INFO] Using Visual Studio version installed at: {}'.format(installation_path))
             build_root = os.path.join(installation_path, 'MSBuild', toolsetVer+'.0')
             props_file = os.path.join(build_root, 'Microsoft.common.props')
             return os.path.exists(props_file)
@@ -327,40 +244,52 @@ def check_cpp_platform_tools(toolsetVer, platform_tool_name, vs2017vswhereOption
 
 
 @conf
-def check_msvs_compatibility(self, waf_platform, version):
-    """
-    Determine if a waf_platform is compatible with a version of MSVS
-    """
-    if not waf_platform in MSVS_PLATFORM_VERSION:
-        return False
-    if not version in MSVS_PLATFORM_VERSION[waf_platform]:
-        return False
+def get_available_launchers(self, project):
 
-    # Additionally filter out platforms that do not have a valid installed toolset
-    msvs_toolset_name = WAF_PLATFORM_TO_VS_PLATFORM_PREFIX_AND_TOOL_SET_DICT[waf_platform][3]
+    if self.is_option_true('use_unified_launcher'):
+        return {
+            'modules':
+            [
+                'ClientLauncher',
+                'ServerLauncher'
+            ]
+        }
 
-    if not check_cpp_platform_tools(self.msvs_version, msvs_toolset_name, self.options.win_vs2017_vswhere_args.split()):
-        Logs.warn("[WARN] Skipping platform '{}' because it is not installed "
-                  "properly for this version of visual studio".format(waf_platform))
-        return False
+    launchers_to_exclude = set()
+    if not self.is_target_platform_enabled('android'):
+        # If android is disabled, remove add it to the launchers to exclude
+        launchers_to_exclude.add('AndroidLauncher')
 
-    else:
-        return True
+    # Get the dictionary for the launchers
+    available_launchers = { 'modules': [fl for fl in AVAILABLE_LAUNCHERS['modules'] if fl not in launchers_to_exclude] }
+
+    # Get the list of all the launchers
+    projects_settings = self.get_project_settings_map()
+    additional_launchers = projects_settings.get(project, {}).get('additional_launchers', [])
+    
+    for p0, _, _, _ in self.env['RESTRICTED_PLATFORMS']:
+        restricted_launcher_name = '{}Launcher'.format(p0)
+        append_to_unique_list(additional_launchers, restricted_launcher_name)
+        pass
+
+    # Update the modules in the dictionary to include the additional launchers
+    for additional_launcher in additional_launchers:
+        if additional_launcher not in available_launchers['modules']:
+            available_launchers['modules'].append(additional_launcher)
+
+    # Check if there is a list of restricted launchers
+    restricted_launchers = projects_settings.get(project, {}).get('restricted_launchers', [])
+
+    # Remove the modules in the dictionary if there is a restricted list
+    if len(restricted_launchers) > 0:
+        for key in available_launchers:
+            modules = available_launchers[key]
+            launchers = [launcher for launcher in modules if launcher in restricted_launchers]
+            available_launchers[key] = launchers
+
+    return available_launchers
 
 
-#############################################################################
-@conf
-def get_supported_configurations(self, platform=None):
-    return PLATFORM_CONFIGURATION_FILTER.get(platform, CONFIGURATIONS)
-
-
-#############################################################################
-@conf
-def get_available_launchers(self):
-    return AVAILABLE_LAUNCHERS
-
-#############################################################################
-#############################################################################
 @conf
 def get_project_vs_filter(self, target):
     if not hasattr(self, 'vs_project_filters'):
@@ -371,8 +300,7 @@ def get_project_vs_filter(self, target):
 
     return self.vs_project_filters[target]
 
-#############################################################################
-#############################################################################
+
 def _load_android_settings(ctx):
     """ Helper function for loading the global android settings """
 
@@ -380,7 +308,7 @@ def _load_android_settings(ctx):
         return
 
     ctx.android_settings = {}
-    settings_file = ctx.root.make_node(Context.launch_dir).make_node([ '_WAF_', 'android', 'android_settings.json' ])
+    settings_file = ctx.engine_node.make_node(['_WAF_','android','android_settings.json'])
     try:
         ctx.android_settings = ctx.parse_json_file(settings_file)
     except Exception as e:
@@ -400,7 +328,7 @@ def get_android_dev_keystore_alias(conf):
 @conf
 def get_android_dev_keystore_path(conf):
     local_path = _get_android_setting(conf, 'DEV_KEYSTORE')
-    debug_ks_node = conf.root.make_node(Context.launch_dir).make_node(local_path)
+    debug_ks_node = conf.engine_node.make_node(local_path)
     return debug_ks_node.abspath()
 
 @conf
@@ -410,7 +338,7 @@ def get_android_distro_keystore_alias(conf):
 @conf
 def get_android_distro_keystore_path(conf):
     local_path = _get_android_setting(conf, 'DISTRO_KEYSTORE')
-    release_ks_node = conf.root.make_node(Context.launch_dir).make_node(local_path)
+    release_ks_node = conf.engine_node.make_node(local_path)
     return release_ks_node.abspath()
 
 @conf
@@ -501,8 +429,7 @@ def get_android_project_absolute_path(self):
 def get_android_patched_libraries_relative_path(self):
     return self.get_android_project_relative_path() + '/' + 'AndroidLibraries'
 
-#############################################################################
-#############################################################################
+
 def _load_environment_file(ctx):
     """ Helper function for loading the environment file created by Setup Assistant """
 
@@ -510,24 +437,26 @@ def _load_environment_file(ctx):
         return
 
     ctx.local_environment = {}
-    settings_file = ctx.root.make_node(Context.launch_dir).make_node([ '_WAF_', 'environment.json' ])
+    settings_file = ctx.get_engine_node().make_node('_WAF_').make_node('environment.json')
     try:
         ctx.local_environment = ctx.parse_json_file(settings_file)
     except Exception as e:
         ctx.cry_file_error(str(e), settings_file.abspath())
 
+
 def _get_environment_file_var(ctx, env_var):
     _load_environment_file(ctx)
     return ctx.local_environment[env_var]
+
 
 @conf
 def get_env_file_var(conf, env_var, required = False, silent = False):
 
     try:
         return _get_environment_file_var(conf, env_var)
-    except:
+    except Exception as e:
         if not silent:
-            message = 'Failed to find %s in _WAF_/environment.json.' % env_var
+            message = 'Failed to find {} in _WAF_/environment.json: {}'.format(env_var, e)
             if required:
                 Logs.error('[ERROR] %s' % message)
             else:
@@ -536,8 +465,6 @@ def get_env_file_var(conf, env_var, required = False, silent = False):
 
     return ''
 
-#############################################################################
-#############################################################################
 
 def _load_specs(ctx):
     """ Helper function to find all specs stored in _WAF_/specs/*.json """
@@ -587,16 +514,16 @@ def loaded_specs(ctx):
 spec_entry_cache = {}
 
 def _spec_entry(ctx, entry, spec_name=None, platform=None, configuration=None):
-    """ Util function to load a specifc spec entry (always returns a list) """
+    """ Util function to load a specific spec entry (always returns a list) """
+
+    if not spec_name: # Fall back to command line specified spec if none was given
+        spec_name = ctx.options.project_spec
 
     cache_key = '{}_{}_{}_{}'.format(entry, spec_name, platform, configuration)
     if cache_key in spec_entry_cache:
         return spec_entry_cache[cache_key]
 
     _load_specs(ctx)
-
-    if not spec_name: # Fall back to command line specified spec if none was given
-        spec_name = ctx.options.project_spec
 
     spec = ctx.loaded_specs_dict.get(spec_name, None)
     if not spec:
@@ -611,12 +538,8 @@ def _spec_entry(ctx, entry, spec_name=None, platform=None, configuration=None):
     # from mutating the list with a bunch of duplicate entries
     res = _to_list( spec.get(entry, []) )[:]
 
-    # The options context is missing an env attribute, hence don't try to find platform settings in this case
-    if hasattr(ctx, 'env'):
-        if not platform:
-            platform = ctx.env['PLATFORM']
-        if not configuration:
-            configuration = ctx.env['CONFIGURATION']
+    # include the platform/config specific modules, if supplied
+    if platform and configuration:
         res += ctx.GetPlatformSpecificSettings(spec, entry, platform, configuration)
 
     spec_entry_cache[cache_key] = res
@@ -628,20 +551,35 @@ spec_modules_cache = {}
 def spec_modules(ctx, spec_name = None, platform=None, configuration=None):
     """ Get all a list of all modules needed for this spec """
 
+    if not spec_name: # Fall back to command line specified spec if none was given
+        spec_name = ctx.options.project_spec
+
     cache_key = '{}_{}_{}'.format(spec_name, platform, configuration)
     if cache_key in spec_modules_cache:
         return spec_modules_cache[cache_key]
 
-    module_list = _spec_entry(ctx, 'modules', spec_name)
-    if platform is not None:
-        platform_filtered_module_list = [module for module in module_list if platform in ctx.get_module_platforms(module)]
-        module_list = platform_filtered_module_list
-    if configuration is not None:
-        configuration_filtered_module_list = [module for module in module_list if configuration in ctx.get_module_configurations(module, platform)]
-        module_list = configuration_filtered_module_list
+    module_list = _spec_entry(ctx, 'modules', spec_name, platform, configuration)
 
-    spec_modules_cache[cache_key] = module_list
-    return module_list
+    spec_name_for_warning = spec_name if spec_name else ctx.options.project_spec
+
+    filtered_module_list = []
+    for module in module_list:
+        if module in filtered_module_list:
+            ctx.warn_once("Duplicate module '{}' in spec '{}'".format(module, spec_name_for_warning))
+        elif not ctx.is_valid_module(module):
+            ctx.warn_once("Invalid module '{}' in spec '{}'".format(module, spec_name_for_warning))
+        else:
+            filtered_module_list.append(module)
+
+    if platform is not None:
+        platform_filtered_module_list = [module for module in filtered_module_list if platform in ctx.get_module_platforms(module)]
+        filtered_module_list = platform_filtered_module_list
+    if configuration is not None:
+        configuration_filtered_module_list = [module for module in filtered_module_list if configuration in ctx.get_module_configurations(module, platform)]
+        filtered_module_list = configuration_filtered_module_list
+
+    spec_modules_cache[cache_key] = filtered_module_list
+    return filtered_module_list
 
 
 @conf
@@ -654,8 +592,14 @@ def is_target_enabled(ctx, target):
     """
     Check if the target is enabled for the build based on whether a spec file was specified
     """
+    project_spec = ctx.options.project_spec
+
+    # prevent sending an empty list form being passed down in the unlikely chance the keys don't exist
+    platform = ctx.env['PLATFORM'] or None
+    config = ctx.env['CONFIGURATION'] or None
+
     if is_project_spec_specified(ctx):
-        return (target in ctx.spec_modules(ctx.options.project_spec)) or (target in ctx.get_all_module_uses(ctx.options.project_spec))
+        return (target in ctx.spec_modules(project_spec, platform, config)) or (target in ctx.get_all_module_uses(project_spec, platform, config))
     else:
         # No spec means all projects are enabled
         return True
@@ -693,17 +637,73 @@ def spec_visual_studio_name(ctx, spec_name = None):
 
 
 @conf
+def spec_exclude_test_configurations(ctx, spec_name = None):
+
+    exclude_test_configurations = _spec_entry(ctx, 'exclude_test_configurations', spec_name)
+    if not exclude_test_configurations:
+        return False
+    return exclude_test_configurations[0]
+
+
+@conf
+def spec_exclude_monolithic_configurations(ctx, spec_name=None):
+
+    exclude_test_configurations = _spec_entry(ctx, 'exclude_monolithic_configurations', spec_name)
+    if not exclude_test_configurations:
+        return False
+    return exclude_test_configurations[0]
+
+
+# The GAME_FOLDER_MAP is used as an optional dictionary that maps a game name to a specific folder.  This dictionary is
+# populated based on the current spec that is used.  By default, the game name and the folder name are the same.
+GAME_FOLDER_MAP = {}
+
+
+@conf
+def get_game_asset_folder(_, game_name):
+    global GAME_FOLDER_MAP
+    return GAME_FOLDER_MAP.get(game_name,game_name)
+
+
+@conf
+def spec_override_gems_json(ctx, spec_name = None):
+    return _spec_entry(ctx, 'override_gems_json', spec_name)
+
+
+@conf
+def spec_additional_code_folders(ctx, spec_name = None):
+    return _spec_entry(ctx, 'additional_code_folders', spec_name)
+
+
+@conf
 def spec_game_projects(ctx, spec_name=None):
     """
     Get and game projects defined for the spec.  Will strip out duplicate entries
     """
+    project_settings_map = ctx.get_project_settings_map()
 
     game_projects = _spec_entry(ctx, 'game_projects', spec_name)
     if game_projects is None:
         return []
     unique_list = list()
     for game_project in game_projects:
-        append_to_unique_list(unique_list, game_project)
+        if game_project in project_settings_map:
+            append_to_unique_list(unique_list, game_project)
+
+    # Check if this spec has any game->folder map
+    global GAME_FOLDER_MAP
+    spec_game_folder_map_list = _spec_entry(ctx, 'game_folders', spec_name)
+    if spec_game_folder_map_list and len(spec_game_folder_map_list) > 0:
+        # If there is an override game folder map in the spec, then validate its uniqueness and add it to the map
+        spec_game_folder_map = spec_game_folder_map_list[0]
+        for game_name, game_folder in spec_game_folder_map.items():
+            if game_name in GAME_FOLDER_MAP:
+                current_game_folder = GAME_FOLDER_MAP[game_name]
+                if current_game_folder != game_folder:
+                    raise Errors.WafError('Conflicting game name to folder map detected in spec {}'.format(spec_name))
+            else:
+                GAME_FOLDER_MAP[game_name] = game_folder
+
     return unique_list
 
 
@@ -725,12 +725,13 @@ def spec_description(ctx, spec_name = None):
     assert( len(description) == 1 )
     return description[0]
 
+
 @conf
 def spec_disable_games(ctx, spec_name = None):
     """ For a given spec, are game projects disabled?  For example, tool-only specs do this."""
 
     # If no spec is supplied, then no games are disabled
-    if len(ctx.options.project_spec)==0:
+    if len(ctx.options.project_spec)==0 and not spec_name:
         return False
 
     disable_games = _spec_entry(ctx, 'disable_game_projects', spec_name)
@@ -741,252 +742,60 @@ def spec_disable_games(ctx, spec_name = None):
 
 
 @conf
-def spec_monolithic_build(ctx, spec_name = None):
-    """ Return true if the current platform|configuration should be a monolithic build in this spec """
-    if not spec_name: # Fall back to command line specified spec if none was given
-        spec_name = ctx.options.project_spec
-
-    configuration = ctx.env['CONFIGURATION']
-    platform = ctx.get_platform_list(ctx.env['PLATFORM'])
-
-    is_monolithic = ctx.is_variant_monolithic(platform, configuration)
-    Logs.debug("lumberyard: spec_monolithic_build(" + str(platform) + spec_name + ") == {}".format(str(is_monolithic)))
-
-    return is_monolithic
-
-
-@conf
-def is_variant_monolithic(ctx, platform, configuration):
-    """
-    Check to see if any variation of the desired platform and configuration is intended
-    to be built as monolithic
-    """
-    current_plats = platform
-    if isinstance(current_plats, str):
-        current_plats = ctx.get_platform_list(current_plats)
-
-    current_confs = configuration
-    if isinstance(current_confs, str):
-        current_confs = [current_confs] # it needs to be a list
-
-    # Check for entry in <platform> style
-    variants = [plat.strip() for plat in current_plats]
-
-    # Check for entry in <configuration>
-    variants += [config.strip() for config in current_confs]
-
-    # Check for entry in <platform>_<configuration> style
-    variants += ['{}_{}'.format(plat.strip(), config.strip()) for plat in current_plats for config in current_confs]
-
-    return len(set(variants).intersection(MONOLITHIC_BUILDS)) > 0
+def spec_additional_launchers(ctx, spec_name = None):
+    """ For a given spec, add any additional custom launchers"""
+    if spec_name is None and len(ctx.options.project_spec)==0:
+        specs_to_include = [spec for spec in ctx.loaded_specs() if not ctx.spec_disable_games(spec)]
+        additional_launcher_for_all_specs = []
+        for spec in specs_to_include:
+            spec_additional_launchers = _spec_entry(ctx, 'additional_launchers', spec)
+            append_to_unique_list(additional_launcher_for_all_specs, spec_additional_launchers)
+        return additional_launcher_for_all_specs
+    else:
+        additional_launcher_projects = _spec_entry(ctx, 'additional_launchers', spec_name)
+    return additional_launcher_projects
 
 
 @conf
-def is_cmd_monolithic(ctx):
-    '''
-    Determine if a build command is tagged as a monolithic build
-    '''
-    for monolithic_key in MONOLITHIC_BUILDS:
-        if monolithic_key in ctx.cmd:
-            return True
+def project_launchers(ctx, default_launchers, spec_name = None):
 
-    return False
+    launchers = set(default_launchers)
+
+    projects_settings = ctx.get_project_settings_map()
+
+    enabled_game_projects = ctx.get_enabled_game_project_list()
+    if len(enabled_game_projects) == 0:
+        # No game projects, so no launchers
+        return []
+
+    # Add any spec defined launchers
+    spec_launchers = spec_additional_launchers(ctx,spec_name)
+    for spec_launcher in spec_launchers:
+        launchers.add(spec_launcher)
+
+    # First pass is to collect all the additional launchers
+    for project_name, project_values in projects_settings.items():
+        if 'additional_launchers' in project_values:
+            for additional_launcher in project_values['additional_launchers']:
+                launchers.add(additional_launcher)
+
+    return list(launchers)
+
+
+@conf
+def spec_restricted_launchers(ctx, spec_name = None):
+    """ For a given spec, See if we are restricting particular launchers for the spec"""
+    if spec_name is None and len(ctx.options.project_spec) == 0:
+        specs_to_restrict = [spec for spec in ctx.loaded_specs() if not ctx.spec_disable_games(spec)]
+        restricted_launcher_list = []
+        for spec in specs_to_restrict:
+            spec_restrict_launchers = _spec_entry(ctx, 'restricted_launchers', spec)
+            append_to_unique_list(restricted_launcher_list, spec_restrict_launchers)
+        return restricted_launcher_list
+    else:
+        additional_launcher_projects = _spec_entry(ctx, 'restricted_launchers', spec_name)
+    return additional_launcher_projects
 
 
 # Set global output directory
 setattr(Context.g_module, Context.OUT, BINTEMP_FOLDER)
-
-# List of platform specific envs that will be filtered out in the env cache
-ELIGIBLE_PLATFORM_SPECIFIC_ENV_KEYS = [ 'INCLUDES',
-                                        'FRAMEWORKPATH',
-                                        'DEFINES',
-                                        'CPPFLAGS',
-                                        'CCDEPS',
-                                        'CFLAGS',
-                                        'ARCH',
-                                        'CXXDEPS',
-                                        'CXXFLAGS',
-                                        'DFLAGS',
-                                        'LIB',
-                                        'STLIB',
-                                        'LIBPATH',
-                                        'STLIBPATH',
-                                        'LINKFLAGS',
-                                        'RPATH',
-                                        'LINKDEPS',
-                                        'FRAMEWORK',
-                                        'ARFLAGS',
-                                        'ASFLAGS']
-
-
-@conf
-def preprocess_platform_list(ctx, platforms, auto_populate_empty=False):
-    """
-    Preprocess a list of platforms from user input
-    """
-    host_platform = Utils.unversioned_sys_platform()
-    processed_platforms = set()
-    if (auto_populate_empty and len(platforms) == 0) or 'all' in platforms:
-        for platform in PLATFORMS[host_platform]:
-            processed_platforms.add(platform)
-    else:
-        for platform in platforms:
-            if platform in PLATFORMS[host_platform]:
-                processed_platforms.add(platform)
-            else:
-                aliased_platforms = ctx.get_platform_alias(platform)
-                if aliased_platforms:
-                    for aliased_platform in aliased_platforms:
-                        processed_platforms.add(aliased_platform)
-    return processed_platforms
-
-@conf
-def preprocess_configuration_list(ctx, target, target_platform, configurations, auto_populate_empty=False):
-    """
-    Preprocess a list of configurations based on an optional target_platform filter from user input
-    """
-
-    processed_configurations = set()
-    if (auto_populate_empty and len(configurations) == 0) or 'all' in configurations:
-        for configuration in CONFIGURATIONS:
-            processed_configurations.add(configuration)
-    else:
-        for configuration in configurations:
-            # Matches an existing configuration
-            if configuration in CONFIGURATIONS:
-                processed_configurations.add(configuration)
-            # Matches an alias
-            elif configuration in CONFIGURATION_SHORTCUT_ALIASES:
-                for aliased_configuration in CONFIGURATION_SHORTCUT_ALIASES[configuration]:
-                    processed_configurations.add(aliased_configuration)
-            elif ':' in configuration and target_platform is not None:
-                # Could be a platform-only configuration, split into components
-                configuration_parts = configuration.split(':')
-                split_platform = configuration_parts[0]
-                split_configuration = configuration_parts[1]
-
-                # Apply the configuration alias here as well
-                if split_configuration in CONFIGURATION_SHORTCUT_ALIASES:
-                    split_configurations = CONFIGURATION_SHORTCUT_ALIASES[split_configuration]
-                elif split_configuration in CONFIGURATIONS:
-                    split_configurations = [split_configuration]
-                else:
-                    split_configurations = []
-                    if target:
-                        Logs.warn('[WARN] configuration value {} in module {} is invalid.'.format(configuration, target))
-                    else:
-                        Logs.warn('[WARN] configuration value {}.'.format(configuration))
-
-                # Apply the platform alias here as well
-                split_platforms = preprocess_platform_list(ctx,[split_platform])
-
-                # Iterate through the platform(s) and add the matched configurations
-                for split_platform in split_platforms:
-                    if split_platform == target_platform:
-                        for split_configuration in split_configurations:
-                            processed_configurations.add(split_configuration)
-            else:
-                if target:
-                    Logs.warn('[WARN] configuration value {} in module {} is invalid.'.format(configuration, target))
-                else:
-                    Logs.warn('[WARN] configuration value {}.'.format(configuration))
-
-    return processed_configurations
-
-VC120_CAPABILITY = ('vc120','Visual Studio 2013')
-VC140_CAPABILITY = ('vc140','Visual Studio 2015')
-VC141_CAPABILITY = ('vc141','Visual Studio 2017')
-ANDROID_CAPABILITY = ('compileandroid','Compile For Android')
-IOS_CAPABILITY = ('compileios','Compile for iOS')
-
-PLATFORM_TO_CAPABILITY_MAP = {
-    'win_x64_vs2017':       VC141_CAPABILITY,
-    'win_x64_vs2015':       VC140_CAPABILITY,
-    'win_x64_vs2013':       VC120_CAPABILITY,
-    'android_armv7_gcc':    ANDROID_CAPABILITY,
-    'android_armv7_clang':  ANDROID_CAPABILITY,
-    'android_armv8_clang':  ANDROID_CAPABILITY,
-    'ios':                  IOS_CAPABILITY,
-    'appletv':              IOS_CAPABILITY,
-}
-
-VALIDATED_CONFIGURATIONS_FILENAME = "valid_configuration_platforms.json"
-AVAILABLE_PLATFORMS = None
-
-
-@conf
-def get_validated_platforms_node(conf):
-    return conf.get_bintemp_folder_node().make_node(VALIDATED_CONFIGURATIONS_FILENAME)
-
-
-@conf
-def get_available_platforms(conf):
-
-    is_configure_context = isinstance(conf, ConfigurationContext)
-    validated_platforms_node = conf.get_validated_platforms_node()
-    validated_platforms_json = conf.parse_json_file(validated_platforms_node) if os.path.exists(validated_platforms_node.abspath()) else None
-
-    global AVAILABLE_PLATFORMS
-    if AVAILABLE_PLATFORMS is None:
-
-        # Get all of the available target platforms for the current host platform
-        host_platform = Utils.unversioned_sys_platform()
-
-        # fallback option for android if the bootstrap params is empty
-        android_enabled_var = conf.get_env_file_var('ENABLE_ANDROID', required=False, silent=True)
-        android_enabled = (android_enabled_var == 'True')
-
-        # Check the enabled capabilities from the bootstrap parameter.  This value is set by the setup assistant
-        enabled_capabilities = conf.get_enabled_capabilities()
-        validated_platforms = []
-        for platform in PLATFORMS[host_platform]:
-
-            platform_capability = PLATFORM_TO_CAPABILITY_MAP.get(platform,None)
-            if platform_capability is not None:
-                if len(enabled_capabilities) > 0 and platform_capability[0] not in enabled_capabilities:
-                    # Only log the target platform removal during the configure process
-                    if isinstance(conf, ConfigurationContext):
-                        Logs.info('[INFO] Removing target platform {} due to "{}" not checked in Setup Assistant.'
-                                  .format(platform, platform_capability[1]))
-                    continue
-
-            # Perform extra validation of platforms that can be disabled through options
-            if platform.startswith('android') and not android_enabled:
-                continue
-
-            if not is_configure_context and validated_platforms_json:
-                if platform not in validated_platforms_json:
-                    continue
-
-            validated_platforms.append(platform)
-
-        AVAILABLE_PLATFORMS = validated_platforms
-    return AVAILABLE_PLATFORMS
-
-
-@conf
-def remove_platform_from_available_platforms(conf, platform_to_remove):
-
-    current_available_platforms = conf.get_available_platforms()
-    updated_available_platforms = []
-    for current_available_platform in current_available_platforms:
-        if current_available_platform != platform_to_remove:
-            updated_available_platforms.append(current_available_platform)
-
-    global AVAILABLE_PLATFORMS
-    AVAILABLE_PLATFORMS = updated_available_platforms
-
-
-@conf
-def update_validated_platforms(conf):
-
-    current_available_platforms = conf.get_available_platforms()
-    validated_platforms_node = conf.get_validated_platforms_node()
-
-    # write out the list of platforms that were successfully configured
-    json_data = json.dumps(current_available_platforms)
-    try:
-        validated_platforms_node.write(json_data)
-    except Exception as e:
-        # If the file cannot be written to, warn, but dont fail.
-        Logs.warn("[WARN] Unable to update validated configurations file '{}' ({})".format(validated_platforms_node.abspath(),e.message))

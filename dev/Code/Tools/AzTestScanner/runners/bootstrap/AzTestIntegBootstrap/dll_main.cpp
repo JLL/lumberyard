@@ -9,8 +9,10 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
+#define NOMINMAX
 #include <windows.h>
 
+#include <AzCore/Memory/AllocatorScope.h>
 #include <AzGameFramework/Application/GameApplication.h>
 #include <IGameStartup.h>
 #include <IEditorGame.h>
@@ -37,13 +39,16 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 AzGameFramework::GameApplication gameApp;
 IGameStartup* m_gameStartup = nullptr;
 HMODULE m_gameDLL = 0;
+AZ::AllocatorScope<AZ::LegacyAllocator, CryStringAllocator> m_legacyAllocatorScope;
 
-extern "C" __declspec(dllexport) int Initialize();
-extern "C" __declspec(dllexport) int Shutdown();
+extern "C" AZ_DLL_EXPORT int Initialize();
+extern "C" AZ_DLL_EXPORT int Shutdown();
 
 //! Initialize the engine using the active game project
 int Initialize()
 {
+    m_legacyAllocatorScope.ActivateAllocators();
+
     char descriptorPath[AZ_MAX_PATH_LEN] = { 0 };
     {
         CEngineConfig engineCfg;
@@ -52,10 +57,11 @@ int Initialize()
     AzGameFramework::GameApplication::StartupParameters gameAppParams;
     gameApp.Start(descriptorPath, gameAppParams);
 
-    char szExeFileName[AZ_MAX_PATH_LEN];
+    char szExeFileName[AZ_MAX_PATH_LEN] = { 0 };
     InitRootDir(szExeFileName, AZ_MAX_PATH_LEN);
 
     SSystemInitParams startupParams;
+    startupParams.bUnattendedMode = true;
     startupParams.pSharedEnvironment = AZ::Environment::GetInstance();
 
     CEngineConfig engineCfg;
@@ -88,7 +94,7 @@ int Initialize()
         IGameStartup::TEntryFunction CreateGameStartup = (IGameStartup::TEntryFunction) GetProcAddress(m_gameDLL, "CreateGameStartup");
 #endif
         m_gameStartup = CreateGameStartup();
-    } 
+    }
     else
     {
         EditorGameRequestBus::BroadcastResult(m_gameStartup, &EditorGameRequestBus::Events::CreateGameStartup);
@@ -106,36 +112,19 @@ int Initialize()
 //! Shutdown the engine
 int Shutdown()
 {
-    // This will just kill the app which is the way the Editor "shuts down" right now
-    gEnv->pSystem->Quit();
-
     if (m_gameStartup)
     {
         m_gameStartup->Shutdown();
         m_gameStartup = nullptr;
-         
-        if (m_gameDLL) {
+
+        if (m_gameDLL)
+        {
             FreeLibrary(m_gameDLL);
         }
     }
 
     gameApp.Stop();
 
-#ifndef AZ_MONOLITHIC_BUILD
-    // HACK HACK HACK
-    // CrySystem module can get loaded multiple times (even from within CrySystem itself)
-    // and currently there is no way to track them (\ref _CryMemoryManagerPoolHelper::Init() in CryMemoryManager_impl.h)
-    // so we will release it as many times as it takes until it actually unloads.
-    void* hModule = CryLoadLibraryDefName("CrySystem");
-    if (hModule)
-    {
-        // loop until we fail (aka unload the DLL)
-        while (CryFreeLibrary(hModule))
-        {
-            ;
-        }
-    }
-#endif
-
+    m_legacyAllocatorScope.DeactivateAllocators();
     return 0;
 }

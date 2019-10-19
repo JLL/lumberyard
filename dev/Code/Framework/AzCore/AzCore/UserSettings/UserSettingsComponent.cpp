@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/UserSettings/UserSettingsComponent.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
@@ -57,7 +56,6 @@ namespace AZ
     {
         AZStd::string settingsPath;
         EBUS_EVENT_RESULT(settingsPath, UserSettingsFileLocatorBus, ResolveFilePath, m_providerId);
-        //AZ_Warning("UserSettings", !settingsPath.empty(), "Failed to resolve file path for settings provider %u. Make sure there is a handler active for the UserSettingsFileLocatorBus.", static_cast<u32>(m_providerId));
         SerializeContext* serializeContext = nullptr;
         EBUS_EVENT_RESULT(serializeContext, ComponentApplicationBus, GetSerializeContext);
         AZ_Warning("UserSettings", serializeContext != nullptr, "Failed to retrieve the serialization context. User settings cannot be loaded.");
@@ -72,7 +70,6 @@ namespace AZ
     {
         AZStd::string settingsPath;
         EBUS_EVENT_RESULT(settingsPath, UserSettingsFileLocatorBus, ResolveFilePath, m_providerId);
-        //AZ_Warning("UserSettings", !settingsPath.empty(), "Failed to resolve file path for settings provider %u. Make sure there is a handler active for the UserSettingsFileLocatorBus.", static_cast<u32>(m_providerId));
         SerializeContext* serializeContext = nullptr;
         EBUS_EVENT_RESULT(serializeContext, ComponentApplicationBus, GetSerializeContext);
         AZ_Warning("UserSettings", serializeContext != nullptr, "Failed to retrieve the serialization context. User settings cannot be stored.");
@@ -85,7 +82,10 @@ namespace AZ
     //-----------------------------------------------------------------------------
     void UserSettingsComponent::Finalize()
     {
-        Save();
+        if (m_saveOnFinalize)
+        {
+            Save();
+        }
         m_provider.Deactivate();
         m_saveOnShutdown = false;
     }
@@ -124,8 +124,6 @@ namespace AZ
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Editor")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("System", 0xc94d118b))
-                    //->DataElement(AZ::Edit::UIHandlers::Default,&UserSettingsComponent::m_settingsPath,"File path","File location for the user settings file")
-                    //    ->Attribute("Folder",AZ_CRC("Relative", 0x6e5b37d9)); // add a relative to the application folder (you can't get out of it)
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &UserSettingsComponent::m_providerId, "ProviderId", "The settings group this provider with handle.")
                         ->EnumAttribute(UserSettings::CT_LOCAL, "Local")
                         ->EnumAttribute(UserSettings::CT_GLOBAL, "Global")
@@ -135,8 +133,3 @@ namespace AZ
     }
     //-----------------------------------------------------------------------------
 }   // namespace AZ
-
-using namespace AZ;
-
-
-#endif  // AZ_UNITY_BUILD

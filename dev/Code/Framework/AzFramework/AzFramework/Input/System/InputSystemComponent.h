@@ -45,16 +45,16 @@ namespace AzFramework
         AZ_COMPONENT(InputSystemComponent, "{CAF3A025-FAC9-4537-B99E-0A800A9326DF}")
 
         ////////////////////////////////////////////////////////////////////////////////////////////
+        //! \ref AZ::ComponentDescriptor::Reflect
+        static void Reflect(AZ::ReflectContext* reflection);
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
         //! \ref AZ::ComponentDescriptor::GetProvidedServices
         static void GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         //! \ref AZ::ComponentDescriptor::GetIncompatibleServices
         static void GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible);
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        //! \ref AZ::ComponentDescriptor::Reflect
-        static void Reflect(AZ::ReflectContext* reflection);
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         //! Constructor
@@ -113,12 +113,13 @@ namespace AzFramework
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Serialized Variables
-        AZ::u32 m_gamepadsEnabled;        //!< The number of enabled game-pads
-        bool    m_keyboardEnabled;        //!< Is the keyboard enabled?
-        bool    m_motionEnabled;          //!< Is motion enabled?
-        bool    m_mouseEnabled;           //!< Is the mouse enabled?
-        bool    m_touchEnabled;           //!< Is touch enabled?
-        bool    m_virtualKeyboardEnabled; //!< Is the virtual keyboard enabled?
+        AZ::u32 m_mouseMovementSampleRateHertz; //!< The mouse movement sample rate in Hertz
+        AZ::u32 m_gamepadsEnabled;              //!< The number of enabled game-pads
+        bool    m_keyboardEnabled;              //!< Is the keyboard enabled?
+        bool    m_motionEnabled;                //!< Is motion enabled?
+        bool    m_mouseEnabled;                 //!< Is the mouse enabled?
+        bool    m_touchEnabled;                 //!< Is touch enabled?
+        bool    m_virtualKeyboardEnabled;       //!< Is the virtual keyboard enabled?
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Other Variables

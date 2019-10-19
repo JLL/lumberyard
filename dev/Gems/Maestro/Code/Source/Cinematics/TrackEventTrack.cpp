@@ -73,12 +73,15 @@ const char* CAnimStringTable::Add(const char* p)
         m_pLastPage = pPage;
 
         m_pEnd = pPage->mem;
+
+        pPageEnd = &m_pLastPage->mem[sizeof(m_pLastPage->mem)];
+        nAvailable = pPageEnd - m_pEnd;
     }
 
     char* pRet = m_pEnd;
     m_pEnd += nLen + 1;
 
-    strcpy(pRet, p);
+    azstrcpy(pRet, nAvailable, p);
 
     m_table.insert(std::make_pair(pRet, pRet));
     return pRet;
@@ -160,11 +163,12 @@ template<>
 inline void TAnimTrack<IEventKey>::Reflect(AZ::SerializeContext* serializeContext)
 {
     serializeContext->Class<TAnimTrack<IEventKey> >()
-        ->Version(1)
+        ->Version(2)
         ->Field("Flags", &TAnimTrack<IEventKey>::m_flags)
         ->Field("Range", &TAnimTrack<IEventKey>::m_timeRange)
         ->Field("ParamType", &TAnimTrack<IEventKey>::m_nParamType)
-        ->Field("Keys", &TAnimTrack<IEventKey>::m_keys);
+        ->Field("Keys", &TAnimTrack<IEventKey>::m_keys)
+        ->Field("Id", &TAnimTrack<IEventKey>::m_id);
 }
 
 //////////////////////////////////////////////////////////////////////////

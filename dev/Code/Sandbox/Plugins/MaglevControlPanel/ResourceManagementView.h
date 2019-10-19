@@ -114,6 +114,7 @@ public:
     QPushButton* EnableSaveButton(const QString& toolTip);
     void DisableSaveButton(const QString& toolTip);
 
+    QPushButton* GetDeleteButton() const;
     QPushButton* EnableDeleteButton(const QString& toolTip);
     void DisableDeleteButton(const QString& toolTip);
 
@@ -165,8 +166,8 @@ public slots:
     void OnCreateProjectStack();
     void OnMenuCloudCanvasHelp();
 
-    void SourceUpdatedCreateResourceGroup(const QString& resourceGroupName, bool includeExample);
-    void SourceChangedCreateResourceGroup(const QString& resourceGroupName, bool includeExample);
+    void SourceUpdatedCreateResourceGroup(const QString& resourceGroupName, const QString& startCode);
+    void SourceChangedCreateResourceGroup(const QString& resourceGroupName, const QString& startCode);
 
     void OnProfileModelReset();
     void OnDeploymentModelReset();
@@ -241,16 +242,17 @@ private:
     enum class SourceControlState
     {
         QUERYING = 0,
-        DISABLED_CHECK_OUT,
+        UNAVAILABLE_CHECK_OUT,
         ENABLED_CHECK_OUT,
         DISABLED_CHECK_IN,
         DISABLED_ADD,
-        ENABLED_ADD
+        ENABLED_ADD,
+        NOT_APPLICABLE
     };
     void SetSourceControlState(SourceControlState newState, const QString& tooltipOverride = {});
 
-    void ValidateSourceCreateResourceGroup(const QString& resourceGroupName, bool includeExample);
-    void DoCreateResourceGroup(const QString& resourceGroupName, bool includeExample);
+    void ValidateSourceCreateResourceGroup(const QString& resourceGroupName, const QString& startCode);
+    void DoCreateResourceGroup(const QString& resourceGroupName, const QString& startCode);
 
     void AddServiceApi();
 

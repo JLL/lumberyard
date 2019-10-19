@@ -17,6 +17,9 @@
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzToolsFramework/SQLite/SQLiteConnection.h>
 #include <AzToolsFramework/API/AssetDatabaseBus.h>
+#include <AzToolsFramework/Debug/TraceContext.h>
+#include <AzToolsFramework/SQLite/SQLiteQuery.h>
+#include <AzToolsFramework/SQLite/SQLiteBoundColumnSet.h>
 
 namespace AzToolsFramework
 {
@@ -30,33 +33,64 @@ namespace AzToolsFramework
         {
             static const char* LOG_NAME = "AzToolsFramework::AssetDatabase";
 
+            // when you add a table, be sure to add it here to check the database for corruption
+            static const char* EXPECTED_TABLES[] = {
+                "BuilderInfo",
+                "Files",
+                "Jobs",
+                "LegacySubIDs",
+                "ProductDependencies",
+                "Products",
+                "ScanFolders",
+                "SourceDependency",
+                "Sources",
+                "dbinfo"
+            };
+
             //////////////////////////////////////////////////////////////////////////
             //table queries
             static const char* QUERY_DATABASEINFO_TABLE = "AzToolsFramework::AssetDatabase::QueryDatabaseInfoTable";
             static const char* QUERY_DATABASEINFO_TABLE_STATEMENT =
                 "SELECT * from dbinfo;";
+            static const auto s_queryDatabaseinfoTable = MakeSqlQuery(QUERY_DATABASEINFO_TABLE, QUERY_DATABASEINFO_TABLE_STATEMENT, LOG_NAME);
+
+            static const char* QUERY_BUILDERINFO_TABLE = "AzToolsFramework::AssetDatabase::QueryBuilderInfo";
+            static const char* QUERY_BUILDERINFO_TABLE_STATEMENT =
+                "SELECT * from BuilderInfo;";
+            static const auto s_queryBuilderInfoTable = MakeSqlQuery(QUERY_BUILDERINFO_TABLE, QUERY_BUILDERINFO_TABLE_STATEMENT, LOG_NAME);
 
             static const char* QUERY_SCANFOLDERS_TABLE = "AzToolsFramework::AssetDatabase::QueryScanFoldersTable";
             static const char* QUERY_SCANFOLDERS_TABLE_STATEMENT =
                 "SELECT * from ScanFolders;";
 
+            static const auto s_queryScanfoldersTable = MakeSqlQuery(QUERY_SCANFOLDERS_TABLE, QUERY_SCANFOLDERS_TABLE_STATEMENT, LOG_NAME);
+
             static const char* QUERY_SOURCES_TABLE = "AzToolsFramework::AssetDatabase::QuerySourcesTable";
             static const char* QUERY_SOURCES_TABLE_STATEMENT =
                 "SELECT * from Sources;";
 
+            static const auto s_querySourcesTable = MakeSqlQuery(QUERY_SOURCES_TABLE, QUERY_SOURCES_TABLE_STATEMENT, LOG_NAME);
+
             static const char* QUERY_JOBS_TABLE = "AzToolsFramework::AssetDatabase::QueryJobsTable";
             static const char* QUERY_JOBS_TABLE_STATEMENT =
                 "SELECT * from Jobs;";
+
+            static const auto s_queryJobsTable = MakeSqlQuery(QUERY_JOBS_TABLE, QUERY_JOBS_TABLE_STATEMENT, LOG_NAME);
 
             static const char* QUERY_JOBS_TABLE_PLATFORM = "AzToolsFramework::AssetDatabase::QueryJobsTablePlatform";
             static const char* QUERY_JOBS_TABLE_PLATFORM_STATEMENT =
                 "SELECT * from Jobs WHERE "
                 "Platform = :platform;";
 
+            static const auto s_queryJobsTablePlatform = MakeSqlQuery(QUERY_JOBS_TABLE_PLATFORM, QUERY_JOBS_TABLE_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_PRODUCTS_TABLE = "AzToolsFramework::AssetDatabase::QueryProductsTable";
             static const char* QUERY_PRODUCTS_TABLE_STATEMENT =
                 "SELECT * from Products INNER JOIN Jobs "
                 "ON Products.JobPK = Jobs.JobID;";
+
+            static const auto s_queryProductsTable = MakeSqlQuery(QUERY_PRODUCTS_TABLE, QUERY_PRODUCTS_TABLE_STATEMENT, LOG_NAME);
 
             static const char* QUERY_PRODUCTS_TABLE_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductsTablePlatform";
             static const char* QUERY_PRODUCTS_TABLE_PLATFORM_STATEMENT =
@@ -64,11 +98,18 @@ namespace AzToolsFramework
                 "ON Products.JobPK = Jobs.JobID WHERE "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryProductsTablePlatform = MakeSqlQuery(QUERY_PRODUCTS_TABLE_PLATFORM, QUERY_PRODUCTS_TABLE_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_LEGACYSUBIDSBYPRODUCTID = "AzToolsFramework::AssetDatabase::QueryLegacySubIDsByProductID";
             static const char* QUERY_LEGACYSUBIDSBYPRODUCTID_STATEMENT =
                 "SELECT * from LegacySubIDs "
                 " WHERE "
                 "   LegacySubIDs.ProductPK = :productId;";
+
+            static const auto s_queryLegacysubidsbyproductid = MakeSqlQuery(QUERY_LEGACYSUBIDSBYPRODUCTID, QUERY_LEGACYSUBIDSBYPRODUCTID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productId"));
+
             static const char* QUERY_PRODUCTDEPENDENCIES_TABLE = "AzToolsFramework::AssetDatabase::QueryProductDependencies";
             static const char* QUERY_PRODUCTDEPENDENCIES_TABLE_STATEMENT =
                 "SELECT ProductDependencies.*, SourceGUID, SubID FROM ProductDependencies "
@@ -76,24 +117,41 @@ namespace AzToolsFramework
                 "INNER JOIN Jobs ON JobPK = JobID "
                 "INNER JOIN Sources ON SourcePK = SourceID;";
 
+            static const auto s_queryProductdependenciesTable = MakeSqlQuery(QUERY_PRODUCTDEPENDENCIES_TABLE, QUERY_PRODUCTDEPENDENCIES_TABLE_STATEMENT, LOG_NAME);
+
+            static const char* QUERY_FILES_TABLE = "AzToolsFramework::AssetDatabase::QueryFilesTable";
+            static const char* QUERY_FILES_TABLE_STATEMENT =
+                "SELECT * from Files;";
+
+            static const auto s_queryFilesTable = MakeSqlQuery(QUERY_FILES_TABLE, QUERY_FILES_TABLE_STATEMENT, LOG_NAME);
+
             //////////////////////////////////////////////////////////////////////////
             //projection and combination queries
 
             // lookup by primary key
             static const char* QUERY_SCANFOLDER_BY_SCANFOLDERID = "AzToolsFramework::AssetDatabase::QueryScanfolderByScanfolderID";
-            static const char* QUERY_SCANFODLER_BY_SCANFOLDERID_STATEMENT =
+            static const char* QUERY_SCANFOLDER_BY_SCANFOLDERID_STATEMENT =
                 "SELECT * FROM ScanFolders WHERE "
                 "ScanFolderID = :scanfolderid;";
+
+            static const auto s_queryScanfolderByScanfolderid = MakeSqlQuery(QUERY_SCANFOLDER_BY_SCANFOLDERID, QUERY_SCANFOLDER_BY_SCANFOLDERID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":scanfolderid"));
 
             static const char* QUERY_SCANFOLDER_BY_DISPLAYNAME = "AzToolsFramework::AssetDatabase::QueryScanfolderByDisplayName";
             static const char* QUERY_SCANFOLDER_BY_DISPLAYNAME_STATEMENT =
                 "SELECT * FROM ScanFolders WHERE "
                 "DisplayName = :displayname;";
 
+            static const auto s_queryScanfolderByDisplayname = MakeSqlQuery(QUERY_SCANFOLDER_BY_DISPLAYNAME, QUERY_SCANFOLDER_BY_DISPLAYNAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":displayname"));
+
             static const char* QUERY_SCANFOLDER_BY_PORTABLEKEY = "AzToolsFramework::AssetDatabase::QueryScanfolderByPortableKey";
             static const char* QUERY_SCANFOLDER_BY_PORTABLEKEY_STATEMENT =
                 "SELECT * FROM ScanFolders WHERE "
                 "PortableKey = :portablekey;";
+
+            static const auto s_queryScanfolderByPortablekey = MakeSqlQuery(QUERY_SCANFOLDER_BY_PORTABLEKEY, QUERY_SCANFOLDER_BY_PORTABLEKEY_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":portablekey"));
 
             // lookup by primary key
             static const char* QUERY_SOURCE_BY_SOURCEID = "AzToolsFramework::AssetDatabase::QuerySourceBySourceID";
@@ -101,31 +159,65 @@ namespace AzToolsFramework
                 "SELECT * FROM Sources WHERE "
                 "SourceID = :sourceid;";
 
+            static const auto s_querySourceBySourceid = MakeSqlQuery(QUERY_SOURCE_BY_SOURCEID, QUERY_SOURCE_BY_SOURCEID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"));
+
             static const char* QUERY_SOURCE_BY_SCANFOLDERID = "AzToolsFramework::AssetDatabase::QuerySourceByScanFolderID";
-            static const char* QUERY_SOURCE_BY_SCANFOLDERID_STATMENT =
+            static const char* QUERY_SOURCE_BY_SCANFOLDERID_STATEMENT =
                 "SELECT * FROM Sources WHERE "
                 "ScanFolderPK = :scanfolderid;";
+
+            static const auto s_querySourceByScanfolderid = MakeSqlQuery(QUERY_SOURCE_BY_SCANFOLDERID, QUERY_SOURCE_BY_SCANFOLDERID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":scanfolderid"));
 
             static const char* QUERY_SOURCE_BY_SOURCEGUID = "AzToolsFramework::AssetDatabase::QuerySourceBySourceGuid";
             static const char* QUERY_SOURCE_BY_SOURCEGUID_STATEMENT =
                 "SELECT * FROM Sources WHERE "
                 "SourceGuid = :sourceguid;";
 
+            static const auto s_querySourceBySourceguid = MakeSqlQuery(QUERY_SOURCE_BY_SOURCEGUID, QUERY_SOURCE_BY_SOURCEGUID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::Uuid>(":sourceguid"));
+
             static const char* QUERY_SOURCE_BY_SOURCENAME = "AzToolsFramework::AssetDatabase::QuerySourceBySourceName";
             static const char* QUERY_SOURCE_BY_SOURCENAME_STATEMENT =
                 "SELECT * FROM Sources WHERE "
                 "SourceName = :sourcename;";
+
+            static const auto s_querySourceBySourcename = MakeSqlQuery(QUERY_SOURCE_BY_SOURCENAME, QUERY_SOURCE_BY_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             static const char* QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID = "AzToolsFramework::AssetDatabase::QuerySourceBySourceNameScanFolderID";
             static const char* QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID_STATEMENT =
                 "SELECT * FROM Sources WHERE "
                 "SourceName = :sourcename AND "
                 "ScanFolderPK = :scanfolderid;";
+            static const auto s_querySourceBySourcenameScanfolderid = MakeSqlQuery(QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID, QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":sourcename"),
+                SqlParam<AZ::s64>(":scanfolderid"));
+
+            static const char* QUERY_SOURCE_ANALYSISFINGERPRINT = "AzToolsFramework::AssetDatabase::QuerySourceFingerprint";
+            static const char* QUERY_SOURCE_ANALYSISFINGERPRINT_STATEMENT =
+                "SELECT AnalysisFingerprint FROM Sources WHERE "
+                "SourceName = :sourcename AND "
+                "ScanFolderPK = :scanfolderid;";
+            static const auto s_querySourceAnalysisFingerprint = MakeSqlQuery(QUERY_SOURCE_ANALYSISFINGERPRINT, QUERY_SOURCE_ANALYSISFINGERPRINT_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":sourcename"),
+                SqlParam<AZ::s64>(":scanfolderid"));
+
+            static const char* QUERY_SOURCES_AND_SCANFOLDERS = "AzToolsFramework::AssetDatabase::QuerySourcesAndScanfolders";
+            static const char* QUERY_SOURCES_AND_SCANFOLDERS_STATEMENT =
+                "SELECT * FROM Sources "
+                "LEFT OUTER JOIN ScanFolders ON ScanFolderPK = ScanFolderID;";
+
+            static const auto s_querySourcesAndScanfolders = MakeSqlQuery(QUERY_SOURCES_AND_SCANFOLDERS, QUERY_SOURCES_AND_SCANFOLDERS_STATEMENT, LOG_NAME);
 
             static const char* QUERY_SOURCE_LIKE_SOURCENAME = "AzToolsFramework::AssetDatabase::QuerySourceLikeSourceName";
             static const char* QUERY_SOURCE_LIKE_SOURCENAME_STATEMENT =
                 "SELECT * FROM Sources WHERE "
-                "SourceName LIKE :sourcename ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "SourceName LIKE :sourcename ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_querySourceLikeSourcename = MakeSqlQuery(QUERY_SOURCE_LIKE_SOURCENAME, QUERY_SOURCE_LIKE_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             // lookup by primary key
             static const char* QUERY_JOB_BY_JOBID = "AzToolsFramework::AssetDatabase::QueryJobByJobID";
@@ -133,15 +225,24 @@ namespace AzToolsFramework
                 "SELECT * FROM Jobs WHERE "
                 "JobID = :jobid;";
 
+            static const auto s_queryJobByJobid = MakeSqlQuery(QUERY_JOB_BY_JOBID, QUERY_JOB_BY_JOBID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":jobid"));
+
             static const char* QUERY_JOB_BY_JOBKEY = "AzToolsFramework::AssetDatabase::QueryJobByJobKey";
             static const char* QUERY_JOB_BY_JOBKEY_STATEMENT =
                 "SELECT * FROM Jobs WHERE "
                 "JobKey = :jobKey;";
 
+            static const auto s_queryJobByJobkey = MakeSqlQuery(QUERY_JOB_BY_JOBKEY, QUERY_JOB_BY_JOBKEY_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":jobKey"));
+
             static const char* QUERY_JOB_BY_JOBRUNKEY = "AzToolsFramework::AssetDatabase::QueryJobByJobRunKey";
             static const char* QUERY_JOB_BY_JOBRUNKEY_STATEMENT =
                 "SELECT * FROM Jobs WHERE "
                 "JobRunKey = :jobrunkey;";
+
+            static const auto s_queryJobByJobrunkey = MakeSqlQuery(QUERY_JOB_BY_JOBRUNKEY, QUERY_JOB_BY_JOBRUNKEY_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::u64>(":jobrunkey"));
 
             static const char* QUERY_JOB_BY_PRODUCTID = "AzToolsFramework::AssetDatabase::QueryJobByProductID";
             static const char* QUERY_JOB_BY_PRODUCTID_STATEMENT =
@@ -149,16 +250,26 @@ namespace AzToolsFramework
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Products.ProductID = :productid;";
 
+            static const auto s_queryJobByProductid = MakeSqlQuery(QUERY_JOB_BY_PRODUCTID, QUERY_JOB_BY_PRODUCTID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
+
             static const char* QUERY_JOB_BY_SOURCEID = "AzToolsFramework::AssetDatabase::QueryJobBySourceID";
             static const char* QUERY_JOB_BY_SOURCEID_STATEMENT =
                 "SELECT * FROM Jobs WHERE "
                 "SourcePK = :sourceid;";
+
+            static const auto s_queryJobBySourceid = MakeSqlQuery(QUERY_JOB_BY_SOURCEID, QUERY_JOB_BY_SOURCEID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"));
 
             static const char* QUERY_JOB_BY_SOURCEID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryJobBySourceIDPlatform";
             static const char* QUERY_JOB_BY_SOURCEID_PLATFORM_STATEMENT =
                 "SELECT * FROM Jobs WHERE "
                 "SourcePK = :sourceid AND "
                 "Platform = :platform;";
+
+            static const auto s_queryJobBySourceidPlatform = MakeSqlQuery(QUERY_JOB_BY_SOURCEID_PLATFORM, QUERY_JOB_BY_SOURCEID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"),
+                    SqlParam<const char*>(":platform"));
 
             // lookup by primary key
             static const char* QUERY_PRODUCT_BY_PRODUCTID = "AzToolsFramework::AssetDatabase::QueryProductByProductID";
@@ -167,11 +278,17 @@ namespace AzToolsFramework
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Products.ProductID = :productid;";
 
+            static const auto s_queryProductByProductid = MakeSqlQuery(QUERY_PRODUCT_BY_PRODUCTID, QUERY_PRODUCT_BY_PRODUCTID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
+
             static const char* QUERY_PRODUCT_BY_JOBID = "AzToolsFramework::AssetDatabase::QueryProductByJobID";
             static const char* QUERY_PRODUCT_BY_JOBID_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Jobs INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Products.JobPK = :jobid;";
+
+            static const auto s_queryProductByJobid = MakeSqlQuery(QUERY_PRODUCT_BY_JOBID, QUERY_PRODUCT_BY_JOBID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":jobid"));
 
             static const char* QUERY_PRODUCT_BY_JOBID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductByJobIDPlatform";
             static const char* QUERY_PRODUCT_BY_JOBID_PLATFORM_STATEMENT =
@@ -180,11 +297,29 @@ namespace AzToolsFramework
                 "Products.JobPK = :jobid AND "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryProductByJobidPlatform = MakeSqlQuery(QUERY_PRODUCT_BY_JOBID_PLATFORM, QUERY_PRODUCT_BY_JOBID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":jobid"),
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_PRODUCT_BY_SOURCEID = "AzToolsFramework::AssetDatabase::QueryProductBySourceID";
             static const char* QUERY_PRODUCT_BY_SOURCEID_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Jobs INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.SourcePK = :sourceid;";
+
+            static const auto s_queryProductBySourceid = MakeSqlQuery(QUERY_PRODUCT_BY_SOURCEID, QUERY_PRODUCT_BY_SOURCEID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"));
+
+            static const char* QUERY_PRODUCT_BY_SOURCEGUID_SUBID = "AzToolsFramework::AssetDatabase::QueryProductBySourceGuidSubid";
+            static const char* QUERY_PRODUCT_BY_SOURCEGUID_SUBID_STATEMENT =
+                "SELECT Sources.SourceGuid, Products.* FROM Sources INNER JOIN Jobs "
+                "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
+                "ON Jobs.JobID = Products.JobPK WHERE "
+                "Sources.SourceGuid = :sourceguid AND Products.SubID = :productsubid;";
+
+            static const auto s_queryProductBySourceGuidSubid = MakeSqlQuery(QUERY_PRODUCT_BY_SOURCEGUID_SUBID, QUERY_PRODUCT_BY_SOURCEGUID_SUBID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::Uuid>(":sourceguid"),
+                    SqlParam<AZ::u32>(":productsubid"));
 
             static const char* QUERY_PRODUCT_BY_SOURCEID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductBySourceIDPlatform";
             static const char* QUERY_PRODUCT_BY_SOURCEID_PLATFORM_STATEMENT =
@@ -193,11 +328,18 @@ namespace AzToolsFramework
                 "Jobs.SourcePK = :sourceid AND "
                 "Platform = :platform;";
 
+            static const auto s_queryProductBySourceidPlatform = MakeSqlQuery(QUERY_PRODUCT_BY_SOURCEID_PLATFORM, QUERY_PRODUCT_BY_SOURCEID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"),
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_PRODUCT_BY_PRODUCTNAME = "AzToolsFramework::AssetDatabase::QueryProductByProductName";
             static const char* QUERY_PRODUCT_BY_PRODUCTNAME_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Jobs INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Products.ProductName = :productname;";
+
+            static const auto s_queryProductByProductname = MakeSqlQuery(QUERY_PRODUCT_BY_PRODUCTNAME, QUERY_PRODUCT_BY_PRODUCTNAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"));
 
             static const char* QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductByProductNamePlatform";
             static const char* QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM_STATEMENT =
@@ -206,18 +348,29 @@ namespace AzToolsFramework
                 "Jobs.Platform = :platform AND "
                 "Products.ProductName = :productname;";
 
+            static const auto s_queryProductByProductnamePlatform = MakeSqlQuery(QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM, QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"),
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_PRODUCT_LIKE_PRODUCTNAME = "AzToolsFramework::AssetDatabase::QueryProductLikeProductName";
             static const char* QUERY_PRODUCT_LIKE_PRODUCTNAME_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Jobs INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
-                "Products.ProductName LIKE :productname ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Products.ProductName LIKE :productname ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryProductLikeProductname = MakeSqlQuery(QUERY_PRODUCT_LIKE_PRODUCTNAME, QUERY_PRODUCT_LIKE_PRODUCTNAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"));
 
             static const char* QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductLikeProductNamePlatform";
             static const char* QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Jobs INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.Platform = :platform AND "
-                "Products.ProductName LIKE :productname ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Products.ProductName LIKE :productname ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryProductLikeProductnamePlatform = MakeSqlQuery(QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM, QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"),
+                    SqlParam<const char*>(":platform"));
 
             static const char* QUERY_PRODUCT_BY_SOURCENAME = "AzToolsFramework::AssetDatabase::QueryProductBySourceName";
             static const char* QUERY_PRODUCT_BY_SOURCENAME_STATEMENT =
@@ -225,6 +378,9 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Sources.SourceName = :sourcename;";
+
+            static const auto s_queryProductBySourcename = MakeSqlQuery(QUERY_PRODUCT_BY_SOURCENAME, QUERY_PRODUCT_BY_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             //add sql statement for querying everything by source name
             static const char* QUERY_PRODUCT_BY_SOURCENAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductBySourceNamePlatform";
@@ -235,13 +391,20 @@ namespace AzToolsFramework
                 "Jobs.Platform = :platform AND "
                 "Sources.SourceName = :sourcename;";
 
+            static const auto s_queryProductBySourcenamePlatform = MakeSqlQuery(QUERY_PRODUCT_BY_SOURCENAME_PLATFORM, QUERY_PRODUCT_BY_SOURCENAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"),
+                    SqlParam<const char*>(":platform"));
+
             //add sql statement for querying everything by source name
             static const char* QUERY_PRODUCT_LIKE_SOURCENAME = "AzToolsFramework::AssetDatabase::QueryProductLikeSourceName";
             static const char* QUERY_PRODUCT_LIKE_SOURCENAME_STATEMENT =
                 "SELECT Products.*, Jobs.* FROM Sources LEFT JOIN Jobs "
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
-                "Sources.SourceName LIKE :sourcename ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Sources.SourceName LIKE :sourcename ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryProductLikeSourcename = MakeSqlQuery(QUERY_PRODUCT_LIKE_SOURCENAME, QUERY_PRODUCT_LIKE_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             //add sql statement for querying everything by source name and platform
             static const char* QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryProductLikeSourceNamePlatform";
@@ -250,7 +413,22 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.Platform = :platform AND "
-                "Sources.SourceName LIKE :sourcename ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Sources.SourceName LIKE :sourcename ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryProductLikeSourcenamePlatform = MakeSqlQuery(QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM, QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":sourcename"),
+                SqlParam<const char*>(":platform"));
+
+            // JobPK and subid together uniquely identify a product.  Since JobPK is indexed, this is a fast query if you happen to know those details.
+            static const char* QUERY_PRODUCT_BY_JOBID_SUBID = "AzToolsFramework::AssetDatabase::QueryProductByJobIDSubID";
+            static const char* QUERY_PRODUCT_BY_JOBID_SUBID_STATEMENT =
+                "SELECT * FROM Products "
+                "WHERE JobPK = :jobpk "
+                "AND SubID = :subid;";
+
+            static const auto s_queryProductByJobIdSubId = MakeSqlQuery(QUERY_PRODUCT_BY_JOBID_SUBID, QUERY_PRODUCT_BY_JOBID_SUBID_STATEMENT, LOG_NAME,
+                SqlParam<AZ::s64>(":jobpk"),
+                SqlParam<AZ::u32>(":subid"));
 
             //add sql statement for querying everything by platform
             static const char* QUERY_COMBINED = "AzToolsFramework::AssetDatabase::QueryCombined";
@@ -259,6 +437,8 @@ namespace AzToolsFramework
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK INNER JOIN Jobs "
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK;";
+
+            static const auto s_queryCombined = MakeSqlQuery(QUERY_COMBINED, QUERY_COMBINED_STATEMENT, LOG_NAME);
 
             //add sql statement for querying everything by platform
             static const char* QUERY_COMBINED_BY_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedByPlatform";
@@ -269,6 +449,9 @@ namespace AzToolsFramework
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryCombinedByPlatform = MakeSqlQuery(QUERY_COMBINED_BY_PLATFORM, QUERY_COMBINED_BY_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_COMBINED_BY_SOURCEID = "AzToolsFramework::AssetDatabase::QueryCombinedBySourceID";
             static const char* QUERY_COMBINED_BY_SOURCEID_STATEMENT =
                 "SELECT * FROM Sources LEFT JOIN Jobs "
@@ -276,6 +459,9 @@ namespace AzToolsFramework
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Sources.SourceID = :sourceid;";
+
+            static const auto s_queryCombinedBySourceid = MakeSqlQuery(QUERY_COMBINED_BY_SOURCEID, QUERY_COMBINED_BY_SOURCEID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"));
 
             static const char* QUERY_COMBINED_BY_SOURCEID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedBySourceIDPlatform";
             static const char* QUERY_COMBINED_BY_SOURCEID_PLATFORM_STATEMENT =
@@ -286,6 +472,10 @@ namespace AzToolsFramework
                 "Sources.SourceID = :sourceid AND "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryCombinedBySourceidPlatform = MakeSqlQuery(QUERY_COMBINED_BY_SOURCEID_PLATFORM, QUERY_COMBINED_BY_SOURCEID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceid"),
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_COMBINED_BY_JOBID = "AzToolsFramework::AssetDatabase::QueryCombinedByJobID";
             static const char* QUERY_COMBINED_BY_JOBID_STATEMENT =
                 "SELECT * FROM Jobs LEFT JOIN Sources "
@@ -293,6 +483,9 @@ namespace AzToolsFramework
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.JobID = :jobid;";
+
+            static const auto s_queryCombinedByJobid = MakeSqlQuery(QUERY_COMBINED_BY_JOBID, QUERY_COMBINED_BY_JOBID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":jobid"));
 
             static const char* QUERY_COMBINED_BY_JOBID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedByJobIDPlatform";
             static const char* QUERY_COMBINED_BY_JOBID_PLATFORM_STATEMENT =
@@ -303,6 +496,10 @@ namespace AzToolsFramework
                 "Jobs.JobID = :jobid AND "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryCombinedByJobidPlatform = MakeSqlQuery(QUERY_COMBINED_BY_JOBID_PLATFORM, QUERY_COMBINED_BY_JOBID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":jobid"),
+                    SqlParam<const char*>(":platform"));
+
             static const char* QUERY_COMBINED_BY_PRODUCTID = "AzToolsFramework::AssetDatabase::QueryCombinedByProcductID";
             static const char* QUERY_COMBINED_BY_PRODUCTID_STATEMENT =
                 "SELECT * FROM Products LEFT JOIN Jobs "
@@ -310,6 +507,9 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN ScanFolders "
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK WHERE "
                 "Products.ProductID = :productid;";
+
+            static const auto s_queryCombinedByProductid = MakeSqlQuery(QUERY_COMBINED_BY_PRODUCTID, QUERY_COMBINED_BY_PRODUCTID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
 
             static const char* QUERY_COMBINED_BY_PRODUCTID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedByProductIDPlatform";
             static const char* QUERY_COMBINED_BY_PRODUCTID_PLATFORM_STATEMENT =
@@ -319,6 +519,10 @@ namespace AzToolsFramework
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK WHERE "
                 "Products.ProductID = :productid AND "
                 "Jobs.Platform = :platform;";
+
+            static const auto s_queryCombinedByProductidPlatform = MakeSqlQuery(QUERY_COMBINED_BY_PRODUCTID_PLATFORM, QUERY_COMBINED_BY_PRODUCTID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"),
+                    SqlParam<const char*>(":platform"));
 
 
             //add sql statement for querying everything by source guid and product subid
@@ -332,6 +536,10 @@ namespace AzToolsFramework
                 "(Sources.SourceGuid = :sourceguid OR "
                 "Products.LegacyGuid = :sourceguid);";
 
+            static const auto s_queryCombinedBySourceguidProductsubid = MakeSqlQuery(QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID, QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::u32>(":productsubid"),
+                    SqlParam<AZ::Uuid>(":sourceguid"));
+
             //add sql statement for querying everything by source guid and product subid and platform
             static const char* QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedBySourceGuidProductSubIDPlatform";
             static const char* QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM_STATEMENT =
@@ -344,6 +552,11 @@ namespace AzToolsFramework
                 "Products.LegacyGuid = :soruceguid) AND "
                 "Jobs.Platform = :platform;";
 
+            static const auto s_queryCombinedBySourceguidProductsubidPlatform = MakeSqlQuery(QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM, QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::u32>(":productsubid"),
+                    SqlParam<AZ::Uuid>(":sourceguid"),
+                    SqlParam<const char*>(":platform"));
+
             //add sql statement for querying everything by source name
             static const char* QUERY_COMBINED_BY_SOURCENAME = "AzToolsFramework::AssetDatabase::QueryCombinedBySourceName";
             static const char* QUERY_COMBINED_BY_SOURCENAME_STATEMENT =
@@ -352,6 +565,9 @@ namespace AzToolsFramework
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Sources.SourceName = :sourcename;";
+
+            static const auto s_queryCombinedBySourcename = MakeSqlQuery(QUERY_COMBINED_BY_SOURCENAME, QUERY_COMBINED_BY_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             //add sql statement for querying everything by source name
             static const char* QUERY_COMBINED_BY_SOURCENAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedBySourceNamePlatform";
@@ -363,6 +579,10 @@ namespace AzToolsFramework
                 "Jobs.Platform = :platform AND "
                 "Sources.SourceName = :sourcename;";
 
+            static const auto s_queryCombinedBySourcenamePlatform = MakeSqlQuery(QUERY_COMBINED_BY_SOURCENAME_PLATFORM, QUERY_COMBINED_BY_SOURCENAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"),
+                    SqlParam<const char*>(":platform"));
+
             //add sql statement for querying everything by source name
             static const char* QUERY_COMBINED_LIKE_SOURCENAME = "AzToolsFramework::AssetDatabase::QueryCombinedLikeSourceName";
             static const char* QUERY_COMBINED_LIKE_SOURCENAME_STATEMENT =
@@ -370,7 +590,10 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK INNER JOIN ScanFolders "
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK WHERE "
-                "Sources.SourceName LIKE :sourcename ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Sources.SourceName LIKE :sourcename ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryCombinedLikeSourcename = MakeSqlQuery(QUERY_COMBINED_LIKE_SOURCENAME, QUERY_COMBINED_LIKE_SOURCENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"));
 
             //add sql statement for querying everything by source name and platform
             static const char* QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedLikeSourceNamePlatform";
@@ -379,7 +602,11 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN Products "
                 "ON Jobs.JobID = Products.JobPK WHERE "
                 "Jobs.Platform = :platform AND "
-                "Sources.SourceName LIKE :sourcename ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Sources.SourceName LIKE :sourcename ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryCombinedLikeSourcenamePlatform = MakeSqlQuery(QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM, QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":sourcename"),
+                    SqlParam<const char*>(":platform"));
 
             //add sql statement for querying everything by product name
             static const char* QUERY_COMBINED_BY_PRODUCTNAME = "AzToolsFramework::AssetDatabase::QueryCombinedByProductName";
@@ -392,6 +619,9 @@ namespace AzToolsFramework
                 "WHERE "
                 "Products.ProductName = :productname;";
 
+            static const auto s_queryCombinedByProductname = MakeSqlQuery(QUERY_COMBINED_BY_PRODUCTNAME, QUERY_COMBINED_BY_PRODUCTNAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"));
+
             //add sql statement for querying everything by product name and platform
             static const char* QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedByProductNamePlatorm";
             static const char* QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM_STATEMENT =
@@ -402,7 +632,11 @@ namespace AzToolsFramework
                 "LEFT OUTER JOIN ScanFolders ON ScanFolders.ScanFolderID = Sources.SourceID "
                 "WHERE "
                 "Products.ProductName = :productname AND"
-                "Jobs.Platform = :platform; ";
+                "Jobs.Platform = :platform;";
+
+            static const auto s_queryCombinedByProductnamePlatform = MakeSqlQuery(QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM, QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"),
+                    SqlParam<const char*>(":platform"));
 
             //add sql statement for querying everything by product name
             static const char* QUERY_COMBINED_LIKE_PRODUCTNAME = "AzToolsFramework::AssetDatabase::QueryCombinedLikeProductName";
@@ -411,7 +645,10 @@ namespace AzToolsFramework
                 "ON Jobs.JobID = Products.JobPK INNER JOIN Sources "
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN ScanFolders "
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK WHERE "
-                "Products.ProductName LIKE :productname ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Products.ProductName LIKE :productname ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryCombinedLikeProductname = MakeSqlQuery(QUERY_COMBINED_LIKE_PRODUCTNAME, QUERY_COMBINED_LIKE_PRODUCTNAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"));
 
             //add sql statement for querying everything by product name and platform
             static const char* QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM = "AzToolsFramework::AssetDatabase::QueryCombinedLikeProductNamePlatorm";
@@ -421,46 +658,73 @@ namespace AzToolsFramework
                 "ON Sources.SourceID = Jobs.SourcePK INNER JOIN ScanFolders "
                 "ON ScanFolders.ScanFolderID = Sources.ScanFolderPK WHERE "
                 "Jobs.Platform = :platform AND "
-                "Products.ProductName LIKE :productname ESCAPE '|';";// use the pipe to escape since its NOT a valid file path or operator
+                "Products.ProductName LIKE :productname ESCAPE '|';"; // use the pipe to escape since its NOT a valid file path or operator
+
+            static const auto s_queryCombinedLikeProductnamePlatform = MakeSqlQuery(QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM, QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":productname"),
+                    SqlParam<const char*>(":platform"));
 
             static const char* QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID = "AzToolsFramework::AssetDatabase::QuerySourceDependencyBySourceDependencyID";
             static const char* QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID_STATEMENT =
                 "SELECT * FROM SourceDependency WHERE "
                 "SourceDependencyID = :sourceDependencyid;";
 
-            static const char* QUERY_SOURCEDEPENDENCY = "AzToolsFramework::AssetDatabase::QuerySourceDependency";
-            static const char* QUERY_SOURCEDEPENDENCY_STATEMENT =
-                "SELECT * from SourceDependency WHERE "
-                "BuilderGuid = :builderGuid AND "
-                "Source = :source AND "
-                "DependsOnSource = :dependsOnSource;";
+            static const auto s_querySourcedependencyBySourcedependencyid = MakeSqlQuery(QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID, QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":sourceDependencyid"));
 
             static const char* QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE = "AzToolsFramework::AssetDatabase::QuerySourceDependencyByDependsOnSource";
             static const char* QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_STATEMENT =
                 "SELECT * from SourceDependency WHERE "
                 "DependsOnSource = :dependsOnSource AND "
+                "TypeOfDependency & :typeOfDependency AND "
                 "Source LIKE :dependentFilter;";
+
+            static const auto s_querySourcedependencyByDependsonsource = MakeSqlQuery(QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE, QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":dependsOnSource"),
+                SqlParam<const char*>(":dependentFilter"),
+                SqlParam<AZ::u32>(":typeOfDependency"));
+
+            static const char* QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_WILDCARD = "AzToolsFramework::AssetDatabase::QuerySourceDependencyByDependsOnSourceWildcard";
+            static const char* QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_WILDCARD_STATEMENT =
+                "SELECT * from SourceDependency WHERE "
+                "((TypeOfDependency & :typeOfDependency AND "
+                "DependsOnSource = :dependsOnSource) OR "
+                "(TypeOfDependency = :wildCardDependency AND "
+                ":dependsOnSource LIKE DependsOnSource)) AND "
+                "Source LIKE :dependentFilter;";
+
+            static const auto s_querySourcedependencyByDependsonsourceWildcard = MakeSqlQuery(QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_WILDCARD, QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_WILDCARD_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":dependsOnSource"),
+                SqlParam<const char*>(":dependentFilter"),
+                SqlParam<AZ::u32>(":typeOfDependency"),
+                SqlParam<AZ::u32>(":wildCardDependency"));
+
             static const char* QUERY_DEPENDSONSOURCE_BY_SOURCE = "AzToolsFramework::AssetDatabase::QueryDependsOnSourceBySource";
             static const char* QUERY_DEPENDSONSOURCE_BY_SOURCE_STATEMENT =
                 "SELECT * from SourceDependency WHERE "
                 "Source = :source AND "
+                "TypeOfDependency & :typeOfDependency AND "
                 "DependsOnSource LIKE :dependencyFilter;";
-
-            static const char* QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE = "AzToolsFramework::AssetDatabase::QuerySourceDependencyByBuilderGUIDAndSource";
-            static const char* QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE_STATEMENT =
-                "SELECT * from SourceDependency WHERE "
-                "Source = :source AND "
-                "BuilderGuid = :builderGuid;";
+            static const auto s_queryDependsonsourceBySource = MakeSqlQuery(QUERY_DEPENDSONSOURCE_BY_SOURCE, QUERY_DEPENDSONSOURCE_BY_SOURCE_STATEMENT, LOG_NAME,
+                SqlParam<const char*>(":source"),
+                SqlParam<const char*>(":dependencyFilter"),
+                SqlParam<AZ::u32>(":typeOfDependency"));
 
             static const char* QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID = "AzToolsFramework::AssetDatabase::QueryProductDependencyByProductDependencyID";
             static const char* QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID_STATEMENT =
                 "SELECT * FROM ProductDependencies WHERE "
                 "ProductDependencyID = :productdependencyid;";
 
+            static const auto s_queryProductdependencyByProductdependencyid = MakeSqlQuery(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productdependencyid"));
+
             static const char* QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID = "AzToolsFramework::AssetDatabase::QueryProductDependencyByProductID";
             static const char* QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID_STATEMENT =
                 "SELECT * FROM ProductDependencies WHERE "
                 "ProductPK = :productid;";
+
+            static const auto s_queryProductdependencyByProductid = MakeSqlQuery(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
 
             static const char* QUERY_DIRECT_PRODUCTDEPENDENCIES = "AzToolsFramework::AssetDatabase::QueryDirectProductDependencies";
             static const char* QUERY_DIRECT_PRODUCTDEPENDENCIES_STATEMENT =
@@ -471,6 +735,9 @@ namespace AzToolsFramework
                 "  ON Sources.SourceGuid = ProductDependencies.DependencySourceGuid "
                 "  AND Products.SubID = ProductDependencies.DependencySubID "
                 "WHERE ProductDependencies.ProductPK = :productid;";
+
+            static const auto s_queryDirectProductdependencies = MakeSqlQuery(QUERY_DIRECT_PRODUCTDEPENDENCIES, QUERY_DIRECT_PRODUCTDEPENDENCIES_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
 
             static const char* QUERY_ALL_PRODUCTDEPENDENCIES = "AzToolsFramework::AssetDatabase::QueryAllProductDependencies";
             static const char* QUERY_ALL_PRODUCTDEPENDENCIES_STATEMENT =
@@ -490,7 +757,62 @@ namespace AzToolsFramework
                 "  ) "
                 "SELECT * FROM allProductDeps;";
 
-            void PopulateJobInfo(AzToolsFramework::AssetSystem::JobInfo &jobinfo, JobDatabaseEntry &jobDatabaseEntry)
+            static const auto s_queryAllProductdependencies = MakeSqlQuery(QUERY_ALL_PRODUCTDEPENDENCIES, QUERY_ALL_PRODUCTDEPENDENCIES_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":productid"));
+
+            static const char* GET_UNRESOLVED_PRODUCT_DEPENDENCIES = "AssetProcessor::GetUnresolvedProductDependencies";
+            static const char* GET_UNRESOLVED_PRODUCT_DEPENDENCIES_STATEMENT =
+                "SELECT * FROM ProductDependencies where UnresolvedPath != ''";
+            static const auto s_queryUnresolvedProductDependencies = MakeSqlQuery(GET_UNRESOLVED_PRODUCT_DEPENDENCIES, GET_UNRESOLVED_PRODUCT_DEPENDENCIES_STATEMENT, LOG_NAME);
+
+
+            // lookup by primary key
+            static const char* QUERY_FILE_BY_FILEID = "AzToolsFramework::AssetDatabase::QueryFileByFileID";
+            static const char* QUERY_FILE_BY_FILEID_STATEMENT =
+                "SELECT * FROM Files WHERE "
+                "FileID = :fileid;";
+
+            static const auto s_queryFileByFileid = MakeSqlQuery(QUERY_FILE_BY_FILEID, QUERY_FILE_BY_FILEID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":fileid"));
+
+            static const char* QUERY_FILES_BY_FILENAME_AND_SCANFOLDER = "AzToolsFramework::AssetDatabase::QueryFilesByFileNameAndScanFolderID";
+            static const char* QUERY_FILES_BY_FILENAME_AND_SCANFOLDER_STATEMENT =
+                "SELECT * FROM Files WHERE "
+                    "ScanFolderPK = :scanfolderpk AND "
+                    "FileName = :filename;";
+
+            static const auto s_queryFilesByFileName = MakeSqlQuery(QUERY_FILES_BY_FILENAME_AND_SCANFOLDER, QUERY_FILES_BY_FILENAME_AND_SCANFOLDER_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":scanfolderpk"),
+                    SqlParam<const char*>(":filename") 
+                );
+
+            static const char* QUERY_FILES_LIKE_FILENAME = "AzToolsFramework::AssetDatabase::QueryFilesLikeFileName";
+            static const char* QUERY_FILES_LIKE_FILENAME_STATEMENT =
+                "SELECT * FROM Files WHERE "
+                "FileName LIKE :filename ESCAPE '|';";
+
+            static const auto s_queryFilesLikeFileName = MakeSqlQuery(QUERY_FILES_LIKE_FILENAME, QUERY_FILES_LIKE_FILENAME_STATEMENT, LOG_NAME,
+                    SqlParam<const char*>(":filename"));
+
+            static const char* QUERY_FILES_BY_SCANFOLDERID = "AzToolsFramework::AssetDatabase::QueryFilesByScanFolderID";
+            static const char* QUERY_FILES_BY_SCANFOLDERID_STATEMENT =
+                "SELECT * FROM Files WHERE "
+                "ScanFolderPK = :scanfolderid;";
+
+            static const auto s_queryFilesByScanfolderid = MakeSqlQuery(QUERY_FILES_BY_SCANFOLDERID, QUERY_FILES_BY_SCANFOLDERID_STATEMENT, LOG_NAME,
+                SqlParam<AZ::s64>(":scanfolderid"));
+
+            static const char* QUERY_FILE_BY_FILENAME_SCANFOLDERID = "AzToolsFramework::AssetDatabase::QueryFileByFileNameScanFolderID";
+            static const char* QUERY_FILE_BY_FILENAME_SCANFOLDERID_STATEMENT =
+                "SELECT * FROM Files WHERE "
+                "ScanFolderPK = :scanfolderid AND "
+                "FileName = :filename;";
+
+            static const auto s_queryFileByFileNameScanfolderid = MakeSqlQuery(QUERY_FILE_BY_FILENAME_SCANFOLDERID, QUERY_FILE_BY_FILENAME_SCANFOLDERID_STATEMENT, LOG_NAME,
+                    SqlParam<AZ::s64>(":scanfolderid"),
+                    SqlParam<const char*>(":filename"));
+
+            void PopulateJobInfo(AzToolsFramework::AssetSystem::JobInfo& jobinfo, JobDatabaseEntry& jobDatabaseEntry)
             {
                 jobinfo.m_platform = AZStd::move(jobDatabaseEntry.m_platform);
                 jobinfo.m_builderGuid = jobDatabaseEntry.m_builderGuid;
@@ -506,13 +828,21 @@ namespace AzToolsFramework
                 jobinfo.m_jobID = jobDatabaseEntry.m_jobID;
             }
         }
-
+        
         //////////////////////////////////////////////////////////////////////////
         //DatabaseInfoEntry
         DatabaseInfoEntry::DatabaseInfoEntry(AZ::s64 rowID, DatabaseVersion version)
             : m_rowID(rowID)
             , m_version(version)
         {
+        }
+
+        auto DatabaseInfoEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("rowID", m_rowID),
+                MakeColumn("version", m_version)
+            );
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -548,8 +878,7 @@ namespace AzToolsFramework
             const char* portableKey,
             const char* outputPrefix,
             int isRoot)
-            : m_scanFolderID(-1)
-            , m_outputPrefix(outputPrefix)
+            : m_outputPrefix(outputPrefix)
             , m_isRoot(isRoot)
         {
             if (scanFolder)
@@ -623,9 +952,21 @@ namespace AzToolsFramework
                 m_portableKey.c_str());
         }
 
+        auto ScanFolderDatabaseEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("ScanFolderID", m_scanFolderID),
+                MakeColumn("ScanFolder", m_scanFolder),
+                MakeColumn("DisplayName", m_displayName),
+                MakeColumn("PortableKey", m_portableKey),
+                MakeColumn("OutputPrefix", m_outputPrefix),
+                MakeColumn("IsRoot", m_isRoot)
+            );
+        }
+
         //////////////////////////////////////////////////////////////////////////
         //SourceDatabaseEntry
-        SourceDatabaseEntry::SourceDatabaseEntry(AZ::s64 sourceID, AZ::s64 scanFolderPK, const char* sourceName, AZ::Uuid sourceGuid)
+        SourceDatabaseEntry::SourceDatabaseEntry(AZ::s64 sourceID, AZ::s64 scanFolderPK, const char* sourceName, AZ::Uuid sourceGuid, const char* analysisFingerprint)
             : m_sourceID(sourceID)
             , m_scanFolderPK(scanFolderPK)
             , m_sourceGuid(sourceGuid)
@@ -634,51 +975,25 @@ namespace AzToolsFramework
             {
                 m_sourceName = sourceName;
             }
+            if (analysisFingerprint)
+            {
+                m_analysisFingerprint = analysisFingerprint;
+            }
         }
 
-        SourceDatabaseEntry::SourceDatabaseEntry(AZ::s64 scanFolderPK, const char* sourceName, AZ::Uuid sourceGuid)
-            : m_sourceID(-1)
-            , m_scanFolderPK(scanFolderPK)
+        SourceDatabaseEntry::SourceDatabaseEntry(AZ::s64 scanFolderPK, const char* sourceName, AZ::Uuid sourceGuid, const char* analysisFingerprint)
+            : m_scanFolderPK(scanFolderPK)
             , m_sourceGuid(sourceGuid)
         {
             if (sourceName)
             {
                 m_sourceName = sourceName;
             }
-        }
 
-        SourceDatabaseEntry::SourceDatabaseEntry(const SourceDatabaseEntry& other)
-            : m_sourceID(other.m_sourceID)
-            , m_scanFolderPK(other.m_scanFolderPK)
-            , m_sourceName(other.m_sourceName)
-            , m_sourceGuid(other.m_sourceGuid)
-        {
-        }
-
-        SourceDatabaseEntry::SourceDatabaseEntry(SourceDatabaseEntry&& other)
-        {
-            *this = AZStd::move(other);
-        }
-
-        SourceDatabaseEntry& SourceDatabaseEntry::operator=(SourceDatabaseEntry&& other)
-        {
-            if (this != &other)
+            if (analysisFingerprint)
             {
-                m_sourceID = other.m_sourceID;
-                m_scanFolderPK = other.m_scanFolderPK;
-                m_sourceName = AZStd::move(other.m_sourceName);
-                m_sourceGuid = other.m_sourceGuid;
+                m_analysisFingerprint = analysisFingerprint;
             }
-            return *this;
-        }
-
-        SourceDatabaseEntry& SourceDatabaseEntry::operator=(const SourceDatabaseEntry& other)
-        {
-            m_sourceID = other.m_sourceID;
-            m_scanFolderPK = other.m_scanFolderPK;
-            m_sourceName = other.m_sourceName;
-            m_sourceGuid = other.m_sourceGuid;
-            return *this;
         }
 
         AZStd::string SourceDatabaseEntry::ToString() const
@@ -686,53 +1001,69 @@ namespace AzToolsFramework
             return AZStd::string::format("SourceDatabaseEntry id:%i scanfolderpk: %i sourcename: %s sourceguid: %s", m_sourceID, m_scanFolderPK, m_sourceName.c_str(), m_sourceGuid.ToString<AZStd::string>().c_str());
         }
 
+        auto SourceDatabaseEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("SourceID", m_sourceID),
+                MakeColumn("ScanFolderPK", m_scanFolderPK),
+                MakeColumn("SourceName", m_sourceName),
+                MakeColumn("SourceGuid", m_sourceGuid),
+                MakeColumn("AnalysisFingerprint", m_analysisFingerprint)
+            );
+        }
+
+        //////////////////////////////////////////////////////////////////////////
+        // BuilderInfoEntry
+        BuilderInfoEntry::BuilderInfoEntry(AZ::s64 builderInfoID, const AZ::Uuid& builderUuid, const char* analysisFingerprint)
+            : m_builderInfoID(builderInfoID)
+            , m_builderUuid(builderUuid)
+        {
+            if (analysisFingerprint)
+            {
+                m_analysisFingerprint = analysisFingerprint;
+            }
+        }
+
+        AZStd::string BuilderInfoEntry::ToString() const
+        {
+            return AZStd::string::format("BuilderInfoEntry id:%i uuid: %s fingerprint: %s", m_builderInfoID, m_builderUuid.ToString<AZStd::string>().c_str(), m_analysisFingerprint.c_str());
+        }
+
+        auto BuilderInfoEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("BuilderID", m_builderInfoID),
+                MakeColumn("Guid", m_builderUuid),
+                MakeColumn("AnalysisFingerprint", m_analysisFingerprint)
+            );
+        }
+
         //////////////////////////////////////////////////////////////////////////
         //SourceFileDependencyEntry
 
-        SourceFileDependencyEntry::SourceFileDependencyEntry(AZ::Uuid builderGuid, const AZStd::string&  source, const AZStd::string& dependsOnSource)
+        SourceFileDependencyEntry::SourceFileDependencyEntry(AZ::Uuid builderGuid, const char *source, const char* dependsOnSource, SourceFileDependencyEntry::TypeOfDependency dependencyType)
             : m_builderGuid(builderGuid)
             , m_source(source)
             , m_dependsOnSource(dependsOnSource)
+            , m_typeOfDependency(dependencyType)
         {
-        }
-
-        SourceFileDependencyEntry::SourceFileDependencyEntry(const SourceFileDependencyEntry& other)
-            : m_sourceDependencyID(other.m_sourceDependencyID)
-            , m_builderGuid(other.m_builderGuid)
-            , m_source(other.m_source)
-            , m_dependsOnSource(other.m_dependsOnSource)
-        {
-        }
-
-        SourceFileDependencyEntry::SourceFileDependencyEntry(SourceFileDependencyEntry&& other)
-        {
-            *this = AZStd::move(other);
-        }
-
-        SourceFileDependencyEntry& SourceFileDependencyEntry::operator=(SourceFileDependencyEntry&& other)
-        {
-            if (this != &other)
-            {
-                m_sourceDependencyID = other.m_sourceDependencyID;
-                m_builderGuid = other.m_builderGuid;
-                m_source = AZStd::move(other.m_source);
-                m_dependsOnSource = AZStd::move(other.m_dependsOnSource);
-            }
-            return *this;
-        }
-
-        SourceFileDependencyEntry& SourceFileDependencyEntry::operator=(const SourceFileDependencyEntry& other)
-        {
-            m_sourceDependencyID = other.m_sourceDependencyID;
-            m_builderGuid = other.m_builderGuid;
-            m_source = AZStd::move(other.m_source);
-            m_dependsOnSource = AZStd::move(other.m_dependsOnSource);
-            return *this;
+            AZ_Assert(dependencyType != SourceFileDependencyEntry::DEP_Any, "You may only store actual dependency types in the database, not DEP_Any");
         }
 
         AZStd::string SourceFileDependencyEntry::ToString() const
         {
-            return AZStd::string::format("SourceFileDependencyEntry id:%i builderGuid: %s source: %s dependsOnSource: %s", m_sourceDependencyID, m_builderGuid.ToString<AZStd::string>().c_str(), m_source.c_str(), m_dependsOnSource.c_str());
+            return AZStd::string::format("SourceFileDependencyEntry id:%i builderGuid: %s source: %s dependsOnSource: %s type: %s", m_sourceDependencyID, m_builderGuid.ToString<AZStd::string>().c_str(), m_source.c_str(), m_dependsOnSource.c_str(), m_typeOfDependency == DEP_SourceToSource ? "source" : "job");
+        }
+
+        auto SourceFileDependencyEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("SourceDependencyID", m_sourceDependencyID),
+                MakeColumn("BuilderGuid", m_builderGuid),
+                MakeColumn("Source", m_source),
+                MakeColumn("DependsOnSource", m_dependsOnSource),
+                MakeColumn("TypeOfDependency", m_typeOfDependency)
+            );
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -771,8 +1102,7 @@ namespace AzToolsFramework
         }
 
         JobDatabaseEntry::JobDatabaseEntry(AZ::s64 sourcePK, const char* jobKey, AZ::u32 fingerprint, const char* platform, AZ::Uuid builderGuid, AssetSystem::JobStatus status, AZ::u64 jobRunKey, AZ::s64 firstFailLogTime, const char* firstFailLogFile, AZ::s64 lastFailLogTime, const char* lastFailLogFile, AZ::s64 lastLogTime, const char* lastLogFile)
-            : m_jobID(-1)
-            , m_sourcePK(sourcePK)
+            : m_sourcePK(sourcePK)
             , m_fingerprint(fingerprint)
             , m_builderGuid(builderGuid)
             , m_status(status)
@@ -872,23 +1202,43 @@ namespace AzToolsFramework
         {
             //equivalence is when everything but the id is the same
             return m_sourcePK == other.m_sourcePK &&
-                m_fingerprint == other.m_fingerprint &&
-                AzFramework::StringFunc::Equal(m_jobKey.c_str(), other.m_jobKey.c_str()) &&
-                AzFramework::StringFunc::Equal(m_platform.c_str(), other.m_platform.c_str()) &&
-                m_builderGuid == other.m_builderGuid &&
-                m_status == other.m_status &&
-                m_jobRunKey == other.m_jobRunKey &&
-                m_firstFailLogTime == other.m_firstFailLogTime &&
-                AzFramework::StringFunc::Equal(m_firstFailLogFile.c_str(), other.m_firstFailLogFile.c_str()) &&
-                m_lastFailLogTime == other.m_lastFailLogTime &&
-                AzFramework::StringFunc::Equal(m_lastFailLogFile.c_str(), other.m_lastFailLogFile.c_str()) &&
-                m_lastLogTime == other.m_lastLogTime &&
-                AzFramework::StringFunc::Equal(m_lastLogFile.c_str(), other.m_lastLogFile.c_str());
+                   m_fingerprint == other.m_fingerprint &&
+                   AzFramework::StringFunc::Equal(m_jobKey.c_str(), other.m_jobKey.c_str()) &&
+                   AzFramework::StringFunc::Equal(m_platform.c_str(), other.m_platform.c_str()) &&
+                   m_builderGuid == other.m_builderGuid &&
+                   m_status == other.m_status &&
+                   m_jobRunKey == other.m_jobRunKey &&
+                   m_firstFailLogTime == other.m_firstFailLogTime &&
+                   AzFramework::StringFunc::Equal(m_firstFailLogFile.c_str(), other.m_firstFailLogFile.c_str()) &&
+                   m_lastFailLogTime == other.m_lastFailLogTime &&
+                   AzFramework::StringFunc::Equal(m_lastFailLogFile.c_str(), other.m_lastFailLogFile.c_str()) &&
+                   m_lastLogTime == other.m_lastLogTime &&
+                   AzFramework::StringFunc::Equal(m_lastLogFile.c_str(), other.m_lastLogFile.c_str());
         }
 
         AZStd::string JobDatabaseEntry::ToString() const
         {
             return AZStd::string::format("JobDatabaseEntry id:%i sourcepk: %i jobkey: %s fingerprint: %i platform: %s builderguid: %s status: %s", m_jobID, m_sourcePK, m_jobKey.c_str(), m_fingerprint, m_platform.c_str(), m_builderGuid.ToString<AZStd::string>().c_str(), AssetSystem::JobStatusString(m_status));
+        }
+
+        auto JobDatabaseEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("JobID", m_jobID),
+                MakeColumn("SourcePK", m_sourcePK),
+                MakeColumn("JobKey", m_jobKey),
+                MakeColumn("Fingerprint", m_fingerprint),
+                MakeColumn("Platform", m_platform),
+                MakeColumn("BuilderGuid", m_builderGuid),
+                MakeColumn("Status", m_status),
+                MakeColumn("JobRunKey", m_jobRunKey),
+                MakeColumn("FirstFailLogTime", m_firstFailLogTime),
+                MakeColumn("FirstFailLogFile", m_firstFailLogFile),
+                MakeColumn("LastFailLogTime", m_lastFailLogTime),
+                MakeColumn("LastFailLogFile", m_lastFailLogFile),
+                MakeColumn("LastLogTime", m_lastLogTime),
+                MakeColumn("LastLogFile", m_lastLogFile)
+            );
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -909,8 +1259,7 @@ namespace AzToolsFramework
 
         ProductDatabaseEntry::ProductDatabaseEntry(AZ::s64 jobPK, AZ::u32 subID, const char* productName,
             AZ::Data::AssetType assetType, AZ::Uuid legacyGuid)
-            : m_productID(-1)
-            , m_jobPK(jobPK)
+            : m_jobPK(jobPK)
             , m_subID(subID)
             , m_assetType(assetType)
             , m_legacyGuid(legacyGuid)
@@ -965,14 +1314,26 @@ namespace AzToolsFramework
         {
             //equivalence is when everything but the id is the same
             return m_jobPK == other.m_jobPK &&
-                m_subID == other.m_subID &&
-                m_assetType == other.m_assetType &&
-                AzFramework::StringFunc::Equal(m_productName.c_str(), other.m_productName.c_str());//don't compare legacy guid
+                   m_subID == other.m_subID &&
+                   m_assetType == other.m_assetType &&
+                   AzFramework::StringFunc::Equal(m_productName.c_str(), other.m_productName.c_str());//don't compare legacy guid
         }
 
         AZStd::string ProductDatabaseEntry::ToString() const
         {
             return AZStd::string::format("ProductDatabaseEntry id:%i jobpk: %i subid: %i productname: %s assettype: %s", m_productID, m_jobPK, m_subID, m_productName.c_str(), m_assetType.ToString<AZStd::string>().c_str());
+        }
+
+        auto ProductDatabaseEntry::GetColumns()
+        {
+            return SQLite::MakeColumns(
+                SQLite::MakeColumn("ProductID", m_productID),
+                SQLite::MakeColumn("JobPK", m_jobPK),
+                SQLite::MakeColumn("ProductName", m_productName),
+                SQLite::MakeColumn("SubID", m_subID),
+                SQLite::MakeColumn("AssetType", m_assetType),
+                SQLite::MakeColumn("LegacyGuid", m_legacyGuid)
+            );
         }
 
         /////////////////////////////
@@ -991,53 +1352,121 @@ namespace AzToolsFramework
         {
         }
 
+        bool LegacySubIDsEntry::operator==(const LegacySubIDsEntry& other) const
+        {
+            return m_productPK == other.m_productPK
+                && m_subID == other.m_subID;
+        }
+
+        auto LegacySubIDsEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("LegacySubID", m_subIDsEntryID),
+                MakeColumn("ProductPK", m_productPK),
+                MakeColumn("SubID", m_subID)
+            );
+        }
+
         //////////////////////////////////////////////////////////////////////////
         //ProductDepdendencyDatabaseEntry
-        ProductDependencyDatabaseEntry::ProductDependencyDatabaseEntry(AZ::s64 productDependencyID, AZ::s64 productPK, AZ::Uuid dependencySourceGuid, AZ::u32 dependencySubID, AZStd::bitset<64> dependencyFlags)
+        ProductDependencyDatabaseEntry::ProductDependencyDatabaseEntry(AZ::s64 productDependencyID, AZ::s64 productPK, AZ::Uuid dependencySourceGuid, AZ::u32 dependencySubID, AZStd::bitset<64> dependencyFlags, const AZStd::string& platform, const AZStd::string& unresolvedPath, DependencyType dependencyType)
             : m_productDependencyID(productDependencyID)
             , m_productPK(productPK)
             , m_dependencySourceGuid(dependencySourceGuid)
             , m_dependencySubID(dependencySubID)
             , m_dependencyFlags(dependencyFlags)
+            , m_platform(platform)
+            , m_unresolvedPath(unresolvedPath)
+            , m_dependencyType(dependencyType)
         {
         }
 
-        ProductDependencyDatabaseEntry::ProductDependencyDatabaseEntry(AZ::s64 productPK, AZ::Uuid dependencySourceGuid, AZ::u32 dependencySubID, AZStd::bitset<64> dependencyFlags)
-            : m_productDependencyID(-1)
-            , m_productPK(productPK)
+        ProductDependencyDatabaseEntry::ProductDependencyDatabaseEntry(AZ::s64 productPK, AZ::Uuid dependencySourceGuid, AZ::u32 dependencySubID, AZStd::bitset<64> dependencyFlags, const AZStd::string& platform, const AZStd::string& unresolvedPath, DependencyType dependencyType)
+            : m_productPK(productPK)
             , m_dependencySourceGuid(dependencySourceGuid)
             , m_dependencySubID(dependencySubID)
             , m_dependencyFlags(dependencyFlags)
+            , m_platform(platform)
+            , m_unresolvedPath(unresolvedPath)
+            , m_dependencyType(dependencyType)
         {
-        }
-
-        ProductDependencyDatabaseEntry::ProductDependencyDatabaseEntry(ProductDependencyDatabaseEntry&& other)
-        {
-            *this = AZStd::move(other);
-        }
-
-        ProductDependencyDatabaseEntry& ProductDependencyDatabaseEntry::operator=(ProductDependencyDatabaseEntry&& other)
-        {
-            m_productDependencyID = AZStd::move(other.m_productDependencyID);
-            m_productPK = AZStd::move(other.m_productPK);
-            m_dependencySourceGuid = AZStd::move(other.m_dependencySourceGuid);
-            m_dependencySubID = AZStd::move(other.m_dependencySubID);
-            m_dependencyFlags = AZStd::move(other.m_dependencyFlags);
-            return *this;
         }
 
         bool ProductDependencyDatabaseEntry::operator==(const ProductDependencyDatabaseEntry& other) const
         {
             //equivalence is when everything but the id is the same
             return m_productPK == other.m_productPK &&
-                m_dependencySourceGuid == other.m_dependencySourceGuid &&
-                m_dependencySubID == other.m_dependencySubID &&
-                m_dependencyFlags == other.m_dependencyFlags;
+                   m_dependencySourceGuid == other.m_dependencySourceGuid &&
+                   m_dependencySubID == other.m_dependencySubID &&
+                   m_dependencyFlags == other.m_dependencyFlags &&
+                   m_unresolvedPath == other.m_unresolvedPath &&
+                   m_dependencyType == other.m_dependencyType &&
+                   m_platform == other.m_platform;
         }
 
         AZStd::string ProductDependencyDatabaseEntry::ToString() const
-        { 
-            return AZStd::string::format("ProductDependencyDatabaseEntry id: %i productpk: %i dependencysourceguid: %s dependencysubid: %i dependencyflags: %i", m_productDependencyID, m_productPK, m_dependencySourceGuid.ToString<AZStd::string>().c_str(), m_dependencySubID, m_dependencyFlags);
+        {
+            return AZStd::string::format("ProductDependencyDatabaseEntry id: %i productpk: %i dependencysourceguid: %s dependencysubid: %i dependencyflags: %i unresolvedPath: %s dependencyType: %i", m_productDependencyID, m_productPK, m_dependencySourceGuid.ToString<AZStd::string>().c_str(), m_dependencySubID, m_dependencyFlags, m_unresolvedPath.c_str(), m_dependencyType);
+        }
+
+        auto ProductDependencyDatabaseEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("ProductDependencyID", m_productDependencyID),
+                MakeColumn("ProductPK", m_productPK),
+                MakeColumn("DependencySourceGuid", m_dependencySourceGuid),
+                MakeColumn("DependencySubID", m_dependencySubID),
+                MakeColumn("DependencyFlags", m_dependencyFlags),
+                MakeColumn("Platform", m_platform),
+                MakeColumn("UnresolvedPath", m_unresolvedPath),
+                MakeColumn("UnresolvedDependencyType", m_dependencyType)
+            );
+        }
+
+        //////////////////////////////////////////////////////////////////////////
+        //FileDatabaseEntry
+
+        bool FileDatabaseEntry::operator==(const FileDatabaseEntry& other) const
+        {
+            return m_scanFolderPK == other.m_scanFolderPK
+                && m_fileName == other.m_fileName
+                && m_isFolder == other.m_isFolder
+                && m_modTime == other.m_modTime;
+        }
+
+        AZStd::string FileDatabaseEntry::ToString() const
+        {
+            return AZStd::string::format("FileDatabaseEntry id: %i scanfolderpk: %i filename: %s isfolder: %i modtime: %i",
+                m_fileID, m_scanFolderPK, m_fileName.c_str(), m_isFolder, m_modTime);
+        }
+
+        auto FileDatabaseEntry::GetColumns()
+        {
+            return MakeColumns(
+                MakeColumn("FileID", m_fileID),
+                MakeColumn("ScanFolderPK", m_scanFolderPK),
+                MakeColumn("FileName", m_fileName),
+                MakeColumn("IsFolder", m_isFolder),
+                MakeColumn("ModTime", m_modTime)
+            );
+        }
+
+        //////////////////////////////////////////////////////////////////////////
+
+        auto SourceAndScanFolderDatabaseEntry::GetColumns()
+        {
+            return CombineColumns(
+                ScanFolderDatabaseEntry::GetColumns(),
+                SourceDatabaseEntry::GetColumns()
+            );
+        }
+
+        auto CombinedDatabaseEntry::GetColumns()
+        {
+            return CombineColumns(ScanFolderDatabaseEntry::GetColumns(),
+                SourceDatabaseEntry::GetColumns(),
+                JobDatabaseEntry::GetColumns(),
+                ProductDatabaseEntry::GetColumns());
         }
 
         //////////////////////////////////////////////////////////////////////////
@@ -1085,6 +1514,12 @@ namespace AzToolsFramework
                 AZ::IO::SystemFile::CreateDir(parentFolder.c_str());
             }
 
+            if ((IsReadOnly()) && (!AZ::IO::SystemFile::Exists(assetDatabaseLocation.c_str())))
+            {
+                AZ_Error("Connection", false, "There is no asset data base in the cache folder.  Cannot open the database.  Make sure Asset Processor is running.");
+                return false;
+            }
+
             if (!IsReadOnly() && AZ::IO::SystemFile::Exists(assetDatabaseLocation.c_str()) && !AZ::IO::SystemFile::IsWritable(assetDatabaseLocation.c_str()))
             {
                 AZ_Error("Connection", false, "Asset database file %s is marked read-only.  The cache should not be checked into source control.", assetDatabaseLocation.c_str());
@@ -1121,6 +1556,17 @@ namespace AzToolsFramework
                 AZ_Error(LOG_NAME, false, "Unable to open database - invalid version - database has %i and we want %i\n", QueryDatabaseVersion(), CurrentDatabaseVersion());
                 return false;
             }
+
+            // make sure that we can see all required tables.
+            for (size_t tableIndex = 0; tableIndex < AZ_ARRAY_SIZE(EXPECTED_TABLES); ++tableIndex)
+            {
+                if (!ValidateDatabaseTable("PostOpenDatabase", EXPECTED_TABLES[tableIndex]))
+                {
+                    AZ_Error(LOG_NAME, false, "The asset database in the Cache folder appears to be from a newer version of Asset Processor.  The Asset Processor will close, to prevent data loss.\n");
+                    return false;
+                }
+            }
+
             return true;
         }
 
@@ -1131,94 +1577,105 @@ namespace AzToolsFramework
 
             //////////////////////////////////////////////////////////////////////////
             //table queries
-            m_databaseConnection->AddStatement(QUERY_DATABASEINFO_TABLE, QUERY_DATABASEINFO_TABLE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCES_TABLE, QUERY_SOURCES_TABLE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOBS_TABLE, QUERY_JOBS_TABLE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOBS_TABLE_PLATFORM, QUERY_JOBS_TABLE_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCTS_TABLE, QUERY_PRODUCTS_TABLE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCTS_TABLE_PLATFORM, QUERY_PRODUCTS_TABLE_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SCANFOLDERS_TABLE, QUERY_SCANFOLDERS_TABLE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_LEGACYSUBIDSBYPRODUCTID, QUERY_LEGACYSUBIDSBYPRODUCTID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCTDEPENDENCIES_TABLE, QUERY_PRODUCTDEPENDENCIES_TABLE_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryDatabaseinfoTable);
+            AddStatement(m_databaseConnection, s_queryScanfoldersTable);
+            AddStatement(m_databaseConnection, s_querySourcesTable);
+            AddStatement(m_databaseConnection, s_queryJobsTable);
+            AddStatement(m_databaseConnection, s_queryJobsTablePlatform);
+            AddStatement(m_databaseConnection, s_queryProductsTable);
+            AddStatement(m_databaseConnection, s_queryProductsTablePlatform);
+            AddStatement(m_databaseConnection, s_queryLegacysubidsbyproductid);
+            AddStatement(m_databaseConnection, s_queryProductdependenciesTable);
+            AddStatement(m_databaseConnection, s_queryFilesTable);
 
             //////////////////////////////////////////////////////////////////////////
             //projection and combination queries
-            m_databaseConnection->AddStatement(QUERY_SCANFOLDER_BY_SCANFOLDERID, QUERY_SCANFODLER_BY_SCANFOLDERID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SCANFOLDER_BY_DISPLAYNAME, QUERY_SCANFOLDER_BY_DISPLAYNAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SCANFOLDER_BY_PORTABLEKEY, QUERY_SCANFOLDER_BY_PORTABLEKEY_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryScanfolderByScanfolderid);
+            AddStatement(m_databaseConnection, s_queryScanfolderByDisplayname);
+            AddStatement(m_databaseConnection, s_queryScanfolderByPortablekey);
 
-            m_databaseConnection->AddStatement(QUERY_SOURCE_BY_SOURCEID, QUERY_SOURCE_BY_SOURCEID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCE_BY_SOURCEGUID, QUERY_SOURCE_BY_SOURCEGUID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCE_BY_SCANFOLDERID, QUERY_SOURCE_BY_SCANFOLDERID_STATMENT);
+            AddStatement(m_databaseConnection, s_querySourceBySourceid);
+            AddStatement(m_databaseConnection, s_querySourceByScanfolderid);
+            AddStatement(m_databaseConnection, s_querySourceBySourceguid);
 
-            m_databaseConnection->AddStatement(QUERY_SOURCE_BY_SOURCENAME, QUERY_SOURCE_BY_SOURCENAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID, QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCE_LIKE_SOURCENAME, QUERY_SOURCE_LIKE_SOURCENAME_STATEMENT);
+            AddStatement(m_databaseConnection, s_querySourceBySourcename);
+            AddStatement(m_databaseConnection, s_querySourceBySourcenameScanfolderid);
+            AddStatement(m_databaseConnection, s_querySourceLikeSourcename);
+            AddStatement(m_databaseConnection, s_querySourceAnalysisFingerprint);
+            AddStatement(m_databaseConnection, s_querySourcesAndScanfolders);
 
+            AddStatement(m_databaseConnection, s_queryJobByJobid);
+            AddStatement(m_databaseConnection, s_queryJobByJobkey);
+            AddStatement(m_databaseConnection, s_queryJobByJobrunkey);
+            AddStatement(m_databaseConnection, s_queryJobByProductid);
+            AddStatement(m_databaseConnection, s_queryJobBySourceid);
+            AddStatement(m_databaseConnection, s_queryJobBySourceidPlatform);
 
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_JOBID, QUERY_JOB_BY_JOBID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_JOBKEY, QUERY_JOB_BY_JOBKEY_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_JOBRUNKEY, QUERY_JOB_BY_JOBRUNKEY_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_PRODUCTID, QUERY_JOB_BY_PRODUCTID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_SOURCEID, QUERY_JOB_BY_SOURCEID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_JOB_BY_SOURCEID_PLATFORM, QUERY_JOB_BY_SOURCEID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryProductByProductid);
+            AddStatement(m_databaseConnection, s_queryProductByJobid);
+            AddStatement(m_databaseConnection, s_queryProductByJobidPlatform);
+            AddStatement(m_databaseConnection, s_queryProductBySourceid);
+            AddStatement(m_databaseConnection, s_queryProductBySourceidPlatform);
 
+            AddStatement(m_databaseConnection, s_queryProductByProductname);
+            AddStatement(m_databaseConnection, s_queryProductByProductnamePlatform);
+            AddStatement(m_databaseConnection, s_queryProductLikeProductname);
+            AddStatement(m_databaseConnection, s_queryProductLikeProductnamePlatform);
 
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_PRODUCTID, QUERY_PRODUCT_BY_PRODUCTID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_JOBID, QUERY_PRODUCT_BY_JOBID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_JOBID_PLATFORM, QUERY_PRODUCT_BY_JOBID_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_SOURCEID, QUERY_PRODUCT_BY_SOURCEID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_SOURCEID_PLATFORM, QUERY_PRODUCT_BY_SOURCEID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryProductBySourcename);
+            AddStatement(m_databaseConnection, s_queryProductBySourcenamePlatform);
+            AddStatement(m_databaseConnection, s_queryProductLikeSourcename);
+            AddStatement(m_databaseConnection, s_queryProductLikeSourcenamePlatform);
+            AddStatement(m_databaseConnection, s_queryProductByJobIdSubId);
+            AddStatement(m_databaseConnection, s_queryProductBySourceGuidSubid);
 
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_PRODUCTNAME, QUERY_PRODUCT_BY_PRODUCTNAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM, QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_LIKE_PRODUCTNAME, QUERY_PRODUCT_LIKE_PRODUCTNAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM, QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombined);
+            AddStatement(m_databaseConnection, s_queryCombinedByPlatform);
 
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_SOURCENAME, QUERY_PRODUCT_BY_SOURCENAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_BY_SOURCENAME_PLATFORM, QUERY_PRODUCT_BY_SOURCENAME_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_LIKE_SOURCENAME, QUERY_PRODUCT_LIKE_SOURCENAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM, QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourceid);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourceidPlatform);
 
+            AddStatement(m_databaseConnection, s_queryCombinedByJobid);
+            AddStatement(m_databaseConnection, s_queryCombinedByJobidPlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED, QUERY_COMBINED_BY_PLATFORM_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_PLATFORM, QUERY_COMBINED_BY_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedByProductid);
+            AddStatement(m_databaseConnection, s_queryCombinedByProductidPlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCEID, QUERY_COMBINED_BY_SOURCEID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCEID_PLATFORM, QUERY_COMBINED_BY_SOURCEID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourceguidProductsubid);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourceguidProductsubidPlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_JOBID, QUERY_COMBINED_BY_JOBID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_JOBID_PLATFORM, QUERY_COMBINED_BY_JOBID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourcename);
+            AddStatement(m_databaseConnection, s_queryCombinedBySourcenamePlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_PRODUCTID, QUERY_COMBINED_BY_PRODUCTID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_PRODUCTID_PLATFORM, QUERY_COMBINED_BY_PRODUCTID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedLikeSourcename);
+            AddStatement(m_databaseConnection, s_queryCombinedLikeSourcenamePlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID, QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM, QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedByProductname);
+            AddStatement(m_databaseConnection, s_queryCombinedByProductnamePlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCENAME, QUERY_COMBINED_BY_SOURCENAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_SOURCENAME_PLATFORM, QUERY_COMBINED_BY_SOURCENAME_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryCombinedLikeProductname);
+            AddStatement(m_databaseConnection, s_queryCombinedLikeProductnamePlatform);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_LIKE_SOURCENAME, QUERY_COMBINED_LIKE_SOURCENAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM, QUERY_COMBINED_LIKE_SOURCENAME_STATEMENT);
+            AddStatement(m_databaseConnection, s_querySourcedependencyBySourcedependencyid);
+            AddStatement(m_databaseConnection, s_querySourcedependencyByDependsonsource);
+            AddStatement(m_databaseConnection, s_querySourcedependencyByDependsonsourceWildcard);
+            AddStatement(m_databaseConnection, s_queryDependsonsourceBySource);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_PRODUCTNAME, QUERY_COMBINED_BY_PRODUCTNAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM, QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryProductdependencyByProductdependencyid);
+            AddStatement(m_databaseConnection, s_queryProductdependencyByProductid);
+            AddStatement(m_databaseConnection, s_queryDirectProductdependencies);
+            AddStatement(m_databaseConnection, s_queryAllProductdependencies);
+            AddStatement(m_databaseConnection, s_queryUnresolvedProductDependencies);
 
-            m_databaseConnection->AddStatement(QUERY_COMBINED_LIKE_PRODUCTNAME, QUERY_COMBINED_LIKE_PRODUCTNAME_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM, QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryFileByFileid);
+            AddStatement(m_databaseConnection, s_queryFilesByFileName);
+            AddStatement(m_databaseConnection, s_queryFilesLikeFileName);
+            AddStatement(m_databaseConnection, s_queryFilesByScanfolderid);
+            AddStatement(m_databaseConnection, s_queryFileByFileNameScanfolderid);
 
-            m_databaseConnection->AddStatement(QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID, QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCEDEPENDENCY, QUERY_SOURCEDEPENDENCY_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE, QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_DEPENDSONSOURCE_BY_SOURCE, QUERY_DEPENDSONSOURCE_BY_SOURCE_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE, QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE_STATEMENT);
-
-            m_databaseConnection->AddStatement(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_DIRECT_PRODUCTDEPENDENCIES, QUERY_DIRECT_PRODUCTDEPENDENCIES_STATEMENT);
-            m_databaseConnection->AddStatement(QUERY_ALL_PRODUCTDEPENDENCIES, QUERY_ALL_PRODUCTDEPENDENCIES_STATEMENT);
+            AddStatement(m_databaseConnection, s_queryBuilderInfoTable);
         }
+
         //////////////////////////////////////////////////////////////////////////
         //Like
         AZStd::string AssetDatabaseConnection::GetLikeActualSearchTerm(const char* likeString, LikeType likeType)
@@ -1253,59 +1710,7 @@ namespace AzToolsFramework
 
         bool AssetDatabaseConnection::QueryDatabaseInfoTable(databaseInfoHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_DATABASEINFO_TABLE, "dbinfo"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_DATABASEINFO_TABLE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_DATABASEINFO_TABLE);
-                return false;
-            }
-
-            Statement::SqlStatus result = statement->Step();
-
-            int rowIDColumnIdx = statement->FindColumn("rowID");
-            if (rowIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "rowID", QUERY_DATABASEINFO_TABLE);
-                return false;
-            }
-
-            int versionColumnIdx = statement->FindColumn("version");
-            if (versionColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "version", QUERY_DATABASEINFO_TABLE);
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                DatabaseInfoEntry databaseinfo(statement->GetColumnInt(rowIDColumnIdx),
-                    static_cast<DatabaseVersion>(statement->GetColumnInt(versionColumnIdx)));
-                if (handler(databaseinfo))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", QUERY_DATABASEINFO_TABLE);
-                return false;
-            }
-
-            return validResult;
+            return s_queryDatabaseinfoTable.BindAndQuery(*m_databaseConnection, handler, &GetDatabaseInfoResult);
         }
 
         DatabaseVersion AssetDatabaseConnection::QueryDatabaseVersion()
@@ -1328,156 +1733,47 @@ namespace AzToolsFramework
 
         bool AssetDatabaseConnection::QueryScanFoldersTable(scanFolderHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SCANFOLDERS_TABLE, "ScanFolders"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SCANFOLDERS_TABLE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SCANFOLDERS_TABLE);
-                return false;
-            }
-
-            return GetScanFolderResult(QUERY_SCANFOLDERS_TABLE, statement, handler);
+            return s_queryScanfoldersTable.BindAndQuery(*m_databaseConnection, handler, &GetScanFolderResult);
         }
 
         bool AssetDatabaseConnection::QuerySourcesTable(sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCES_TABLE, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCES_TABLE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCES_TABLE);
-                return false;
-            }
-
-            return GetSourceResult(QUERY_SOURCES_TABLE, statement, handler);
+            return s_querySourcesTable.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult);
         }
 
         bool AssetDatabaseConnection::QueryJobsTable(jobHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_JOBS_TABLE;
             if (platform && strlen(platform))
             {
-                name = QUERY_JOBS_TABLE_PLATFORM;
+                return s_queryJobsTablePlatform.BindAndThen(*m_databaseConnection, handler, platform).Query(&GetJobResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            if (name == QUERY_JOBS_TABLE_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetJobResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryJobsTable.BindAndThen(*m_databaseConnection, handler).Query(&GetJobResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductsTable(productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_PRODUCTS_TABLE;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCTS_TABLE_PLATFORM;
+                return s_queryProductsTablePlatform.BindAndThen(*m_databaseConnection, handler, platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            if (name == QUERY_PRODUCTS_TABLE_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryProductsTable.BindAndThen(*m_databaseConnection, handler).Query(&GetProductResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductDependenciesTable(combinedProductDependencyHandler handler)
         {
-            const char* name = QUERY_PRODUCTDEPENDENCIES_TABLE;
-            if (!ValidateDatabaseTable(name, "ProductDependencies"))
-            {
-                return false;
-            }
+            return s_queryProductdependenciesTable.BindAndQuery(*m_databaseConnection, handler, &GetCombinedDependencyResult);
+        }
 
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            return GetCombinedDependencyResult(name, statement, handler);
+        bool AssetDatabaseConnection::QueryFilesTable(fileHandler handler)
+        {
+            return s_queryFilesTable.BindAndQuery(*m_databaseConnection, handler, &GetFileResult);
         }
 
         bool AssetDatabaseConnection::QueryScanFolderByScanFolderID(AZ::s64 scanfolderid, scanFolderHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SCANFOLDER_BY_SCANFOLDERID, "ScanFolders"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SCANFOLDER_BY_SCANFOLDERID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SCANFOLDER_BY_SCANFOLDERID);
-                return false;
-            }
-
-            int scanfolderIdx = statement->GetNamedParamIdx(":scanfolderid");
-            if (!scanfolderIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :scanFolder parameter in %s", QUERY_SCANFOLDER_BY_SCANFOLDERID);
-                return false;
-            }
-
-            statement->BindValueInt64(scanfolderIdx, scanfolderid);
-
-            return GetScanFolderResult(QUERY_SCANFOLDER_BY_SCANFOLDERID, statement, handler);
+            return s_queryScanfolderByScanfolderid.BindAndQuery(*m_databaseConnection, handler, &GetScanFolderResult, scanfolderid);
         }
 
         bool AssetDatabaseConnection::QueryScanFolderBySourceID(AZ::s64 sourceID, scanFolderHandler handler)
@@ -1519,112 +1815,24 @@ namespace AzToolsFramework
             return found && succeeded;
         }
 
-        bool AssetDatabaseConnection::QueryScanFolderByDisplayName(const char* displayName, scanFolderHandler handler) 
+        bool AssetDatabaseConnection::QueryScanFolderByDisplayName(const char* displayName, scanFolderHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SCANFOLDER_BY_DISPLAYNAME, "ScanFolders"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SCANFOLDER_BY_DISPLAYNAME);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SCANFOLDER_BY_DISPLAYNAME);
-                return false;
-            }
-
-            int displayNameIdx = statement->GetNamedParamIdx(":displayname");
-            if (!displayNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :displayname parameter in %s", QUERY_SCANFOLDER_BY_DISPLAYNAME);
-                return false;
-            }
-
-            statement->BindValueText(displayNameIdx, displayName);
-
-            return GetScanFolderResult(QUERY_SCANFOLDER_BY_DISPLAYNAME, statement, handler);
+            return s_queryScanfolderByDisplayname.BindAndQuery(*m_databaseConnection, handler, &GetScanFolderResult, displayName);
         }
-        
+
         bool AssetDatabaseConnection::QueryScanFolderByPortableKey(const char* portableKey, scanFolderHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SCANFOLDER_BY_PORTABLEKEY, "ScanFolders"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SCANFOLDER_BY_PORTABLEKEY);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SCANFOLDER_BY_PORTABLEKEY);
-                return false;
-            }
-
-            int portableKeyIdx = statement->GetNamedParamIdx(":portablekey");
-            if (!portableKeyIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :portablekey parameter in %s", QUERY_SCANFOLDER_BY_PORTABLEKEY);
-                return false;
-            }
-
-            statement->BindValueText(portableKeyIdx, portableKey);
-
-            return GetScanFolderResult(QUERY_SCANFOLDER_BY_PORTABLEKEY, statement, handler);
+            return s_queryScanfolderByPortablekey.BindAndQuery(*m_databaseConnection, handler, &GetScanFolderResult, portableKey);
         }
 
         bool AssetDatabaseConnection::QuerySourceBySourceID(AZ::s64 sourceid, sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCE_BY_SOURCEID, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_BY_SOURCEID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_BY_SOURCEID);
-                return false;
-            }
-
-            int sourceIdx = statement->GetNamedParamIdx(":sourceid");
-            if (!sourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceid parameter in %s", QUERY_SOURCE_BY_SOURCEID);
-                return false;
-            }
-
-            statement->BindValueInt64(sourceIdx, sourceid);
-
-            return GetSourceResult(QUERY_SOURCE_BY_SOURCEID, statement, handler);
+            return s_querySourceBySourceid.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, sourceid);
         }
 
         bool AssetDatabaseConnection::QuerySourceByScanFolderID(AZ::s64 scanFolderID, sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCE_BY_SCANFOLDERID, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_BY_SCANFOLDERID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_BY_SCANFOLDERID);
-                return false;
-            }
-
-            int scanfolderIdx = statement->GetNamedParamIdx(":scanfolderid");
-            if (!scanfolderIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :scanfolderid parameter in %s", QUERY_SOURCE_BY_SCANFOLDERID);
-                return false;
-            }
-
-            statement->BindValueInt64(scanfolderIdx, scanFolderID);
-
-            return GetSourceResult(QUERY_SOURCE_BY_SCANFOLDERID, statement, handler);
+            return s_querySourceByScanfolderid.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, scanFolderID);
         }
 
         bool AssetDatabaseConnection::QuerySourceByJobID(AZ::s64 jobid, sourceHandler handler)
@@ -1654,1027 +1862,289 @@ namespace AzToolsFramework
 
         bool AssetDatabaseConnection::QuerySourceBySourceGuid(AZ::Uuid sourceGuid, sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCE_BY_SOURCEGUID, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_BY_SOURCEGUID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_BY_SOURCEGUID);
-                return false;
-            }
-
-            int sourceGuidIdx = statement->GetNamedParamIdx(":sourceguid");
-            if (!sourceGuidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceguid parameter in %s", QUERY_SOURCE_BY_SOURCEGUID);
-                return false;
-            }
-
-            statement->BindValueUuid(sourceGuidIdx, sourceGuid);
-
-            return GetSourceResult(QUERY_SOURCE_BY_SOURCEGUID, statement, handler);
+            return s_querySourceBySourceguid.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, sourceGuid);
         }
 
         bool AssetDatabaseConnection::QuerySourceBySourceName(const char* exactSourceName, sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCE_BY_SOURCENAME, "Sources"))
+            return s_querySourceBySourcename.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, exactSourceName);
+        }
+
+        bool AssetDatabaseConnection::QuerySourceAnalysisFingerprint(const char* exactSourceName, AZ::s64 scanFolderID, AZStd::string& outFingerprint)
+        {
+            outFingerprint.clear();
+
+            StatementAutoFinalizer autoFinal;
+            if (!s_querySourceAnalysisFingerprint.Bind(*m_databaseConnection, autoFinal, exactSourceName, scanFolderID))
             {
                 return false;
             }
 
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_BY_SOURCENAME);
             Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_BY_SOURCENAME);
-                return false;
-            }
+            Statement::SqlStatus result = statement->Step();
 
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
+            bool validResult = result == Statement::SqlDone; // this means no results, but no error
+            if (result == Statement::SqlOK) // this means results, no error
             {
-                AZ_Error(LOG_NAME, false, "Could not find :sourcename parameter in %s", QUERY_SOURCE_BY_SOURCENAME);
-                return false;
+                // this is a highly optimized query and always results in only one column.
+                outFingerprint = statement->GetColumnText(0);
+                validResult = true;
             }
-            statement->BindValueText(sourceNameIdx, exactSourceName);
+            return validResult;
+        }
 
-            return GetSourceResult(QUERY_SOURCE_BY_SOURCENAME, statement, handler);
+        bool AssetDatabaseConnection::QuerySourceAndScanfolder(combinedSourceScanFolderHandler handler)
+        {
+            return s_querySourcesAndScanfolders.BindAndQuery(*m_databaseConnection, handler, &GetSourceAndScanfolderResult);
         }
 
         bool AssetDatabaseConnection::QuerySourceBySourceNameScanFolderID(const char* exactSourceName, AZ::s64 scanFolderID, sourceHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourcename parameter in %s", QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID);
-                return false;
-            }
-            statement->BindValueText(sourceNameIdx, exactSourceName);
-
-            int scanfolderIdx = statement->GetNamedParamIdx(":scanfolderid");
-            if (!scanfolderIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :scanfolderid parameter in %s", QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID);
-                return false;
-            }
-            statement->BindValueInt64(scanfolderIdx, scanFolderID);
-
-            return GetSourceResult(QUERY_SOURCE_BY_SOURCENAME_SCANFOLDERID, statement, handler);
+            return s_querySourceBySourcenameScanfolderid.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, exactSourceName, scanFolderID);
         }
 
         bool AssetDatabaseConnection::QuerySourceLikeSourceName(const char* likeSourceName, LikeType likeType, sourceHandler handler)
         {
             AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeSourceName, likeType);
 
-            if (!ValidateDatabaseTable(QUERY_SOURCE_LIKE_SOURCENAME, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCE_LIKE_SOURCENAME);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCE_LIKE_SOURCENAME);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourcename parameter in %s", QUERY_SOURCE_LIKE_SOURCENAME);
-                return false;
-            }
-            statement->BindValueText(sourceNameIdx, actualSearchTerm.c_str());
-
-            return GetSourceResult(QUERY_SOURCE_LIKE_SOURCENAME, statement, handler);
+            return s_querySourceLikeSourcename.BindAndQuery(*m_databaseConnection, handler, &GetSourceResult, actualSearchTerm.c_str());
         }
 
         bool AssetDatabaseConnection::QueryJobByJobID(AZ::s64 jobid, jobHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_JOB_BY_JOBID, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_JOB_BY_JOBID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_JOB_BY_JOBID);
-                return false;
-            }
-
-            int jobIdx = statement->GetNamedParamIdx(":jobid");
-            if (!jobIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :jobid parameter in %s", QUERY_JOB_BY_JOBID);
-                return false;
-            }
-
-            statement->BindValueInt64(jobIdx, jobid);
-
-            return GetJobResult(QUERY_JOB_BY_JOBID, statement, handler);
+            return s_queryJobByJobid.BindAndQuery(*m_databaseConnection, handler, &GetJobResultSimple, jobid);
         }
 
         bool AssetDatabaseConnection::QueryJobByJobKey(AZStd::string jobKey, jobHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_JOB_BY_JOBKEY, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_JOB_BY_JOBKEY);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_JOB_BY_JOBKEY);
-                return false;
-            }
-
-            int jobKeyIdx = statement->GetNamedParamIdx(":jobKey");
-            if (!jobKeyIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :jobKey parameter in %s", QUERY_JOB_BY_JOBKEY);
-                return false;
-            }
-
-            statement->BindValueText(jobKeyIdx, jobKey.c_str());
-
-            return GetJobResult(QUERY_JOB_BY_JOBKEY, statement, handler);
-
+            return s_queryJobByJobkey.BindAndQuery(*m_databaseConnection, handler, &GetJobResultSimple, jobKey.c_str());
         }
 
         bool AssetDatabaseConnection::QueryJobByJobRunKey(AZ::u64 jobrunkey, jobHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_JOB_BY_JOBRUNKEY, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_JOB_BY_JOBRUNKEY);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_JOB_BY_JOBRUNKEY);
-                return false;
-            }
-
-            int jobrunkeyIdx = statement->GetNamedParamIdx(":jobrunkey");
-            if (!jobrunkeyIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :jobrunkey parameter in %s", QUERY_JOB_BY_JOBRUNKEY);
-                return false;
-            }
-
-            statement->BindValueInt64(jobrunkeyIdx, jobrunkey);
-
-            return GetJobResult(QUERY_JOB_BY_JOBRUNKEY, statement, handler);
+            return s_queryJobByJobrunkey.BindAndQuery(*m_databaseConnection, handler, &GetJobResultSimple, jobrunkey);
         }
 
         bool AssetDatabaseConnection::QueryJobByProductID(AZ::s64 productid, jobHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_JOB_BY_PRODUCTID, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_JOB_BY_PRODUCTID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_JOB_BY_PRODUCTID);
-                return false;
-            }
-
-            int productIdx = statement->GetNamedParamIdx(":productid");
-            if (!productIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productid parameter in %s", QUERY_JOB_BY_PRODUCTID);
-                return false;
-            }
-
-            statement->BindValueInt64(productIdx, productid);
-
-            return GetJobResult(QUERY_JOB_BY_PRODUCTID, statement, handler);
+            return s_queryJobByProductid.BindAndQuery(*m_databaseConnection, handler, &GetJobResultSimple, productid);
         }
 
         bool AssetDatabaseConnection::QueryJobBySourceID(AZ::s64 sourceID, jobHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_JOB_BY_SOURCEID;
             if (platform && strlen(platform))
             {
-                name = QUERY_JOB_BY_SOURCEID_PLATFORM;
+                return s_queryJobBySourceidPlatform.BindAndThen(*m_databaseConnection, handler, sourceID, platform).Query(&GetJobResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Jobs"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceidIdx = statement->GetNamedParamIdx(":sourceid");
-            if (!sourceidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceid parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueInt64(sourceidIdx, sourceID);
-
-            if (name == QUERY_JOB_BY_SOURCEID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetJobResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryJobBySourceid.BindAndThen(*m_databaseConnection, handler, sourceID).Query(&GetJobResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductByProductID(AZ::s64 productid, productHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_PRODUCT_BY_PRODUCTID, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_PRODUCT_BY_PRODUCTID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_PRODUCT_BY_PRODUCTID);
-                return false;
-            }
-
-            int productIdx = statement->GetNamedParamIdx(":productid");
-            if (!productIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productid parameter in %s", QUERY_PRODUCT_BY_PRODUCTID);
-                return false;
-            }
-
-            statement->BindValueInt64(productIdx, productid);
-
-            return GetProductResult(QUERY_PRODUCT_BY_PRODUCTID, statement, handler);
+            return s_queryProductByProductid.BindAndQuery(*m_databaseConnection, handler, &GetProductResultSimple, productid);
         }
 
         bool AssetDatabaseConnection::QueryProductByJobID(AZ::s64 jobid, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_PRODUCT_BY_JOBID;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_BY_JOBID_PLATFORM;
+                return s_queryProductByJobidPlatform.BindAndThen(*m_databaseConnection, handler, jobid, platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int jobIdx = statement->GetNamedParamIdx(":jobid");
-            if (!jobIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :jobid parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueInt64(jobIdx, jobid);
-
-            if (name == QUERY_PRODUCT_BY_JOBID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryProductByJobid.BindAndThen(*m_databaseConnection, handler, jobid).Query(&GetProductResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductBySourceID(AZ::s64 sourceid, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_PRODUCT_BY_SOURCEID;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_BY_SOURCEID_PLATFORM;
+                return s_queryProductBySourceidPlatform.BindAndThen(*m_databaseConnection, handler, sourceid, platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
+            
+            return s_queryProductBySourceid.BindAndThen(*m_databaseConnection, handler, sourceid).Query(&GetProductResult, builderGuid, jobKey, status);
+        }
 
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceIdx = statement->GetNamedParamIdx(":sourceid");
-            if (!sourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceid parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueInt64(sourceIdx, sourceid);
-
-            if (name == QUERY_PRODUCT_BY_SOURCEID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+        bool AssetDatabaseConnection::QueryProductBySourceGuidSubID(AZ::Uuid sourceGuid, AZ::u32 productSubID, productHandler handler)
+        {
+            return s_queryProductBySourceGuidSubid.BindAndQuery(*m_databaseConnection, handler, &GetProductResultSimple, sourceGuid, productSubID);
         }
 
         bool AssetDatabaseConnection::QueryProductByProductName(const char* exactProductname, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_PRODUCT_BY_PRODUCTNAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM;
+                return s_queryProductByProductnamePlatform.BindAndThen(*m_databaseConnection, handler, exactProductname, platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int productNameIdx = statement->GetNamedParamIdx(":productname");
-            if (!productNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-            statement->BindValueText(productNameIdx, exactProductname);
-
-            if (name == QUERY_PRODUCT_BY_PRODUCTNAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryProductByProductname.BindAndThen(*m_databaseConnection, handler, exactProductname).Query(&GetProductResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductLikeProductName(const char* likeProductname, LikeType likeType, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
             AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeProductname, likeType);
 
-            const char* name = QUERY_PRODUCT_LIKE_PRODUCTNAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM;
+                return s_queryProductLikeProductnamePlatform.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str(), platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int productNameIdx = statement->GetNamedParamIdx(":productname");
-            if (!productNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-            statement->BindValueText(productNameIdx, actualSearchTerm.c_str());
-
-            if (name == QUERY_PRODUCT_LIKE_PRODUCTNAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryProductLikeProductname.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str()).Query(&GetProductResult, builderGuid, jobKey, status);
         }
-
 
         bool AssetDatabaseConnection::QueryProductBySourceName(const char* exactSourceName, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_PRODUCT_BY_SOURCENAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_BY_SOURCENAME_PLATFORM;
+                return s_queryProductBySourcenamePlatform.BindAndThen(*m_databaseConnection, handler, exactSourceName, platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-            statement->BindValueText(sourceNameIdx, exactSourceName);
-
-            if (name == QUERY_PRODUCT_BY_SOURCENAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryProductBySourcename.BindAndThen(*m_databaseConnection, handler, exactSourceName).Query(&GetProductResult, builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryProductLikeSourceName(const char* likeSourceName, LikeType likeType, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
             AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeSourceName, likeType);
 
-            const char* name = QUERY_PRODUCT_LIKE_SOURCENAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM;
+                return s_queryProductLikeSourcenamePlatform.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str(), platform).Query(&GetProductResult, builderGuid, jobKey, status);
             }
+            
+            return s_queryProductLikeSourcename.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str()).Query(&GetProductResult, builderGuid, jobKey, status);
+        }
 
-            if (!ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-            statement->BindValueText(sourceNameIdx, actualSearchTerm.c_str());
-
-            if (name == QUERY_PRODUCT_LIKE_SOURCENAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetProductResult(name, statement, handler, builderGuid, jobKey, status);
+        bool AssetDatabaseConnection::QueryProductByJobIDSubID(AZ::s64 jobID, AZ::u32 subId, productHandler handler)
+        {
+            return s_queryProductByJobIdSubId.BindAndQuery(*m_databaseConnection, handler, &GetProductResultSimple, jobID, subId);
         }
 
         bool AssetDatabaseConnection::QueryLegacySubIdsByProductID(AZ::s64 productId, legacySubIDsHandler handler)
         {
-            const char* name = QUERY_LEGACYSUBIDSBYPRODUCTID;
-            if (!ValidateDatabaseTable(name, "LegacySubIDs"))
-            {
-                return false;
-            }
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-            int productIdx = statement->GetNamedParamIdx(":productId");
-            if (!productIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productId parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueInt64(productIdx, productId);
-
-            return GetLegacySubIDsResult(name, statement, handler);
+            return s_queryLegacysubidsbyproductid.BindAndQuery(*m_databaseConnection, handler, &GetLegacySubIDsResult, productId);
         }
 
         bool AssetDatabaseConnection::QueryCombined(combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status, bool includeLegacySubIDs)
         {
-            const char* name = QUERY_COMBINED;
+            auto callback = [this, builderGuid, jobKey, status, includeLegacySubIDs](const char* callName, SQLite::Statement* statement, AssetDatabaseConnection::combinedHandler handler)
+            {
+                return this->GetCombinedResult(callName, statement, handler, builderGuid, jobKey, status, includeLegacySubIDs);
+            };
+
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_PLATFORM;
+                return s_queryCombinedByPlatform.BindAndQuery(*m_databaseConnection, handler, callback, platform);
             }
+            
+            return s_queryCombined.BindAndQuery(*m_databaseConnection, handler, callback);
+        }
 
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
+        auto AssetDatabaseConnection::GetCombinedResultAsLambda()
+        {
+            return [this](const char* name, Statement* statement, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, AzToolsFramework::AssetSystem::JobStatus status)
             {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            if (name == QUERY_COMBINED_BY_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status, includeLegacySubIDs);
+                return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            };
         }
 
         bool AssetDatabaseConnection::QueryCombinedBySourceID(AZ::s64 sourceID, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_SOURCEID;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_SOURCEID_PLATFORM;
+                return s_queryCombinedBySourceidPlatform.BindAndThen(*m_databaseConnection, handler, sourceID, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceidIdx = statement->GetNamedParamIdx(":sourceid");
-            if (!sourceidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceid parameter in %s", name);
-                return false;
-            }
-            statement->BindValueInt64(sourceidIdx, sourceID);
-
-            if (name == QUERY_COMBINED_BY_SOURCEID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedBySourceid.BindAndThen(*m_databaseConnection, handler, sourceID)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedByJobID(AZ::s64 jobID, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_JOBID;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_JOBID_PLATFORM;
+                return s_queryCombinedByJobidPlatform.BindAndThen(*m_databaseConnection, handler, jobID, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int jobidIdx = statement->GetNamedParamIdx(":jobid");
-            if (!jobidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :jobid parameter in %s", name);
-                return false;
-            }
-            statement->BindValueInt64(jobidIdx, jobID);
-
-            if (name == QUERY_COMBINED_BY_JOBID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedByJobid.BindAndThen(*m_databaseConnection, handler, jobID)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedByProductID(AZ::s64 productID, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_PRODUCTID;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_PRODUCTID_PLATFORM;
+                return s_queryCombinedByProductidPlatform.BindAndThen(*m_databaseConnection, handler, productID, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int productidIdx = statement->GetNamedParamIdx(":productid");
-            if (!productidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productid parameter in %s", name);
-                return false;
-            }
-            statement->BindValueInt64(productidIdx, productID);
-
-            if (name == QUERY_COMBINED_BY_PRODUCTID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedByProductid.BindAndThen(*m_databaseConnection, handler, productID)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedBySourceGuidProductSubId(AZ::Uuid sourceGuid, AZ::u32 productSubID, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM;
+                return s_queryCombinedBySourceguidProductsubidPlatform.BindAndThen(*m_databaseConnection, handler, productSubID, sourceGuid, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceGuidIdx = statement->GetNamedParamIdx(":sourceguid");
-            if (!sourceGuidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceguid parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueUuid(sourceGuidIdx, sourceGuid);
-
-            int productsubidIdx = statement->GetNamedParamIdx(":productsubid");
-            if (!productsubidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productsubid parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueInt(productsubidIdx, productSubID);
-
-            if (name == QUERY_COMBINED_BY_SOURCEGUID_PRODUCTSUBID_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedBySourceguidProductsubid.BindAndThen(*m_databaseConnection, handler, productSubID, sourceGuid)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedBySourceName(const char* exactSourceName, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_SOURCENAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_SOURCENAME_PLATFORM;
+                return s_queryCombinedBySourcenamePlatform.BindAndThen(*m_databaseConnection, handler, exactSourceName, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourcename parameter in %s", name);
-                return false;
-            }
-            statement->BindValueText(sourceNameIdx, exactSourceName);
-
-            if (name == QUERY_COMBINED_BY_SOURCENAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedBySourcename.BindAndThen(*m_databaseConnection, handler, exactSourceName)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedLikeSourceName(const char* likeSourceName, LikeType likeType, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
             AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeSourceName, likeType);
 
-            const char* name = QUERY_COMBINED_LIKE_SOURCENAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM;
+                return s_queryCombinedLikeSourcenamePlatform.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str(), platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int sourceNameIdx = statement->GetNamedParamIdx(":sourcename");
-            if (!sourceNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourcename parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueText(sourceNameIdx, actualSearchTerm.c_str());
-
-            if (name == QUERY_COMBINED_LIKE_SOURCENAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedLikeSourcename.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str())
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedByProductName(const char* exactProductName, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
-            const char* name = QUERY_COMBINED_BY_PRODUCTNAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM;
+                return s_queryCombinedByProductnamePlatform.BindAndThen(*m_databaseConnection, handler, exactProductName, platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int productNameIdx = statement->GetNamedParamIdx(":productname");
-            if (!productNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueText(productNameIdx, exactProductName);
-
-            if (name == QUERY_COMBINED_BY_PRODUCTNAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedByProductname.BindAndThen(*m_databaseConnection, handler, exactProductName)
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryCombinedLikeProductName(const char* likeProductName, LikeType likeType, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
         {
             AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeProductName, likeType);
 
-            const char* name = QUERY_COMBINED_LIKE_PRODUCTNAME;
             if (platform && strlen(platform))
             {
-                name = QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM;
+                return s_queryCombinedLikeProductnamePlatform.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str(), platform)
+                    .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
             }
-
-            if (!ValidateDatabaseTable(name, "ScanFolders") ||
-                !ValidateDatabaseTable(name, "Sources") ||
-                !ValidateDatabaseTable(name, "Jobs") ||
-                !ValidateDatabaseTable(name, "Products"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, name);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", name);
-                return false;
-            }
-
-            int productNameIdx = statement->GetNamedParamIdx(":productname");
-            if (!productNameIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :productname parameter in %s", name);
-                return false;
-            }
-
-            statement->BindValueText(productNameIdx, actualSearchTerm.c_str());
-
-            if (name == QUERY_COMBINED_LIKE_PRODUCTNAME_PLATFORM)
-            {
-                int platformIdx = statement->GetNamedParamIdx(":platform");
-                if (!platformIdx)
-                {
-                    AZ_Error(LOG_NAME, false, "Could not find :platform parameter in %s", name);
-                    return false;
-                }
-
-                statement->BindValueText(platformIdx, platform);
-            }
-
-            return GetCombinedResult(name, statement, handler, builderGuid, jobKey, status);
+            
+            return s_queryCombinedLikeProductname.BindAndThen(*m_databaseConnection, handler, actualSearchTerm.c_str())
+                .Query(GetCombinedResultAsLambda(), builderGuid, jobKey, status);
         }
 
         bool AssetDatabaseConnection::QueryJobInfoByJobID(AZ::s64 jobID, jobInfoHandler handler)
@@ -2739,34 +2209,33 @@ namespace AzToolsFramework
         {
             bool found = false;
             bool succeeded = QueryJobByJobKey(jobKey,
-                [&](JobDatabaseEntry& entry)
-            {
-                AzToolsFramework::AssetSystem::JobInfo jobinfo;
-                succeeded = QuerySourceBySourceID(entry.m_sourcePK,
-                    [&](SourceDatabaseEntry& sourceEntry)
-                {
-                    jobinfo.m_sourceFile = AZStd::move(sourceEntry.m_sourceName);
-                    QueryScanFolderBySourceID(sourceEntry.m_sourceID,
-                        [&](ScanFolderDatabaseEntry& scanFolderEntry)
+                    [&](JobDatabaseEntry& entry)
+                    {
+                        AzToolsFramework::AssetSystem::JobInfo jobinfo;
+                        succeeded = QuerySourceBySourceID(entry.m_sourcePK,
+                                [&](SourceDatabaseEntry& sourceEntry)
+                                {
+                                    jobinfo.m_sourceFile = AZStd::move(sourceEntry.m_sourceName);
+                                    QueryScanFolderBySourceID(sourceEntry.m_sourceID,
+                                        [&](ScanFolderDatabaseEntry& scanFolderEntry)
+                                        {
+                                            found = true;
+                                            jobinfo.m_watchFolder = scanFolderEntry.m_scanFolder;
+                                            return false;
+                                        });
+                                    return true;
+                                });
+
+                        if (!found)
                         {
-                            found = true;
-                            jobinfo.m_watchFolder = scanFolderEntry.m_scanFolder;
                             return false;
-                        });
-                    return true;
-                });
+                        }
 
-                if (!found)
-                {
-                    return false;
-                }
+                        PopulateJobInfo(jobinfo, entry);
 
-                PopulateJobInfo(jobinfo, entry);
-
-                return handler(jobinfo);
-            });
+                        return handler(jobinfo);
+                    });
             return found && succeeded;
-
         }
 
         bool AssetDatabaseConnection::QueryJobInfoBySourceName(const char* sourceName, jobInfoHandler handler, AZ::Uuid builderGuid, const char* jobKey, const char* platform, AssetSystem::JobStatus status)
@@ -2810,304 +2279,152 @@ namespace AzToolsFramework
             return found && succeeded;
         }
 
-        bool AssetDatabaseConnection::QuerySourceDependency(const AZ::Uuid& builderId, const char* source, const char* dependsOnSource, sourceFileDependencyHandler handler)
-        {
-            if (!ValidateDatabaseTable(QUERY_SOURCEDEPENDENCY, "SourceDependency"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCEDEPENDENCY);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-
-            int builderGuidIdx = statement->GetNamedParamIdx(":builderGuid");
-            if (!builderGuidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "could not find builderGuid in statement %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-            statement->BindValueUuid(builderGuidIdx, builderId);
-
-            int sourceIdx = statement->GetNamedParamIdx(":source");
-            if (!sourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "could not find source in statement %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-            statement->BindValueText(sourceIdx, source);
-
-            int dependsOnSourceIdx = statement->GetNamedParamIdx(":dependsOnSource");
-            if (!dependsOnSourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :dependsOnSource parameter in %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-
-            statement->BindValueText(dependsOnSourceIdx, dependsOnSource);
-
-            return GetSourceDependencyResult(QUERY_SOURCEDEPENDENCY, statement, handler);
-        }
-
         bool AssetDatabaseConnection::QuerySourceDependencyBySourceDependencyId(AZ::s64 sourceDependencyID, sourceFileDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID, "SourceDependency"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID);
-                return false;
-            }
-
-            int sourceDepedendencyIdx = statement->GetNamedParamIdx(":sourceDependencyid");
-            if (!sourceDepedendencyIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :sourceDependencyid parameter in %s", QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID);
-                return false;
-            }
-
-            statement->BindValueInt64(sourceDepedendencyIdx, sourceDependencyID);
-
-            return GetSourceDependencyResult(QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID, statement, handler);
+            return s_querySourcedependencyBySourcedependencyid.BindAndQuery(*m_databaseConnection, handler, &GetSourceDependencyResult, sourceDependencyID);
         }
 
-        bool AssetDatabaseConnection::QuerySourceDependencyByDependsOnSource(const char* dependsOnSource, const char* dependentFilter, sourceFileDependencyHandler handler)
+        bool AssetDatabaseConnection::QuerySourceDependencyByDependsOnSource(const char* dependsOnSource, const char* dependentFilter, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::TypeOfDependency dependencyType, sourceFileDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE, "SourceDependency"))
+            if (dependencyType & AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::DEP_SourceLikeMatch)
             {
-                return false;
+                return QuerySourceDependencyByDependsOnSourceWildcard(dependsOnSource, dependentFilter, handler);
             }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE);
-                return false;
-            }
-
-            int dependsOnSourceIdx = statement->GetNamedParamIdx(":dependsOnSource");
-            if (!dependsOnSourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :dependsOnSource parameter in %s", QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE);
-                return false;
-            }
-
-            statement->BindValueText(dependsOnSourceIdx, dependsOnSource);
-
-
-            int dependentFilterIdx = statement->GetNamedParamIdx(":dependentFilter");
-            if (!dependentFilterIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :dependentFilter parameter in %s", QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE);
-                return false;
-            }
-
-            statement->BindValueText(dependentFilterIdx, dependentFilter == nullptr ? "%" : dependentFilter);
-
-            return GetSourceDependencyResult(QUERY_SOURCEDEPENDENCY_BY_DEPENDSONSOURCE, statement, handler);
+            return s_querySourcedependencyByDependsonsource.BindAndQuery(*m_databaseConnection, handler, &GetSourceDependencyResult, dependsOnSource, dependentFilter == nullptr ? "%" : dependentFilter, dependencyType);
         }
 
-        bool AssetDatabaseConnection::QueryDependsOnSourceBySourceDependency(const char* sourceDependency, const char* dependencyFilter, sourceFileDependencyHandler handler)
+        bool AssetDatabaseConnection::QuerySourceDependencyByDependsOnSourceWildcard(const char* dependsOnSource, const char* dependentFilter, sourceFileDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_DEPENDSONSOURCE_BY_SOURCE, "SourceDependency"))
-            {
-                return false;
-            }
+            SourceFileDependencyEntry::TypeOfDependency matchDependency = SourceFileDependencyEntry::TypeOfDependency::DEP_SourceOrJob;
+            SourceFileDependencyEntry::TypeOfDependency wildcardDependency = SourceFileDependencyEntry::TypeOfDependency::DEP_SourceLikeMatch;
 
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_DEPENDSONSOURCE_BY_SOURCE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_DEPENDSONSOURCE_BY_SOURCE);
-                return false;
-            }
-
-            int sourceIdx = statement->GetNamedParamIdx(":source");
-            if (!sourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :source parameter in %s", QUERY_DEPENDSONSOURCE_BY_SOURCE);
-                return false;
-            }
-
-            statement->BindValueText(sourceIdx, sourceDependency);
-
-            int dependencyFilterIdx = statement->GetNamedParamIdx(":dependencyFilter");
-            if (!dependencyFilterIdx)
-            {
-                AZ_Error(LOG_NAME, false, "Could not find :dependencyFilter parameter in %s", QUERY_DEPENDSONSOURCE_BY_SOURCE);
-                return false;
-            }
-
-            statement->BindValueText(dependencyFilterIdx, dependencyFilter == nullptr ? "%" : dependencyFilter);
-
-            return GetSourceDependencyResult(QUERY_DEPENDSONSOURCE_BY_SOURCE, statement, handler);
+            return s_querySourcedependencyByDependsonsourceWildcard.BindAndQuery(*m_databaseConnection, handler, &GetSourceDependencyResult, dependsOnSource, dependentFilter == nullptr ? "%" : dependentFilter, matchDependency, wildcardDependency);
         }
 
-        bool AssetDatabaseConnection::QuerySourceDependencyByBuilderGUIDAndSource(const AZ::Uuid& builderGuid, const char* source, sourceFileDependencyHandler handler)
+        bool AssetDatabaseConnection::QueryDependsOnSourceBySourceDependency(const char* sourceDependency, const char* dependencyFilter, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::TypeOfDependency dependencyType, sourceFileDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE, "SourceDependency"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_SOURCEDEPENDENCY_BY_BUILDERGUID_SOURCE);
-                return false;
-            }
-
-            int builderGuidIdx = statement->GetNamedParamIdx(":builderGuid");
-            if (!builderGuidIdx)
-            {
-                AZ_Error(LOG_NAME, false, "could not find builderGuid in statement %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-            statement->BindValueUuid(builderGuidIdx, builderGuid);
-
-            int sourceIdx = statement->GetNamedParamIdx(":source");
-            if (!sourceIdx)
-            {
-                AZ_Error(LOG_NAME, false, "could not find dependencyType in statement %s", QUERY_SOURCEDEPENDENCY);
-                return false;
-            }
-            statement->BindValueText(sourceIdx, source);
-
-            return GetSourceDependencyResult(QUERY_SOURCEDEPENDENCY_BY_SOURCEDEPENDENCYID, statement, handler);
-
+            return s_queryDependsonsourceBySource.BindAndQuery(*m_databaseConnection, handler, &GetSourceDependencyResult, sourceDependency, dependencyFilter == nullptr ? "%" : dependencyFilter, dependencyType);
         }
 
         // Product Dependencies
         bool AssetDatabaseConnection::QueryProductDependencyByProductDependencyId(AZ::s64 productDependencyID, productDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID, "ProductDependencies"))
-            {
-                return false;
-            }
+            return s_queryProductdependencyByProductdependencyid.BindAndQuery(*m_databaseConnection, handler, &GetProductDependencyResult, productDependencyID);
+        }
 
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID);
-                return false;
-            }
-
-            if (!statement->BindNamedInt64(":productdependencyid", productDependencyID))
-            {
-                return false;
-            }
-
-            return GetProductDependencyResult(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTDEPENDENCYID, statement, handler);
+        bool AssetDatabaseConnection::QueryUnresolvedProductDependencies(productDependencyHandler handler)
+        {
+            return s_queryUnresolvedProductDependencies.BindAndQuery(*m_databaseConnection, handler, &GetProductDependencyResult);
         }
 
         bool AssetDatabaseConnection::QueryProductDependencyByProductId(AZ::s64 productID, productDependencyHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID, "ProductDependencies"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID);
-                return false;
-            }
-
-            if (!statement->BindNamedInt64(":productid", productID))
-            {
-                return false;
-            }
-
-            return GetProductDependencyResult(QUERY_PRODUCTDEPENDENCY_BY_PRODUCTID, statement, handler);
+            return s_queryProductdependencyByProductid.BindAndQuery(*m_databaseConnection, handler, &GetProductDependencyResult, productID);
         }
 
         bool AssetDatabaseConnection::QueryDirectProductDependencies(AZ::s64 productID, productHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_DIRECT_PRODUCTDEPENDENCIES, "ProductDependencies") ||
-                !ValidateDatabaseTable(QUERY_DIRECT_PRODUCTDEPENDENCIES, "Products") ||
-                !ValidateDatabaseTable(QUERY_DIRECT_PRODUCTDEPENDENCIES, "Jobs") ||
-                !ValidateDatabaseTable(QUERY_DIRECT_PRODUCTDEPENDENCIES, "Sources"))
-            {
-                return false;
-            }
-
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_DIRECT_PRODUCTDEPENDENCIES);
-            Statement* statement = autoFinal.Get();
-            if (!statement)
-            {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_DIRECT_PRODUCTDEPENDENCIES);
-                return false;
-            }
-
-            if (!statement->BindNamedInt64(":productid", productID))
-            {
-                return false;
-            }
-
-            return GetProductResult(QUERY_DIRECT_PRODUCTDEPENDENCIES, statement, handler);
+            return s_queryDirectProductdependencies.BindAndQuery(*m_databaseConnection, handler, &GetProductResultSimple, productID);
         }
 
         bool AssetDatabaseConnection::QueryAllProductDependencies(AZ::s64 productID, productHandler handler)
         {
-            if (!ValidateDatabaseTable(QUERY_ALL_PRODUCTDEPENDENCIES, "ProductDependencies") ||
-                !ValidateDatabaseTable(QUERY_ALL_PRODUCTDEPENDENCIES, "Products") ||
-                !ValidateDatabaseTable(QUERY_ALL_PRODUCTDEPENDENCIES, "Jobs") ||
-                !ValidateDatabaseTable(QUERY_ALL_PRODUCTDEPENDENCIES, "Sources"))
+            return s_queryAllProductdependencies.BindAndQuery(*m_databaseConnection, handler, &GetProductResultSimple, productID);
+        }
+
+        bool AssetDatabaseConnection::QueryFileByFileID(AZ::s64 fileID, fileHandler handler)
+        {
+            return s_queryFileByFileid.BindAndQuery(*m_databaseConnection, handler, &GetFileResult, fileID);
+        }
+
+        bool AssetDatabaseConnection::QueryFilesByFileNameAndScanFolderID(const char* fileName, AZ::s64 scanFolderID, fileHandler handler)
+        {
+            return s_queryFilesByFileName.BindAndQuery(*m_databaseConnection, handler, &GetFileResult, scanFolderID, fileName);
+        }
+
+        bool AssetDatabaseConnection::QueryFilesLikeFileName(const char* likeFileName, LikeType likeType, fileHandler handler)
+        {
+            AZStd::string actualSearchTerm = GetLikeActualSearchTerm(likeFileName, likeType);
+
+            return s_queryFilesLikeFileName.BindAndQuery(*m_databaseConnection, handler, &GetFileResult, actualSearchTerm.c_str());
+        }
+
+        bool AssetDatabaseConnection::QueryFilesByScanFolderID(AZ::s64 scanFolderID, fileHandler handler) 
+        {
+            return s_queryFilesByScanfolderid.BindAndQuery(*m_databaseConnection, handler, &GetFileResult, scanFolderID);
+        }
+
+        bool AssetDatabaseConnection::QueryFileByFileNameScanFolderID(const char* fileName, AZ::s64 scanFolderID, fileHandler handler)
+        {
+            return s_queryFileByFileNameScanfolderid.BindAndQuery(*m_databaseConnection, handler, &GetFileResult, scanFolderID, fileName);
+        }
+
+        bool AssetDatabaseConnection::QueryBuilderInfoTable(const BuilderInfoHandler& handler)
+        {
+            StatementAutoFinalizer autoFinal;
+            if (!s_queryBuilderInfoTable.Bind(*m_databaseConnection, autoFinal))
             {
                 return false;
             }
 
-            StatementAutoFinalizer autoFinal(*m_databaseConnection, QUERY_ALL_PRODUCTDEPENDENCIES);
             Statement* statement = autoFinal.Get();
-            if (!statement)
+
+            Statement::SqlStatus result = statement->Step();
+
+            if (result == Statement::SqlError)
             {
-                AZ_Error(LOG_NAME, false, "Unable to find SQL statement: %s", QUERY_ALL_PRODUCTDEPENDENCIES);
+                AZ_Error(LOG_NAME, false, "SqlError occurred!");
                 return false;
             }
 
-            if (!statement->BindNamedInt64(":productid", productID))
+            BuilderInfoEntry entry;
+            auto boundColumns = entry.GetColumns();
+
+            // possible values for result:
+            // SqlDone:  There is no more data available (but there was no error)
+            // SqlOk: There is data available.
+            while (result == Statement::SqlOK)
             {
+                if(!boundColumns.Fetch(statement))
+                {
+                    return false;
+                }
+
+                if(!handler(BuilderInfoEntry(entry)))
+                {
+                    break; // handler returned false meaning "do not continue to return rows"
+                }
+                result = statement->Step();
+            }
+
+            if (result == Statement::SqlError)
+            {
+                AZ_Warning(LOG_NAME, false, "SqlError occurred!");
                 return false;
             }
 
-            return GetProductResult(QUERY_ALL_PRODUCTDEPENDENCIES, statement, handler);
+            return true;
         }
 
         bool AssetDatabaseConnection::ValidateDatabaseTable(const char* callName, const char* tableName)
         {
-            (void)callName; // for release mode, when AZ_Error is compiled down to nothing.
-            (void)tableName;
+            AZ_UNUSED(callName); // for release mode, when AZ_Error is compiled down to nothing.
+            AZ_UNUSED(tableName);
 
             if (m_validatedTables.find(tableName) != m_validatedTables.end())
             {
                 return true; // already validated.
             }
 
-            AZ_Error(LOG_NAME, m_databaseConnection, "Fatal: attempt to work on a database connection that doesn't exist: %s", callName);
-            
             if (!m_databaseConnection)
             {
+                AZ_Error(LOG_NAME, false, "Fatal: attempt to work on a database connection that doesn't exist: %s", callName);
                 return false;
             }
-            
-            AZ_Error(LOG_NAME, m_databaseConnection->IsOpen(), "Fatal: attempt to work on a database connection that isn't open: %s", callName);
 
-            if ((!m_databaseConnection) || (!m_databaseConnection->IsOpen()))
+            if (!m_databaseConnection->IsOpen())
             {
+                AZ_Error(LOG_NAME, false, "Fatal: attempt to work on a database connection that isn't open: %s", callName);
                 return false;
             }
 
@@ -3121,871 +2438,32 @@ namespace AzToolsFramework
             return true;
         }
 
-        bool AssetDatabaseConnection::GetScanFolderResult(const char* callName, Statement* statement, scanFolderHandler handler)
+        // Simple helper function to determine if we should call the handler based on optional filtering criteria
+        bool ResultMatchesJobCriteria(const char* jobKey, AZ::Uuid builderGuid, AssetSystem::JobStatus status, AZStd::string_view savedJobKey, AZ::Uuid savedBuilderGuid, AssetSystem::JobStatus savedJobStatus)
         {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            int scanFolderIDColumnIdx = statement->FindColumn("ScanFolderID");
-            if (scanFolderIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolderID", callName);
-                return false;
-            }
-
-            int scanFolderColumnIdx = statement->FindColumn("ScanFolder");
-            if (scanFolderColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolder", callName);
-                return false;
-            }
-
-            int displayNameColumnIdx = statement->FindColumn("DisplayName");
-            if (displayNameColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "DisplayName", callName);
-                return false;
-            }
-
-            int portableKeyColumnIdx = statement->FindColumn("PortableKey");
-            if (portableKeyColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "PortableKey", callName);
-                return false;
-            }
-
-            int outputPrefixColumnIdx = statement->FindColumn("OutputPrefix");
-            if (outputPrefixColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "OutputPrefix", callName);
-                return false;
-            }
-
-            int isRootColumnIdx = statement->FindColumn("IsRoot");
-            if (isRootColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "IsRoot", callName);
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                ScanFolderDatabaseEntry scanfolder;
-                scanfolder.m_scanFolderID = statement->GetColumnInt64(scanFolderIDColumnIdx);
-                scanfolder.m_scanFolder = AZStd::move(statement->GetColumnText(scanFolderColumnIdx));
-                scanfolder.m_displayName = AZStd::move(statement->GetColumnText(displayNameColumnIdx));
-                scanfolder.m_portableKey = AZStd::move(statement->GetColumnText(portableKeyColumnIdx));
-                scanfolder.m_outputPrefix = AZStd::move(statement->GetColumnText(outputPrefixColumnIdx));
-                scanfolder.m_isRoot = AZStd::move(statement->GetColumnInt(isRootColumnIdx));
-
-                if (handler(scanfolder))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
+            return (jobKey ? savedJobKey == jobKey : true)
+                && (!builderGuid.IsNull() ? savedBuilderGuid == builderGuid : true)
+                && (status != AssetSystem::JobStatus::Any ? savedJobStatus == status : true);
         }
 
-        bool AssetDatabaseConnection::GetSourceResult(const char* callName, Statement* statement, sourceHandler handler)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            int sourceIDColumnIdx = statement->FindColumn("SourceID");
-            if (sourceIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceID", callName);
-                return false;
-            }
-
-            int scanFolderColumnIdx = statement->FindColumn("ScanFolderPK");
-            if (scanFolderColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolderPK", callName);
-                return false;
-            }
-
-            int sourceNameColumnIdx = statement->FindColumn("SourceName");
-            if (sourceNameColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceName", callName);
-                return false;
-            }
-
-            int guidValueColumnIdx = statement->FindColumn("SourceGuid");
-            if (guidValueColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceGuid", callName);
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                SourceDatabaseEntry source;
-                source.m_sourceID = statement->GetColumnInt64(sourceIDColumnIdx);
-                source.m_scanFolderPK = statement->GetColumnInt64(scanFolderColumnIdx);
-                source.m_sourceName = AZStd::move(statement->GetColumnText(sourceNameColumnIdx));
-                source.m_sourceGuid = statement->GetColumnUuid(guidValueColumnIdx);
-
-                if (handler(source))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetSourceDependencyResult(const char* callName, SQLite::Statement* statement, sourceFileDependencyHandler handler)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            int sourceDependencyIdx = statement->FindColumn("SourceDependencyID");
-            if (sourceDependencyIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceDependencyID", callName);
-                return false;
-            }
-
-            int builderGuidIdx = statement->FindColumn("BuilderGuid");
-            if (builderGuidIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "BuilderGuid", callName);
-                return false;
-            }
-
-            int sourceIdx = statement->FindColumn("Source");
-            if (sourceIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Source", callName);
-                return false;
-            }
-
-            int dependsOnSourceIdx = statement->FindColumn("DependsOnSource");
-            if (dependsOnSourceIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "DependsOnSource", callName);
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                SourceFileDependencyEntry entry;
-                entry.m_sourceDependencyID = statement->GetColumnInt64(sourceDependencyIdx);
-                entry.m_builderGuid = statement->GetColumnUuid(builderGuidIdx);
-                entry.m_source = AZStd::move(statement->GetColumnText(sourceIdx));
-                entry.m_dependsOnSource = AZStd::move(statement->GetColumnText(dependsOnSourceIdx));
-
-                if (handler(entry))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetJobResult(const char* callName, Statement* statement, jobHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            int jobIDColumnIdx = statement->FindColumn("JobID");
-            if (jobIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobID", callName);
-                return false;
-            }
-
-            int sourcePKColumnIdx = statement->FindColumn("SourcePK");
-            if (sourcePKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourcePK", callName);
-                return false;
-            }
-
-            int jobKeyColumnIdx = statement->FindColumn("JobKey");
-            if (jobKeyColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobKey", callName);
-                return false;
-            }
-
-            int fingerprintColumnIdx = statement->FindColumn("Fingerprint");
-            if (fingerprintColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Fingerprint", callName);
-                return false;
-            }
-
-            int platformColumnIdx = statement->FindColumn("Platform");
-            if (platformColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Platform", callName);
-                return false;
-            }
-
-            int buildeGuidColumnIdx = statement->FindColumn("BuilderGuid");
-            if (buildeGuidColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "BuilderGuid", callName);
-                return false;
-            }
-
-            int statusColumnIdx = statement->FindColumn("Status");
-            if (statusColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Status", callName);
-                return false;
-            }
-
-            int jobRunKeyColumnIdx = statement->FindColumn("JobRunKey");
-            if (jobRunKeyColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobRunKey", callName);
-                return false;
-            }
-
-            int firstFailLogTimeColumnIdx = statement->FindColumn("FirstFailLogTime");
-            if (firstFailLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "FirstFailLogTime", callName);
-                return false;
-            }
-
-            int firstFailLogFileColumnIdx = statement->FindColumn("FirstFailLogFile");
-            if (firstFailLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "FirstFailLogFile", callName);
-                return false;
-            }
-
-            int lastFailLogTimeColumnIdx = statement->FindColumn("LastFailLogTime");
-            if (lastFailLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastFailLogTime", callName);
-                return false;
-            }
-
-            int lastFailLogFileColumnIdx = statement->FindColumn("LastFailLogFile");
-            if (lastFailLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastFailLogFile", callName);
-                return false;
-            }
-
-            int lastLogTimeColumnIdx = statement->FindColumn("LastLogTime");
-            if (lastLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastLogTime", callName);
-                return false;
-            }
-
-            int lastLogFileColumnIdx = statement->FindColumn("LastLogFile");
-            if (lastLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastLogFile", callName);
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                JobDatabaseEntry job;
-                job.m_jobKey = AZStd::move(statement->GetColumnText(jobKeyColumnIdx));
-                job.m_builderGuid = statement->GetColumnUuid(buildeGuidColumnIdx);
-                job.m_status = static_cast<AssetSystem::JobStatus>(statement->GetColumnInt(statusColumnIdx));
-
-                bool callHandler = (jobKey ? job.m_jobKey == jobKey : true &&
-                                    !builderGuid.IsNull() ? job.m_builderGuid == builderGuid : true &&
-                                    status != AssetSystem::JobStatus::Any ? job.m_status == status : true);
-                if (callHandler)
-                {
-                    job.m_jobID = statement->GetColumnInt64(jobIDColumnIdx);
-                    job.m_sourcePK = statement->GetColumnInt64(sourcePKColumnIdx);
-                    job.m_fingerprint = statement->GetColumnInt(fingerprintColumnIdx);
-                    job.m_platform = AZStd::move(statement->GetColumnText(platformColumnIdx));
-                    job.m_status = static_cast<AssetSystem::JobStatus>(statement->GetColumnInt(statusColumnIdx));
-                    job.m_jobRunKey = statement->GetColumnInt64(jobRunKeyColumnIdx);
-                    job.m_firstFailLogTime = statement->GetColumnInt64(firstFailLogTimeColumnIdx);
-                    job.m_firstFailLogFile = AZStd::move(statement->GetColumnText(firstFailLogFileColumnIdx));
-                    job.m_lastFailLogTime = statement->GetColumnInt64(lastFailLogTimeColumnIdx);
-                    job.m_lastFailLogFile = AZStd::move(statement->GetColumnText(lastFailLogFileColumnIdx));
-                    job.m_lastLogTime = statement->GetColumnInt64(lastLogTimeColumnIdx);
-                    job.m_lastLogFile = AZStd::move(statement->GetColumnText(lastLogFileColumnIdx));
-
-                    if (handler(job))
-                    {
-                        result = statement->Step();
-                    }
-                    else
-                    {
-                        result = Statement::SqlDone;
-                    }
-                }
-                else
-                {
-                    result = statement->Step();
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetProductResult(const char* callName, Statement* statement, productHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-            Statement::SqlStatus result = statement->Step();
-
-            int productIDColumnIdx = statement->FindColumn("ProductID");
-            if (productIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ProductID", callName);
-                return false;
-            }
-
-            int jobPKColumnIdx = statement->FindColumn("JobPK");
-            if (jobPKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobPK", callName);
-                return false;
-            }
-
-            int subIDColumnIdx = statement->FindColumn("SubID");
-            if (subIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SubID", callName);
-                return false;
-            }
-
-            int productNameColumnIdx = statement->FindColumn("ProductName");
-            if (productNameColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ProductName", callName);
-                return false;
-            }
-
-            int assetTypeColumnIdx = statement->FindColumn("AssetType");
-            if (assetTypeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "AssetType", callName);
-                return false;
-            }
-
-            int legacyGuidColumnIdx = statement->FindColumn("LegacyGuid");
-            if (legacyGuidColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LegacyGuid", callName);
-                return false;
-            }
-
-            int jobKeyColumnIdx = -1;
-            if (jobKey)
-            {
-                jobKeyColumnIdx = statement->FindColumn("JobKey");
-                if (jobKeyColumnIdx == -1)
-                {
-                    AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobKey", callName);
-                    return false;
-                }
-            }
-
-            int builderGuidColumnIdx = -1;
-            if (!builderGuid.IsNull())
-            {
-                builderGuidColumnIdx = statement->FindColumn("BuilderGuid");
-                if (builderGuidColumnIdx == -1)
-                {
-                    AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "BuilderGuid", callName);
-                    return false;
-                }
-            }
-
-            int statusColumnIdx = -1;
-            if (status != AssetSystem::JobStatus::Any)
-            {
-                statusColumnIdx = statement->FindColumn("Status");
-                if (statusColumnIdx == -1)
-                {
-                    AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Status", callName);
-                    return false;
-                }
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                bool callHandler = (jobKey ? statement->GetColumnText(jobKeyColumnIdx) == jobKey : true &&
-                                    !builderGuid.IsNull() ? statement->GetColumnUuid(builderGuidColumnIdx) == builderGuid : true &&
-                                    status != AssetSystem::JobStatus::Any ? static_cast<AssetSystem::JobStatus>(statement->GetColumnInt(statusColumnIdx)) == status : true);
-                if (callHandler)
-                {
-                    ProductDatabaseEntry product;
-                    product.m_productID = statement->GetColumnInt64(productIDColumnIdx);
-                    product.m_jobPK = statement->GetColumnInt64(jobPKColumnIdx);
-                    product.m_subID = statement->GetColumnInt(subIDColumnIdx);
-                    product.m_productName = AZStd::move(statement->GetColumnText(productNameColumnIdx));
-                    product.m_assetType = statement->GetColumnUuid(assetTypeColumnIdx);
-                    product.m_legacyGuid = statement->GetColumnUuid(legacyGuidColumnIdx);
-
-                    if (handler(product))
-                    {
-                        result = statement->Step();
-                    }
-                    else
-                    {
-                        result = Statement::SqlDone;
-                    }
-                }
-                else
-                {
-                    result = statement->Step();
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetProductDependencyResult(const char* callName, Statement* statement, productDependencyHandler handler)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-            Statement::SqlStatus result = statement->Step();
-
-            int productDependencyIDColumnIdx = statement->FindColumn("ProductDependencyID");
-            if (productDependencyIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "ProductDependencyID");
-                return false;
-            }
-
-            int productPKColumnIdx = statement->FindColumn("ProductPK");
-            if (productPKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "ProductPK");
-                return false;
-            }
-
-            int dependencySourceGuidIdx = statement->FindColumn("DependencySourceGuid");
-            if (dependencySourceGuidIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "DependencySourceGuid");
-                return false;
-            }
-
-            int dependencySubIDIdx = statement->FindColumn("DependencySubID");
-            if (dependencySubIDIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "DependencySubID");
-                return false;
-            }
-
-            int dependencyFlagsIdx = statement->FindColumn("DependencyFlags");
-            if (dependencyFlagsIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "DependencyFlags");
-                return false;
-            }
-
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                ProductDependencyDatabaseEntry productDependency;
-                productDependency.m_productDependencyID = statement->GetColumnInt64(productDependencyIDColumnIdx);
-                productDependency.m_productPK = statement->GetColumnInt64(productPKColumnIdx);
-                productDependency.m_dependencySourceGuid = statement->GetColumnUuid(dependencySourceGuidIdx);
-                productDependency.m_dependencySubID = statement->GetColumnInt(dependencySubIDIdx);
-                productDependency.m_dependencyFlags = statement->GetColumnInt64(dependencyFlagsIdx);
-
-                if (handler(productDependency))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetLegacySubIDsResult(const char* callName, SQLite::Statement* statement, legacySubIDsHandler handler)
-        {
-            AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            int sourceLegacySubIDIdx = statement->FindColumn("LegacySubID");
-            if (sourceLegacySubIDIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "LegacySubID");
-                return false;
-            }
-
-            int productPKIdx = statement->FindColumn("ProductPK");
-            if (productPKIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "ProductPK");
-                return false;
-            }
-
-            int subIDIdx = statement->FindColumn("SubID");
-            if (subIDIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, "SubID");
-                return false;
-            }
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                LegacySubIDsEntry entry;
-                entry.m_subIDsEntryID = statement->GetColumnInt64(sourceLegacySubIDIdx);
-                entry.m_productPK = statement->GetColumnInt64(productPKIdx);
-                entry.m_subID = statement->GetColumnInt(subIDIdx);
-
-                if (handler(entry))
-                {
-                    result = statement->Step();
-                }
-                else
-                {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-
-        bool AssetDatabaseConnection::GetCombinedResult(const char* callName, Statement* statement, combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status, bool includeLegacySubIDs)
+        bool AssetDatabaseConnection::GetCombinedResult(const char* callName, Statement* statement, AssetDatabaseConnection::combinedHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status, bool includeLegacySubIDs)
         {
             AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
             Statement::SqlStatus result = statement->Step();
 
-            //////////////////////////////////////////////////////////////////////////
-            //scanfolder
-            int scanFolderIDColumnIdx = statement->FindColumn("ScanFolderID");
-            if (scanFolderIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolderID", callName);
-                return false;
-            }
-
-            int scanFolderColumnIdx = statement->FindColumn("ScanFolder");
-            if (scanFolderColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolder", callName);
-                return false;
-            }
-
-            int displayNameIdx = statement->FindColumn("DisplayName");
-            if (displayNameIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "DisplayName", callName);
-                return false;
-            }
-
-            int outputPrefixIdx = statement->FindColumn("OutputPrefix");
-            if (outputPrefixIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "OutputPrefix", callName);
-                return false;
-            }
-
-            //////////////////////////////////////////////////////////////////////////
-            //source
-            int sourceIDColumnIdx = statement->FindColumn("SourceID");
-            if (sourceIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceID", callName);
-                return false;
-            }
-
-            int scanFolderPKColumnIdx = statement->FindColumn("ScanFolderPK");
-            if (scanFolderPKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ScanFolderPK", callName);
-                return false;
-            }
-
-            int sourceNameColumnIdx = statement->FindColumn("SourceName");
-            if (sourceNameColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceName", callName);
-                return false;
-            }
-
-            int guidValueColumnIdx = statement->FindColumn("SourceGuid");
-            if (guidValueColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourceGuid", callName);
-                return false;
-            }
-
-            //////////////////////////////////////////////////////////////////////////
-            //job
-            int jobIDColumnIdx = statement->FindColumn("JobID");
-            if (jobIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobID", callName);
-                return false;
-            }
-
-            int sourcePKColumnIdx = statement->FindColumn("SourcePK");
-            if (sourcePKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SourcePK", callName);
-                return false;
-            }
-
-            int jobKeyColumnIdx = statement->FindColumn("JobKey");
-            if (jobKeyColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobKey", callName);
-                return false;
-            }
-
-            int fingerprintColumnIdx = statement->FindColumn("Fingerprint");
-            if (fingerprintColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Fingerprint", callName);
-                return false;
-            }
-
-            int platformColumnIdx = statement->FindColumn("Platform");
-            if (platformColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Platform", callName);
-                return false;
-            }
-
-            int builderGuidColumnIdx = statement->FindColumn("BuilderGuid");
-            if (builderGuidColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "BuilderGuid", callName);
-                return false;
-            }
-
-            int statusColumnIdx = statement->FindColumn("Status");
-            if (statusColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "Status", callName);
-                return false;
-            }
-
-            int jobRunKeyColumnIdx = statement->FindColumn("JobRunKey");
-            if (jobRunKeyColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobRunKey", callName);
-                return false;
-            }
-
-            int firstFailLogTimeColumnIdx = statement->FindColumn("FirstFailLogTime");
-            if (firstFailLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "FirstFailLogTime", callName);
-                return false;
-            }
-
-            int firstFailLogFileColumnIdx = statement->FindColumn("FirstFailLogFile");
-            if (firstFailLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "FirstFailLogFile", callName);
-                return false;
-            }
-
-            int lastFailLogTimeColumnIdx = statement->FindColumn("LastFailLogTime");
-            if (lastFailLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastFailLogTime", callName);
-                return false;
-            }
-
-            int lastFailLogFileColumnIdx = statement->FindColumn("LastFailLogFile");
-            if (lastFailLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastFailLogFile", callName);
-                return false;
-            }
-
-            int lastLogTimeColumnIdx = statement->FindColumn("LastLogTime");
-            if (lastLogTimeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastLogTime", callName);
-                return false;
-            }
-
-            int lastLogFileColumnIdx = statement->FindColumn("LastLogFile");
-            if (lastLogFileColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LastLogFile", callName);
-                return false;
-            }
-
-            //////////////////////////////////////////////////////////////////////////
-            //product
-
-            int productIDColumnIdx = statement->FindColumn("ProductID");
-            if (productIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ProductID", callName);
-                return false;
-            }
-
-            int jobPKColumnIdx = statement->FindColumn("JobPK");
-            if (jobPKColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "JobPK", callName);
-                return false;
-            }
-
-            int subIDColumnIdx = statement->FindColumn("SubID");
-            if (subIDColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "SubID", callName);
-                return false;
-            }
-
-            int productNameColumnIdx = statement->FindColumn("ProductName");
-            if (productNameColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "ProductName", callName);
-                return false;
-            }
-
-            int assetTypeColumnIdx = statement->FindColumn("AssetType");
-            if (assetTypeColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "AssetType", callName);
-                return false;
-            }
-
-            int legacyGuidColumnIdx = statement->FindColumn("LegacyGuid");
-            if (legacyGuidColumnIdx == -1)
-            {
-                AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", "LegacyGuid", callName);
-                return false;
-            }
+            CombinedDatabaseEntry combined;
+            auto boundColumns = combined.GetColumns();
 
             bool validResult = result == Statement::SqlDone;
             while (result == Statement::SqlOK)
             {
-                CombinedDatabaseEntry combined;
-                combined.m_builderGuid = statement->GetColumnUuid(builderGuidColumnIdx);
-                combined.m_jobKey = AZStd::move(statement->GetColumnText(jobKeyColumnIdx));
-                combined.m_status = static_cast<AssetSystem::JobStatus>(statement->GetColumnInt(statusColumnIdx));
-
-                bool callHandler = (jobKey ? combined.m_jobKey == jobKey : true &&
-                                    !builderGuid.IsNull() ? combined.m_builderGuid == builderGuid : true &&
-                                    status != AssetSystem::JobStatus::Any ? combined.m_status == status : true);
-                if (callHandler)
+                if (!boundColumns.Fetch(statement))
                 {
-                    //scan folder
-                    combined.m_scanFolderID = statement->GetColumnInt64(scanFolderIDColumnIdx);
-                    combined.m_scanFolder = AZStd::move(statement->GetColumnText(scanFolderColumnIdx));
-                    combined.m_displayName = AZStd::move(statement->GetColumnText(displayNameIdx));
-                    combined.m_outputPrefix = AZStd::move(statement->GetColumnText(outputPrefixIdx));
+                    return false;
+                }
 
-                    //source
-                    combined.m_sourceID = statement->GetColumnInt64(sourceIDColumnIdx);
-                    combined.m_scanFolderPK = statement->GetColumnInt64(scanFolderPKColumnIdx);
-                    combined.m_sourceName = AZStd::move(statement->GetColumnText(sourceNameColumnIdx));
-                    combined.m_sourceGuid = statement->GetColumnUuid(guidValueColumnIdx);
-
-                    //job
-                    combined.m_jobID = statement->GetColumnInt64(jobIDColumnIdx);
-                    combined.m_sourcePK = statement->GetColumnInt64(sourcePKColumnIdx);
-                    //combined.m_jobKey = AZStd::move(statement->GetColumnText(jobKeyColumnIdx)); //is done above for filtering
-                    combined.m_fingerprint = statement->GetColumnInt(fingerprintColumnIdx);
-                    combined.m_platform = AZStd::move(statement->GetColumnText(platformColumnIdx));
-                    //combined.m_builderGuid = statement->GetColumnUuid(builderGuidColumnIdx); //is done above for filtering
-                    //combined.m_status = static_cast<AssetSystem::JobStatus>(statement->GetColumnInt(statusColumnIdx)); //is done above for filtering
-                    combined.m_jobRunKey = statement->GetColumnInt64(jobRunKeyColumnIdx);
-                    combined.m_firstFailLogTime = statement->GetColumnInt64(firstFailLogFileColumnIdx);
-                    combined.m_firstFailLogFile = AZStd::move(statement->GetColumnText(firstFailLogFileColumnIdx));
-                    combined.m_lastFailLogTime = statement->GetColumnInt64(lastFailLogTimeColumnIdx);
-                    combined.m_lastFailLogFile = AZStd::move(statement->GetColumnText(lastFailLogFileColumnIdx));
-                    combined.m_lastLogTime = statement->GetColumnInt64(lastLogTimeColumnIdx);
-                    combined.m_lastLogFile = AZStd::move(statement->GetColumnText(lastLogFileColumnIdx));
-
-                    //product
-                    combined.m_productID = statement->GetColumnInt64(productIDColumnIdx);
-                    combined.m_jobPK = statement->GetColumnInt64(jobPKColumnIdx);
-                    combined.m_subID = statement->GetColumnInt(subIDColumnIdx);
-                    combined.m_productName = AZStd::move(statement->GetColumnText(productNameColumnIdx));
-                    combined.m_assetType = statement->GetColumnUuid(assetTypeColumnIdx);
-                    combined.m_legacyGuid = statement->GetColumnUuid(legacyGuidColumnIdx);
-
+                if (ResultMatchesJobCriteria(jobKey, builderGuid, status, combined.m_jobKey, combined.m_builderGuid, combined.m_status))
+                {
                     if (includeLegacySubIDs)
                     {
                         QueryLegacySubIdsByProductID(combined.m_productID, [&combined](LegacySubIDsEntry& entry)
@@ -4010,6 +2488,7 @@ namespace AzToolsFramework
                     result = statement->Step();
                 }
                 validResult = true;
+                combined.m_legacySubIDs.clear();
             }
 
             if (result == Statement::SqlError)
@@ -4020,71 +2499,241 @@ namespace AzToolsFramework
             return validResult;
         }
 
-        bool AzToolsFramework::AssetDatabase::AssetDatabaseConnection::GetCombinedDependencyResult(const char* callName, SQLite::Statement* statement, combinedProductDependencyHandler handler)
+        namespace
         {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            Statement::SqlStatus result = statement->Step();
-
-            AZStd::vector<int> columns;
-            if (!GetStatementColumns(statement, callName, { "ProductDependencyID", "ProductPK", "DependencySourceGuid", "DependencySubID", "DependencyFlags", "SourceGuid", "SubID" }, columns))
+            // Helper function that can handle the majority use-case of iterating every row and passing the TEntry result to the handler
+            template<typename TEntry>
+            bool GetResult(const char* callName, Statement* statement, AZStd::function<bool(TEntry& entry)> handler)
             {
-                return false;
-            }
+                AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
 
-            bool validResult = result == Statement::SqlDone;
-            while (result == Statement::SqlOK)
-            {
-                ProductDependencyDatabaseEntry entry;
+                Statement::SqlStatus result = statement->Step();
 
-                entry.m_productDependencyID = statement->GetColumnInt64(columns[0]);
-                entry.m_productPK = statement->GetColumnInt64(columns[1]);
-                entry.m_dependencySourceGuid = statement->GetColumnUuid(columns[2]);
-                entry.m_dependencySubID = statement->GetColumnInt(columns[3]);
-                entry.m_dependencyFlags = statement->GetColumnInt64(columns[4]);
+                TEntry entry;
+                auto boundColumns = entry.GetColumns();
 
-                AZ::Data::AssetId assetId(statement->GetColumnUuid(columns[5]), statement->GetColumnInt(columns[6]));
-
-                if (handler(assetId, entry))
+                bool validResult = result == Statement::SqlDone;
+                while (result == Statement::SqlOK)
                 {
-                    result = statement->Step();
+                    if (!boundColumns.Fetch(statement))
+                    {
+                        return false;
+                    }
+
+                    if (handler(entry))
+                    {
+                        result = statement->Step();
+                    }
+                    else
+                    {
+                        result = Statement::SqlDone;
+                    }
+                    validResult = true;
                 }
-                else
+
+                if (result == Statement::SqlError)
                 {
-                    result = Statement::SqlDone;
-                }
-                validResult = true;
-            }
-
-            if (result == Statement::SqlError)
-            {
-                AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
-                return false;
-            }
-
-            return validResult;
-        }
-
-        bool AssetDatabaseConnection::GetStatementColumns(Statement* statement, const char* callName, AZStd::initializer_list<const char*> columnNames, AZStd::vector<int>& columnIndices)
-        {
-            (void)callName; // AZ_Error may be compiled out entirely in release builds.
-
-            columnIndices.reserve(columnNames.size());
-
-            for (const char* column : columnNames)
-            {
-                int index = statement->FindColumn(column);
-
-                if (index == -1)
-                {
-                    AZ_Error(LOG_NAME, false, "Results from %s failed to have a %s column", callName, column);
+                    AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
                     return false;
                 }
 
-                columnIndices.push_back(index);
+                return validResult;
             }
 
-            return true;
-        }
+            bool GetDatabaseInfoResult(const char* callName, Statement* statement, AssetDatabaseConnection::databaseInfoHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetScanFolderResult(const char* callName, Statement* statement, AssetDatabaseConnection::scanFolderHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetSourceResult(const char* callName, Statement* statement, AssetDatabaseConnection::sourceHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetSourceAndScanfolderResult(const char* callName, Statement* statement, AssetDatabaseConnection::combinedSourceScanFolderHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetSourceDependencyResult(const char* callName, SQLite::Statement* statement, AssetDatabaseConnection::sourceFileDependencyHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetProductDependencyResult(const char* callName, Statement* statement, AssetDatabaseConnection::productDependencyHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetLegacySubIDsResult(const char* callName, SQLite::Statement* statement, AssetDatabaseConnection::legacySubIDsHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetFileResult(const char* callName, SQLite::Statement* statement, AssetDatabaseConnection::fileHandler handler)
+            {
+                return GetResult(callName, statement, handler);
+            }
+
+            bool GetJobResultSimple(const char* name, Statement* statement, AssetDatabaseConnection::jobHandler handler)
+            {
+                return GetJobResult(name, statement, handler);
+            }
+
+            bool GetJobResult(const char* callName, Statement* statement, AssetDatabaseConnection::jobHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status)
+            {
+                AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
+
+                Statement::SqlStatus result = statement->Step();
+
+                JobDatabaseEntry job;
+                auto boundColumns = job.GetColumns();
+
+                bool validResult = result == Statement::SqlDone;
+                while (result == Statement::SqlOK)
+                {
+                    if (!boundColumns.Fetch(statement))
+                    {
+                        return false;
+                    }
+
+                    if (ResultMatchesJobCriteria(jobKey, builderGuid, status, job.m_jobKey, job.m_builderGuid, job.m_status))
+                    {
+                        if (handler(job))
+                        {
+                            result = statement->Step();
+                        }
+                        else
+                        {
+                            result = Statement::SqlDone;
+                        }
+                    }
+                    else
+                    {
+                        result = statement->Step();
+                    }
+                    validResult = true;
+                }
+
+                if (result == Statement::SqlError)
+                {
+                    AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
+                    return false;
+                }
+
+                return validResult;
+            }
+
+            bool GetProductResultSimple(const char* name, Statement* statement, AssetDatabaseConnection::productHandler handler)
+            {
+                return GetProductResult(name, statement, handler);
+            }
+
+            bool GetProductResult(const char* callName, Statement* statement, AssetDatabaseConnection::productHandler handler, AZ::Uuid builderGuid, const char* jobKey, AssetSystem::JobStatus status)
+            {
+                AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
+                Statement::SqlStatus result = statement->Step();
+
+                ProductDatabaseEntry product;
+                AZStd::string savedJobKey;
+                AZ::Uuid savedBuilderGuid;
+                int savedJobStatus;
+
+                auto productColumns = product.GetColumns();
+                auto jobKeyColumn = MakeColumn("JobKey", savedJobKey);
+                auto builderGuidColumn = MakeColumn("BuilderGuid", savedBuilderGuid);
+                auto statusColumn = MakeColumn("Status", savedJobStatus);
+
+                bool validResult = result == Statement::SqlDone;
+                while (result == Statement::SqlOK)
+                {
+                    if ((jobKey && !jobKeyColumn.Fetch(statement))
+                        || (!builderGuid.IsNull() && !builderGuidColumn.Fetch(statement))
+                        || (status != AssetSystem::JobStatus::Any && !statusColumn.Fetch(statement)))
+                    {
+                        return false;
+                    }
+
+                    if (ResultMatchesJobCriteria(jobKey, builderGuid, status, savedJobKey, savedBuilderGuid, static_cast<AssetSystem::JobStatus>(savedJobStatus)))
+                    {
+                        if (!productColumns.Fetch(statement))
+                        {
+                            return false;
+                        }
+
+                        if (handler(product))
+                        {
+                            result = statement->Step();
+                        }
+                        else
+                        {
+                            result = Statement::SqlDone;
+                        }
+                    }
+                    else
+                    {
+                        result = statement->Step();
+                    }
+                    validResult = true;
+                }
+
+                if (result == Statement::SqlError)
+                {
+                    AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
+                    return false;
+                }
+
+                return validResult;
+            }
+
+            bool GetCombinedDependencyResult(const char* callName, SQLite::Statement* statement, AssetDatabaseConnection::combinedProductDependencyHandler handler)
+            {
+                AZ_UNUSED(callName); // AZ_Error may be compiled out entirely in release builds.
+
+                Statement::SqlStatus result = statement->Step();
+
+                ProductDependencyDatabaseEntry entry;
+                AZ::Uuid sourceGuid;
+                AZ::s32 subId;
+
+                auto boundColumns = entry.GetColumns();
+                auto guidColumn = MakeColumn("SourceGuid", sourceGuid);
+                auto subIdColumn = MakeColumn("SubID", subId);
+
+                bool validResult = result == Statement::SqlDone;
+                while (result == Statement::SqlOK)
+                {
+                    if (!boundColumns.Fetch(statement) || !guidColumn.Fetch(statement) || !subIdColumn.Fetch(statement))
+                    {
+                        return false;
+                    }
+
+                    AZ::Data::AssetId assetId(sourceGuid, subId);
+
+                    if (handler(assetId, entry))
+                    {
+                        result = statement->Step();
+                    }
+                    else
+                    {
+                        result = Statement::SqlDone;
+                    }
+                    validResult = true;
+                }
+
+                if (result == Statement::SqlError)
+                {
+                    AZ_Warning(LOG_NAME, false, "Error occurred while stepping %s", callName);
+                    return false;
+                }
+
+                return validResult;
+            }
+        } // namespace Internal
     } // namespace AssetDatabase
 } // namespace AZToolsFramework

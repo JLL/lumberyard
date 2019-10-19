@@ -72,7 +72,8 @@ namespace ScriptCanvasEditor
 
         void CanvasWidget::SetupGraphicsView()
         {
-            m_graphicsView = aznew GraphCanvas::GraphCanvasGraphicsView();
+            const bool registerMenuActions = false;
+            m_graphicsView = aznew GraphCanvas::GraphCanvasGraphicsView(nullptr, registerMenuActions);
 
             AZ_Assert(m_graphicsView, "Could Canvas Widget unable to create CanvasGraphicsView object.");
             if (m_graphicsView)
@@ -167,47 +168,9 @@ namespace ScriptCanvasEditor
                 return;
             }
 
-            if (!m_attached)
-            {
-                ScriptCanvas::Debugger::NotificationBus::Handler::BusConnect();
-
-                ScriptCanvas::Debugger::ConnectionRequestBus::Broadcast(&ScriptCanvas::Debugger::ConnectionRequests::Attach, graph->GetUniqueId());
-            }
-            else
-            {
-                ScriptCanvas::Debugger::ConnectionRequestBus::Broadcast(&ScriptCanvas::Debugger::ConnectionRequests::Detach, graph->GetUniqueId());
-            }
         }
 
-        void CanvasWidget::OnAttach(const AZ::EntityId& graphId)
-        {
-            ScriptCanvas::Graph* graph{};
-            ScriptCanvas::GraphRequestBus::EventResult(graph, m_graphicsView->GetScene(), &ScriptCanvas::GraphRequests::GetGraph);
-            if (!graph  || graph->GetUniqueId() != graphId)
-            {
-                return;
-            }
-
-            m_attached = true;
-            ui->m_debugAttach->setText("Debugging: On");
-        }
-
-        void CanvasWidget::OnDetach(const AZ::EntityId& graphId)
-        {
-            ScriptCanvas::Graph* graph{};
-            ScriptCanvas::GraphRequestBus::EventResult(graph, m_graphicsView->GetScene(), &ScriptCanvas::GraphRequests::GetGraph);
-            if (!graph || graph->GetUniqueId() != graphId)
-            {
-                return;
-            }
-
-            m_attached = false;
-            ui->m_debugAttach->setText("Debugging: Off");
-
-            ScriptCanvas::Debugger::NotificationBus::Handler::BusDisconnect();
-        }
-
-        #include <Editor/View/Widgets/CanvasWidget.moc>
+#include <Editor/View/Widgets/CanvasWidget.moc>
 
     }
 }

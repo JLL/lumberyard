@@ -12,9 +12,10 @@
 
 #pragma once
 
-#include "EMotionFXConfig.h"
-#include "EventHandler.h"
-#include "AnimGraphTransitionCondition.h"
+#include <EMotionFX/Source/EMotionFXConfig.h>
+#include <EMotionFX/Source/EventHandler.h>
+#include <EMotionFX/Source/AnimGraphTransitionCondition.h>
+#include <EMotionFX/Source/Event.h>
 
 
 namespace EMotionFX
@@ -31,31 +32,14 @@ namespace EMotionFX
     class EMFX_API AnimGraphMotionCondition
         : public AnimGraphTransitionCondition
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphMotionCondition, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS);
-
-        // Forward declaration.
     private:
         class EventHandler;
 
     public:
-        AZ_RTTI(AnimGraphMotionCondition, "{0E2EDE4E-BDEE-4383-AB18-208CE7F7A784}", AnimGraphTransitionCondition);
+        AZ_RTTI(AnimGraphMotionCondition, "{0E2EDE4E-BDEE-4383-AB18-208CE7F7A784}", AnimGraphTransitionCondition)
+        AZ_CLASS_ALLOCATOR_DECL
 
-        enum
-        {
-            TYPE_ID = 0x00002001
-        };
-
-        enum
-        {
-            ATTRIB_MOTIONNODE       = 0,
-            ATTRIB_FUNCTION         = 1,
-            ATTRIB_NUMLOOPS         = 2,
-            ATTRIB_PLAYTIME         = 3,
-            ATTRIB_EVENTTYPE        = 4,
-            ATTRIB_EVENTPARAMETER   = 5
-        };
-
-        enum EFunction
+        enum TestFunction : AZ::u8
         {
             FUNCTION_EVENT                  = 0,
             FUNCTION_HASENDED               = 1,
@@ -71,69 +55,74 @@ namespace EMotionFX
         class EMFX_API UniqueData
             : public AnimGraphObjectData
         {
-            MCORE_MEMORYOBJECTCATEGORY(AnimGraphMotionCondition::UniqueData, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS);
             EMFX_ANIMGRAPHOBJECTDATA_IMPLEMENT_LOADSAVE
 
         public:
-            UniqueData(AnimGraphObject* object, AnimGraphInstance* animGraphInstance, MotionInstance* motionInstance);
-            ~UniqueData();
+            AZ_CLASS_ALLOCATOR_DECL
 
-            uint32 GetClassSize() const override                                                                                     { return sizeof(UniqueData); }
-            AnimGraphObjectData* Clone(void* destMem, AnimGraphObject* object, AnimGraphInstance* animGraphInstance) override        { return new (destMem) UniqueData(object, animGraphInstance, nullptr); }
+            UniqueData(AnimGraphObject* object, AnimGraphInstance* animGraphInstance, MotionInstance* motionInstance);
+            ~UniqueData() = default;
 
         public:
             MotionInstance*                             mMotionInstance;
-            AnimGraphMotionCondition::EventHandler*     mEventHandler;
-            bool                                        mTriggered;
         };
 
-        static AnimGraphMotionCondition* Create(AnimGraph* animGraph);
+        AnimGraphMotionCondition();
+        AnimGraphMotionCondition(AnimGraph* animGraph);
+        ~AnimGraphMotionCondition();
 
-        void RegisterAttributes() override;
+        void Reinit() override;
+        bool InitAfterLoading(AnimGraph* animGraph) override;
+
         void OnUpdateUniqueData(AnimGraphInstance* animGraphInstance) override;
-        void OnUpdateAttributes() override;
-        void OnRenamedNode(AnimGraph* animGraph, AnimGraphNode* node, const AZStd::string& oldName) override;
         void OnRemoveNode(AnimGraph* animGraph, AnimGraphNode* nodeToRemove) override;
 
-        void Reset(AnimGraphInstance* animGraphInstance) override;
-
-        const char* GetTypeString() const override;
         void GetSummary(AZStd::string* outResult) const override;
         void GetTooltip(AZStd::string* outResult) const override;
         const char* GetPaletteName() const override;
-        AnimGraphObjectData* CreateObjectData() override;
 
         bool TestCondition(AnimGraphInstance* animGraphInstance) const override;
+
+        void SetTestFunction(TestFunction testFunction);
+        TestFunction GetTestFunction() const;
         const char* GetTestFunctionString() const;
-        AnimGraphObject* Clone(AnimGraph* animGraph) override;
-        EFunction GetFunction() const;
+
+        void SetEventDatas(EventDataSet&& eventData);
+        const EventDataSet& GetEventDatas() const;
+
+        void SetMotionNodeId(AnimGraphNodeId motionNodeId);
+        AnimGraphNodeId GetMotionNodeId() const;
+        AnimGraphNode* GetMotionNode() const;
+
+        void SetNumLoops(AZ::u32 numLoops);
+        AZ::u32 GetNumLoops() const;
+
+        void SetPlayTime(float playTime);
+        float GetPlayTime() const;
+
+        void GetAttributeStringForAffectedNodeIds(const AZStd::unordered_map<AZ::u64, AZ::u64>& convertedIds, AZStd::string& attributesString) const override;
+
+        static void Reflect(AZ::ReflectContext* context);
 
     private:
-        // the motion instance event handler
-        class EventHandler
-            : public MotionInstanceEventHandler
-        {
-            MCORE_MEMORYOBJECTCATEGORY(AnimGraphMotionCondition::EventHandler, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_CONDITIONS);
 
-        public:
-            static EventHandler* Create(AnimGraphMotionCondition* condition, UniqueData* uniqueData);
+        AZ::Crc32 GetNumLoopsVisibility() const;
+        AZ::Crc32 GetPlayTimeVisibility() const;
+        AZ::Crc32 GetEventPropertiesVisibility() const;
 
-            void OnEvent(const EventInfo& eventInfo) override;
-            void OnHasLooped() override;
-            void OnIsFrozenAtLastFrame() override;
-            void OnDeleteMotionInstance() override;
+        static const char* s_functionMotionEvent;
+        static const char* s_functionHasEnded;
+        static const char* s_functionHasReachedMaxNumLoops;
+        static const char* s_functionHasReachedPlayTime;
+        static const char* s_functionHasLessThan;
+        static const char* s_functionIsMotionAssigned;
+        static const char* s_functionIsMotionNotAssigned;
 
-        private:
-            AnimGraphMotionCondition*  mCondition;
-            UniqueData*                mUniqueData;
-
-            EventHandler(AnimGraphMotionCondition* condition, UniqueData* uniqueData);
-            ~EventHandler();
-        };
-
-        AnimGraphMotionNode*   mMotionNode;
-
-        AnimGraphMotionCondition(AnimGraph* animGraph);
-        ~AnimGraphMotionCondition();
+        EventDataSet            m_eventDatas;
+        AZ::u64                 m_motionNodeId;
+        AnimGraphMotionNode*    m_motionNode;
+        AZ::u32                 m_numLoops;
+        float                   m_playTime;
+        TestFunction            m_testFunction;
     };
 } // namespace EMotionFX

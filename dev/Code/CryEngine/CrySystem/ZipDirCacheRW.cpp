@@ -27,11 +27,13 @@
 #include <AzCore/IO/FileIO.h>
 #include <AzFramework/IO/FileOperations.h>
 
+#include "CryArchive.h"
+#include <lz4frame.h>
+#include <zstd.h>
+
 #ifndef OPTIMIZED_READONLY_ZIP_ENTRY
 
 #include "CryZlib.h"  // declaration of Z_OK for ZipRawDecompress
-
-using namespace ZipFile;
 
 //////////////////////////////////////////////////////////////////////////
 void ZipDir::CacheRW::AddRef()
@@ -183,9 +185,26 @@ char* ZipDir::CacheRW::AllocPath(const char* pPath)
     return temp;
 }
 
+unsigned int ZipDir::CacheRW::GetCompressedSizeEstimate(unsigned int uncompressedSize, CompressionCodec::Codec codec)
+{
+    switch (codec)
+    {
+    case CompressionCodec::Codec::ZLIB:
+        return (uncompressedSize + (uncompressedSize >> 3) + 32);
+    case CompressionCodec::Codec::ZSTD:
+        return ZSTD_compressBound(uncompressedSize);
+    case CompressionCodec::Codec::LZ4:
+        return LZ4F_compressFrameBound(uncompressedSize, nullptr);
+    default:
+        AZ_Assert(false, "Unknown codec passed in for size estimate");
+        break;
+    }
+    return 0;
+}
+
 // Adds a new file to the zip or update an existing one
 // adds a directory (creates several nested directories if needed)
-ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod, int nCompressionLevel)
+ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod, int nCompressionLevel, CompressionCodec::Codec codec)
 {
     char str[_MAX_PATH];
     char* szRelativePath = UnifyPath(str, szRelativePathSrc);
@@ -193,30 +212,42 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, vo
     SmartPtr pBufferDestroyer(m_pHeap);
 
     // we'll need the compressed data
-    void* pCompressed;
+    void* pCompressed = nullptr;
     unsigned long nSizeCompressed;
-    int nError;
+    int nError = Z_ERRNO;
 
     if (nSize == 0)
     {
-        nCompressionMethod = METHOD_STORE;
+        nCompressionMethod = ZipFile::METHOD_STORE;
     }
-
     switch (nCompressionMethod)
     {
-    case METHOD_DEFLATE:
-        // allocate memory for compression. Min is nSize * 1.001 + 12
-        nSizeCompressed = nSize + (nSize >> 3) + 32;
+    case ZipFile::METHOD_DEFLATE:
+        nSizeCompressed = GetCompressedSizeEstimate(nSize, codec);
         pCompressed = m_pHeap->TempAlloc(nSizeCompressed, "ZipDir::CacheRW::UpdateFile");
         pBufferDestroyer.Attach(pCompressed);
-        nError = ZipRawCompress(m_pHeap, pUncompressed, &nSizeCompressed, pCompressed, nSize, nCompressionLevel);
+
+        switch (codec)
+        {
+        case CompressionCodec::Codec::ZSTD:
+            nError = ZipRawCompressZSTD(m_pHeap, pUncompressed, &nSizeCompressed, pCompressed, nSize, nCompressionLevel);
+            break;
+
+        case CompressionCodec::Codec::ZLIB:
+            nError = ZipRawCompress(m_pHeap, pUncompressed, &nSizeCompressed, pCompressed, nSize, nCompressionLevel);
+            break;
+
+        case CompressionCodec::Codec::LZ4:
+            nError = ZipRawCompressLZ4(m_pHeap, pUncompressed, &nSizeCompressed, pCompressed, nSize, nCompressionLevel);
+            break;
+        }
         if (Z_OK != nError)
         {
             return ZD_ERROR_ZLIB_FAILED;
         }
         break;
 
-    case METHOD_STORE:
+    case ZipFile::METHOD_STORE:
         pCompressed = pUncompressed;
         nSizeCompressed = nSize;
         break;
@@ -256,7 +287,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, vo
         if (nFreeSpace >= nSizeCompressed)
         {
             // and we can just override the compressed data in the file
-            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
             if (e != ZD_ERROR_SUCCESS)
             {
                 return e;
@@ -266,7 +297,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, vo
         {
             // we need to write the file anew - in place of current CDR
             pFileEntry->nFileHeaderOffset = m_lCDROffset;
-            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
             lNewCDROffset = pFileEntry->nEOFOffset;
             if (e != ZD_ERROR_SUCCESS)
             {
@@ -277,7 +308,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, vo
     else
     {
         pFileEntry->nFileHeaderOffset = m_lCDROffset;
-        ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+        ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
         if (e != ZD_ERROR_SUCCESS)
         {
             return e;
@@ -304,8 +335,10 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFile (const char* szRelativePathSrc, vo
     {
         if (!AZ::IO::FileIOBase::GetDirectInstance()->Write(m_fileHandle, ptr, sizeToWrite))
         {
+            char error[1024];
+            azstrerror_s(error, 1024, errno);
             CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_ERROR,
-                "Cannot write to zip file!! error = (%d): %s", errno, strerror(errno));
+                "Cannot write to zip file!! error = (%d): %s", errno, error);
             return ZD_ERROR_IO_FAILED;
         }
         ptr += sizeToWrite;
@@ -348,7 +381,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::StartContinuousFileUpdate(const char* szRelat
         return ZD_ERROR_INVALID_PATH;
     }
 
-    pFileEntry->OnNewFileData (NULL, nSize, nSize, METHOD_STORE, false);
+    pFileEntry->OnNewFileData (NULL, nSize, nSize, ZipFile::METHOD_STORE, false);
     // since we changed the time, we'll have to update CDR
     m_nFlags |= FLAGS_CDR_DIRTY;
 
@@ -367,7 +400,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::StartContinuousFileUpdate(const char* szRelat
         if (nFreeSpace >= nSize)
         {
             // and we can just override the compressed data in the file
-            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
             if (e != ZD_ERROR_SUCCESS)
             {
                 return e;
@@ -377,7 +410,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::StartContinuousFileUpdate(const char* szRelat
         {
             // we need to write the file anew - in place of current CDR
             pFileEntry->nFileHeaderOffset = m_lCDROffset;
-            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+            ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
             lNewCDROffset = pFileEntry->nEOFOffset;
             if (e != ZD_ERROR_SUCCESS)
             {
@@ -388,7 +421,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::StartContinuousFileUpdate(const char* szRelat
     else
     {
         pFileEntry->nFileHeaderOffset = m_lCDROffset;
-        ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+        ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
         if (e != ZD_ERROR_SUCCESS)
         {
             return e;
@@ -436,7 +469,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFileContinuousSegment (const char* szRe
         return ZD_ERROR_INVALID_PATH;
     }
 
-    pFileEntry->OnNewFileData (pUncompressed, nSegmentSize, nSegmentSize, METHOD_STORE, true);
+    pFileEntry->OnNewFileData (pUncompressed, nSegmentSize, nSegmentSize, ZipFile::METHOD_STORE, true);
     // since we changed the time, we'll have to update CDR
     m_nFlags |= FLAGS_CDR_DIRTY;
 
@@ -449,7 +482,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFileContinuousSegment (const char* szRe
     }
 
     // and we can just override the compressed data in the file
-    ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+    ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
     if (e != ZD_ERROR_SUCCESS)
     {
         return e;
@@ -468,8 +501,10 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFileContinuousSegment (const char* szRe
     const bool encrypt = false; // we do not support encription for continous file update
     if (!WriteCompressedData((char*)pUncompressed, nSegmentSize, encrypt))
     {
+        char error[1024];
+        azstrerror_s(error, 1024, errno);
         CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_ERROR,
-            "Cannot write to zip file!! error = (%d): %s", errno, strerror(errno));
+            "Cannot write to zip file!! error = (%d): %s", errno, error);
         return ZD_ERROR_IO_FAILED;
     }
 
@@ -511,7 +546,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::UpdateFileCRC (const char* szRelativePathSrc,
     }
 
     // and we can just override the compressed data in the file
-    ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+    ErrorEnum e = WriteLocalHeader(m_fileHandle, pFileEntry, szRelativePath, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
     if (e != ZD_ERROR_SUCCESS)
     {
         return e;
@@ -673,7 +708,7 @@ ZipDir::ErrorEnum ZipDir::CacheRW::ReadFile (FileEntry* pFileEntry, void* pCompr
             //Intentionally empty block
         }
 #ifdef SUPPORT_RSA_AND_STREAMCIPHER_PAK_ENCRYPTION
-        else if (pFileEntry->nMethod == METHOD_STORE_AND_STREAMCIPHER_KEYTABLE || pFileEntry->nMethod == METHOD_DEFLATE_AND_STREAMCIPHER_KEYTABLE)
+        else if (pFileEntry->nMethod == ZipFile::METHOD_STORE_AND_STREAMCIPHER_KEYTABLE || pFileEntry->nMethod == ZipFile::METHOD_DEFLATE_AND_STREAMCIPHER_KEYTABLE)
         {
             unsigned char IV[ZipFile::BLOCK_CIPHER_KEY_LENGTH]; //16 byte
             int nKeyIndex = ZipEncrypt::GetEncryptionKeyIndex(pFileEntry);
@@ -808,9 +843,9 @@ bool ZipDir::CacheRW::WriteCDR(AZ::IO::HandleType fTarget)
     //arrFiles.SortByFileOffset();
     size_t nSizeCDR = arrFiles.GetStats().nSizeCDR;
     void* pCDR = m_pHeap->TempAlloc(nSizeCDR, "ZipDir::CacheRW::WriteCDR");
-    size_t nSizeCDRSerialized = arrFiles.MakeZipCDR(m_lCDROffset, pCDR, m_encryptedHeaders == HEADERS_ENCRYPTED_TEA);
+    size_t nSizeCDRSerialized = arrFiles.MakeZipCDR(m_lCDROffset, pCDR, m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA);
     assert (nSizeCDRSerialized == nSizeCDR);
-    if (m_encryptedHeaders == HEADERS_ENCRYPTED_TEA)
+    if (m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA)
     {
 #if defined(SUPPORT_XTEA_PAK_ENCRYPTION)
         // We do not encrypt CDREnd, so we can find it by signature
@@ -952,7 +987,7 @@ bool ZipDir::CacheRW::RelinkZip(AZ::IO::HandleType fTmp)
                 //Intentionally empty block
             }
 #ifdef SUPPORT_RSA_AND_STREAMCIPHER_PAK_ENCRYPTION
-            else if (it->pFileEntry->nMethod == METHOD_STORE_AND_STREAMCIPHER_KEYTABLE || it->pFileEntry->nMethod == METHOD_DEFLATE_AND_STREAMCIPHER_KEYTABLE)
+            else if (it->pFileEntry->nMethod == ZipFile::METHOD_STORE_AND_STREAMCIPHER_KEYTABLE || it->pFileEntry->nMethod == ZipFile::METHOD_DEFLATE_AND_STREAMCIPHER_KEYTABLE)
             {
                 unsigned char IV[ZipFile::BLOCK_CIPHER_KEY_LENGTH]; //16 byte
                 int nKeyIndex = ZipEncrypt::GetEncryptionKeyIndex(it->pFileEntry);
@@ -1034,7 +1069,7 @@ bool ZipDir::CacheRW::WriteZipFiles(std::vector<FileDataRecordPtr>& queFiles, AZ
         (*it)->pFileEntry->nFileHeaderOffset = static_cast<uint32>(tellOffset);
 
         // while writing the local header, the data offset will also be calculated
-        if (ZD_ERROR_SUCCESS != WriteLocalHeader(fTmp, (*it)->pFileEntry, (*it)->strPath.c_str(), m_encryptedHeaders == HEADERS_ENCRYPTED_TEA))
+        if (ZD_ERROR_SUCCESS != WriteLocalHeader(fTmp, (*it)->pFileEntry, (*it)->strPath.c_str(), m_encryptedHeaders == ZipFile::HEADERS_ENCRYPTED_TEA))
         {
             return false;
         }

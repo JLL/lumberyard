@@ -29,6 +29,7 @@ namespace HttpRequestor
     {
         AZStd::thread_desc desc;
         desc.m_name = s_loggingName;
+        desc.m_cpuId = AFFINITY_MASK_USERTHREADS;
         m_runThread = true;
         // Shutdown will be handled by the InitializationManager - no need to call in the destructor
         AWSNativeSDKInit::InitializationManager::InitAwsApi();
@@ -46,7 +47,6 @@ namespace HttpRequestor
             m_thread.join();
         }
 
-        m_thread.detach();
     }
 
     void Manager::AddRequest(Parameters && httpRequestParameters)
@@ -60,11 +60,11 @@ namespace HttpRequestor
 
     void Manager::AddTextRequest(TextParameters && httpTextRequestParameters)
     {
-	    {
-		    AZStd::lock_guard<AZStd::mutex> lock(m_requestMutex);
-		    m_textRequestsToHandle.push(AZStd::move(httpTextRequestParameters));
-	    }
-	    m_requestConditionVar.notify_all();
+        {
+            AZStd::lock_guard<AZStd::mutex> lock(m_requestMutex);
+            m_textRequestsToHandle.push(AZStd::move(httpTextRequestParameters));
+        }
+        m_requestConditionVar.notify_all();
     }
 
     void Manager::ThreadFunction()
@@ -80,14 +80,14 @@ namespace HttpRequestor
     {
         // Lock mutex and wait for work to be signalled via the condition variable
         AZStd::unique_lock<AZStd::mutex> lock(m_requestMutex);
-        m_requestConditionVar.wait(lock);
+        m_requestConditionVar.wait(lock, [&] { return !m_runThread || !m_requestsToHandle.empty() || !m_textRequestsToHandle.empty(); });
 
         // Swap queues
         AZStd::queue<Parameters> requestsToHandle;
         requestsToHandle.swap(m_requestsToHandle);
 
-	    AZStd::queue<TextParameters> textRequestsToHandle;
-	    textRequestsToHandle.swap(m_textRequestsToHandle);
+        AZStd::queue<TextParameters> textRequestsToHandle;
+        textRequestsToHandle.swap(m_textRequestsToHandle);
 
         // Release lock
         lock.unlock();
@@ -99,11 +99,11 @@ namespace HttpRequestor
             requestsToHandle.pop();
         }
 
-	    while (!textRequestsToHandle.empty())
-	    {
-		    HandleTextRequest(textRequestsToHandle.front());
-		    textRequestsToHandle.pop();
-	    }
+        while (!textRequestsToHandle.empty())
+        {
+            HandleTextRequest(textRequestsToHandle.front());
+            textRequestsToHandle.pop();
+        }
     }
 
     void Manager::HandleRequest(const Parameters& httpRequestParameters)
@@ -179,8 +179,8 @@ namespace HttpRequestor
 
         // load up the raw output into a string
         // TODO(aaj): it feels like there should be some limit maybe 1 MB?
-	    std::istreambuf_iterator<char> eos;
+        std::istreambuf_iterator<char> eos;
         AZStd::string data(std::istreambuf_iterator<char>(httpResponse->GetResponseBody()), eos);
-	    httpRequestParameters.GetCallback()(AZStd::move(data), httpResponse->GetResponseCode());
+        httpRequestParameters.GetCallback()(AZStd::move(data), httpResponse->GetResponseCode());
     }
 }

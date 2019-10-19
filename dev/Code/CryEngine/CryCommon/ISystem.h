@@ -11,8 +11,8 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-// In Mac, including ISystem without including platform.h first fails because platform.h 
-// includes CryThread.h which includes CryThread_pthreads.h which uses ISystem (gEnv). 
+// In Mac, including ISystem without including platform.h first fails because platform.h
+// includes CryThread.h which includes CryThread_pthreads.h which uses ISystem (gEnv).
 // So plaform.h needs the contents of ISystem.h.
 // By including platform.h outside of the guard, we give platform.h the right include order
 #include <platform.h> // Needed for LARGE_INTEGER (for consoles).
@@ -31,7 +31,6 @@
 #include "CompileTimeAssert.h"
 
 #include <AzCore/IO/SystemFile.h>
-#include <AzCore/std/any.h>
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #undef AZ_RESTRICTED_SECTION
@@ -100,6 +99,8 @@ struct ICharacterManager;
 struct SFileVersion;
 struct INameTable;
 struct IBudgetingSystem;
+struct ILevelSystem;
+struct IViewSystem;
 struct IFlowSystem;
 struct IDialogSystem;
 namespace DRS {
@@ -127,6 +128,7 @@ struct ISoftCodeMgr;
 struct IZLibCompressor;
 struct IZLibDecompressor;
 struct ILZ4Decompressor;
+class IZStdDecompressor;
 struct IOutputPrintSink;
 struct IPhysicsDebugRenderer;
 struct IPhysRenderer;
@@ -204,9 +206,6 @@ enum ESystemUpdateFlags
     ESYSUPDATE_UPDATE_VIEW_ONLY = 0x0040
 };
 
-static const int NUM_SPEC_LEVELS = 4;
-static const int NUM_PLATFORMS = 8;
-
 // Description:
 //   Configuration specification, depends on user selected machine specification.
 enum ESystemConfigSpec
@@ -218,33 +217,6 @@ enum ESystemConfigSpec
     CONFIG_VERYHIGH_SPEC = 4,
 
     END_CONFIG_SPEC_ENUM, // MUST BE LSAT VALUE. USED FOR ERROR CHECKING.
-};
-
-// Description:
-//   Status of cvar for a specifc platform and spec level
-//   editedValue - current setting within Graphics Settings Dialog box
-//   overwrittenValue - original setting from platform config file (set to originalValue if not found)
-//   originalValue - original settings from sys_spec config file index
-
-struct CVarFileStatus
-{
-    AZStd::any editedValue;
-    AZStd::any overwrittenValue;
-    AZStd::any originalValue;
-    CVarFileStatus(AZStd::any edit, AZStd::any over, AZStd::any orig) : editedValue(edit), overwrittenValue(over), originalValue(orig) {}
-};
-
-// Description:
-//   Status of specific cvar for Editor mapping
-//   type - CVAR_INT / CVAR_FLOAT / CVAR_STRING
-//   cvarGroup - source of cvar (sys_spec_particles, sys_spec_physics, etc.) or "miscellaneous" if only specified in platform config file
-//   fileVals = CVarFileStatus for each spec level of a specific platform
-
-struct CVarInfo
-{
-    int type;
-    AZStd::string cvarGroup;
-    AZStd::vector<CVarFileStatus> fileVals;
 };
 
 // Description:
@@ -442,19 +414,19 @@ enum ESystemEvent
 
     // Summary:
     //   Called before switching to level memory heap
-    ESYSTEM_EVENT_SWITCHING_TO_LEVEL_HEAP,
+    ESYSTEM_EVENT_SWITCHING_TO_LEVEL_HEAP_DEPRECATED,
 
     // Summary:
     //   Called after switching to level memory heap
-    ESYSTEM_EVENT_SWITCHED_TO_LEVEL_HEAP,
+    ESYSTEM_EVENT_SWITCHED_TO_LEVEL_HEAP_DEPRECATED,
 
     // Summary:
     //   Called before switching to global memory heap
-    ESYSTEM_EVENT_SWITCHING_TO_GLOBAL_HEAP,
+    ESYSTEM_EVENT_SWITCHING_TO_GLOBAL_HEAP_DEPRECATED,
 
     // Summary:
     //   Called after switching to global memory heap
-    ESYSTEM_EVENT_SWITCHED_TO_GLOBAL_HEAP,
+    ESYSTEM_EVENT_SWITCHED_TO_GLOBAL_HEAP_DEPRECATED,
 
     // Description:
     //   Sent after precaching of the streaming system has been done
@@ -507,12 +479,20 @@ enum ESystemEvent
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION ISYSTEM_H_SECTION_1
-#include AZ_RESTRICTED_FILE(ISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ISystem_h_provo.inl"
+    #endif
 #endif
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION ISYSTEM_H_SECTION_2
-#include AZ_RESTRICTED_FILE(ISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ISystem_h_provo.inl"
+    #endif
 #endif
     ESYSTEM_EVENT_STREAMING_INSTALL_ERROR,
 
@@ -670,7 +650,11 @@ struct ICVarsWhitelist
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION ISYSTEM_H_SECTION_3
-#include AZ_RESTRICTED_FILE(ISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ISystem_h_provo.inl"
+    #endif
 #endif
 
 namespace AZ
@@ -870,13 +854,13 @@ struct SSystemInitParams
 
     bool UseAssetCache() const
     {
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_MAC) || defined(AZ_PLATFORM_LINUX)
         char checkPath[AZ_MAX_PATH_LEN] = { 0 };
         azsnprintf(checkPath, AZ_MAX_PATH_LEN, "%s/engine.json", rootPathCache);
         return AZ::IO::SystemFile::Exists(checkPath);
 #else
         return false;
-#endif // defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#endif // defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
     }
 };
 
@@ -971,7 +955,7 @@ struct SSystemGlobalEnvironment
     IEntitySystem*             pEntitySystem;
     IConsole*                  pConsole;
     Telemetry::ITelemetrySystem* pTelemetrySystem;
-    ISystem*                   pSystem;
+    ISystem*                   pSystem = nullptr;
     ICharacterManager*         pCharacterManager;
     IAISystem*                 pAISystem;
     ILog*                      pLog;
@@ -982,7 +966,6 @@ struct SSystemGlobalEnvironment
     IRenderer*                 pRenderer;
     IHardwareMouse*            pHardwareMouse;
     IMaterialEffects*          pMaterialEffects;
-    JobManager::IJobManager*   pJobManager;
     ISoftCodeMgr*                            pSoftCodeMgr;
     IOverloadSceneManager*       pOverloadSceneManager;
     IServiceNetwork*              pServiceNetwork;
@@ -996,7 +979,11 @@ struct SSystemGlobalEnvironment
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION ISYSTEM_H_SECTION_4
-#include AZ_RESTRICTED_FILE(ISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ISystem_h_provo.inl"
+    #endif
 #endif
 
     ISystemScheduler*          pSystemScheduler;
@@ -1134,14 +1121,7 @@ struct SSystemGlobalEnvironment
 #if defined(CONSOLE)
         return false;
 #else
-        if (!pGame)
-        {
-            return bEditor;
-        }
-        else
-        {
-            return bEditor && !bEditorGameMode;
-        }
+        return bEditor && !bEditorGameMode;
 #endif
     }
 
@@ -1165,12 +1145,6 @@ struct SSystemGlobalEnvironment
         m_isCutscenePlaying = isPlaying;
     }
 
-    // Getter function for jobmanager
-    ILINE JobManager::IJobManager* GetJobManager()
-    {
-        return pJobManager;
-    }
-
     ILINE bool IsInToolMode() const
     {
         return bToolMode;
@@ -1181,14 +1155,14 @@ struct SSystemGlobalEnvironment
         bToolMode = bNewToolMode;
     }
 
-    ILINE void SetDynamicMergedMeshGenerationEnable(bool mmgenEnable)
+    ILINE void SetDynamicMergedMeshGenerationEnabled(bool mmgenEnable)
     {
-        m_bDynamicMergedMeshGenerationEnable = mmgenEnable;
+        m_bDynamicMergedMeshGenerationEnabled = mmgenEnable;
     }
 
-    ILINE const bool IsDynamicMergedMeshGenerationEnable() const
+    ILINE const bool IsDynamicMergedMeshGenerationEnabled() const
     {
-        return m_bDynamicMergedMeshGenerationEnable;
+        return m_bDynamicMergedMeshGenerationEnabled;
     }
 
 #if !defined(CONSOLE)
@@ -1202,14 +1176,14 @@ private:
 
     bool m_isFMVPlaying;
     bool m_isCutscenePlaying;
-    bool m_bDynamicMergedMeshGenerationEnable;
+    bool m_bDynamicMergedMeshGenerationEnabled;
 
 public:
     SSystemGlobalEnvironment()
         : pSystemScheduler(nullptr)
         , szCmdLine("")
         , bToolMode(false)
-        , m_bDynamicMergedMeshGenerationEnable(false)
+        , m_bDynamicMergedMeshGenerationEnabled(false)
     {
     };
 };
@@ -1416,12 +1390,15 @@ struct ISystem
     virtual IZLibCompressor* GetIZLibCompressor() = 0;
     virtual IZLibDecompressor* GetIZLibDecompressor() = 0;
     virtual ILZ4Decompressor* GetLZ4Decompressor() = 0;
+    virtual IZStdDecompressor* GetZStdDecompressor() = 0;
     virtual ICryPerfHUD* GetPerfHUD() = 0;
     virtual IPlatformOS* GetPlatformOS() = 0;
     virtual INotificationNetwork* GetINotificationNetwork() = 0;
     virtual IHardwareMouse* GetIHardwareMouse() = 0;
     virtual IDialogSystem* GetIDialogSystem() = 0;
     virtual IFlowSystem* GetIFlowSystem() = 0;
+    virtual IViewSystem* GetIViewSystem() = 0;
+    virtual ILevelSystem* GetILevelSystem() = 0;
     virtual IBudgetingSystem* GetIBudgetingSystem() = 0;
     virtual INameTable* GetINameTable() = 0;
     virtual IDiskProfiler* GetIDiskProfiler() = 0;
@@ -1509,7 +1486,7 @@ struct ISystem
 
     // Summary:
     //   Creates new xml node.
-    virtual XmlNodeRef CreateXmlNode(const char* sNodeName = "", bool bReuseStrings = false) = 0;
+    virtual XmlNodeRef CreateXmlNode(const char* sNodeName = "", bool bReuseStrings = false, bool bIsProcessingInstruction = false) = 0;
     // Summary:
     //   Loads xml from memory buffer, returns 0 if load failed.
     virtual XmlNodeRef LoadXmlFromBuffer(const char* buffer, size_t size, bool bReuseStrings = false, bool bSuppressWarnings = false) = 0;
@@ -1646,14 +1623,6 @@ struct ISystem
     //             if false changes only server config spec (as known on the client).
     virtual void SetConfigSpec(ESystemConfigSpec spec, ESystemConfigPlatform platform, bool bClient) = 0;
 
-    // Summary:
-    //   Return pointer to the Editor map for the Graphics Settings Dialog
-    virtual AZStd::unordered_map<AZStd::string, CVarInfo>* GetGraphicsSettingsMap() const = 0;
-
-    // Summary:
-    //   Sets pointer to the Editor map for the Graphics Settings Dialog
-    virtual void SetGraphicsSettingsMap(AZStd::unordered_map<AZStd::string, CVarInfo>* editorMap) = 0;
-
     //////////////////////////////////////////////////////////////////////////
 
     // Summary:
@@ -1741,6 +1710,13 @@ struct ISystem
     //////////////////////////////////////////////////////////////////////////
 
     // Summary:
+    //  Enable/Disable drawing the console 
+    virtual void SetConsoleDrawEnabled(bool enabled) = 0;
+
+    //  Enable/Disable drawing the UI 
+    virtual void SetUIDrawEnabled(bool enabled) = 0;
+
+    // Summary:
     //   Get the index of the currently running Crytek application. (0 = first instance, 1 = second instance, etc)
     virtual int GetApplicationInstance() = 0;
 
@@ -1787,7 +1763,7 @@ struct ISystem
     //   Should be after init game.
     // Example:
     //   +g_gametype ASSAULT +map "testy"
-    virtual void ExecuteCommandLine() = 0;
+    virtual void ExecuteCommandLine(bool deferred=true) = 0;
 
     // Description:
     //  GetSystemUpdate stats (all systems update without except console)
@@ -1802,10 +1778,6 @@ struct ISystem
     virtual void DumpMemoryCoverage() = 0;
     virtual ESystemGlobalState  GetSystemGlobalState(void) = 0;
     virtual void SetSystemGlobalState(const ESystemGlobalState systemGlobalState) = 0;
-
-    // Summary:
-    //      Add a PlatformOS create flag
-    virtual void AddPlatformOSCreateFlag(const uint8 createFlag) = 0;
 
     // Summary:
     //      Asynchronous memcpy
@@ -1861,7 +1833,7 @@ struct ISystem
     virtual void UnregisterWindowMessageHandler(IWindowMessageHandler* pHandler) = 0;
 
     // Deprecated, use AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty instead
-    virtual int AZ_DEPRECATED(PumpWindowMessage(bool bAll, WIN_HWND hWnd = 0),
+    AZ_DEPRECATED(virtual int PumpWindowMessage(bool bAll, WIN_HWND hWnd = 0),
         "PumpWindowMessage has been deprecated, use AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty instead.")
     {
         // AzFramework::ApplicationRequests::Bus::Broadcast(&AzFramework::ApplicationRequests::PumpSystemEventLoopUntilEmpty);
@@ -1871,6 +1843,18 @@ struct ISystem
     // Create an instance of a Local File IO object (which reads directly off the local filesystem, instead of,
     // for example, reading from the network or a pack or USB or such.
     virtual std::shared_ptr<AZ::IO::FileIOBase> CreateLocalFileIO() = 0;
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // EBus interface used to listen for cry system notifications
+    class CrySystemNotifications : public AZ::EBusTraits
+    {
+    public:
+        virtual ~CrySystemNotifications() = default;
+
+        // Override to be notified right before the call to ISystem::Render
+        virtual void OnPreRender() {}
+    };
+    using CrySystemNotificationBus = AZ::EBus<CrySystemNotifications>;
 };
 
 //JAT - this is a very important function for the dedicated server - it lets us run >1000 players per piece of server hardware
@@ -1967,12 +1951,12 @@ public:
     }
 };
 
-#ifdef AZ_PROFILE_TELEMETRY 
+#ifdef AZ_PROFILE_TELEMETRY
 
 #define LOADING_TIME_PROFILE_SECTION AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzCore)
-#define LOADING_TIME_PROFILE_SECTION_ARGS(...) AZ_PROFILE_SCOPE_DYNAMIC(AZ::Debug::ProfileCategory::AzCore, __VA_ARGS__) 
-#define LOADING_TIME_PROFILE_SECTION_NAMED(sectionName) AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzCore, sectionName) 
-#define LOADING_TIME_PROFILE_SECTION_NAMED_ARGS(sectionName, args) AZ_PROFILE_SCOPE_DYNAMIC(AZ::Debug::ProfileCategory::AzCore, sectionName, args) 
+#define LOADING_TIME_PROFILE_SECTION_ARGS(...) AZ_PROFILE_SCOPE_DYNAMIC(AZ::Debug::ProfileCategory::AzCore, __VA_ARGS__)
+#define LOADING_TIME_PROFILE_SECTION_NAMED(sectionName) AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzCore, sectionName)
+#define LOADING_TIME_PROFILE_SECTION_NAMED_ARGS(sectionName, args) AZ_PROFILE_SCOPE_DYNAMIC(AZ::Debug::ProfileCategory::AzCore, sectionName, args)
 
 #else
 
@@ -2011,12 +1995,17 @@ extern SC_API SSystemGlobalEnvironment* gEnv;
 //   Gets the system interface.
 inline ISystem* GetISystem()
 {
-    static ISystem* s_system = gEnv ? gEnv->pSystem : nullptr;
-    if (!s_system)
+    // Some unit tests temporarily install and then uninstall ISystem* mocks.
+    // It is generally okay for runtime and tool systems which call this function to cache the returned pointer, 
+    // because their lifetime is usually shorter than the lifetime of the ISystem* implementation.
+    // It is NOT safe for this function to cache it as a static itself, though, as the static it would cache
+    // it inside may outlive the the actual instance implementing ISystem* when unit tests are torn down and then restarted.
+    ISystem* systemInterface = gEnv ? gEnv->pSystem : nullptr;
+    if (!systemInterface)
     {
-        CrySystemRequestBus::BroadcastResult(s_system, &CrySystemRequests::GetCrySystem);
+        CrySystemRequestBus::BroadcastResult(systemInterface, &CrySystemRequests::GetCrySystem);
     }
-    return s_system;
+    return systemInterface;
 };
 
 inline ISystemScheduler* GetISystemScheduler(void)
@@ -2027,7 +2016,7 @@ inline ISystemScheduler* GetISystemScheduler(void)
 
 // Description:
 //   This function must be called once by each module at the beginning, to setup global pointers.
-extern "C" DLL_EXPORT void ModuleInitISystem(ISystem* pSystem, const char* moduleName);
+extern "C" AZ_DLL_EXPORT void ModuleInitISystem(ISystem* pSystem, const char* moduleName);
 extern bool g_bProfilerEnabled;
 extern int g_iTraceAllocations;
 
@@ -2099,7 +2088,11 @@ inline void CryWarning(EValidatorModule module, EValidatorSeverity severity, con
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION ISYSTEM_H_SECTION_5
-#include AZ_RESTRICTED_FILE(ISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ISystem_h_provo.inl"
+    #endif
 #endif
 #if defined(_RELEASE) && defined(IS_CONSOLE_PLATFORM)
 #ifndef LOG_CONST_CVAR_ACCESS
@@ -2323,6 +2316,8 @@ static void AssertConsoleExists(void)
 // Summary:
 //   Preferred way to unregister a CVar
 #define UNREGISTER_CVAR(_name)                                                      (ASSERT_CONSOLE_EXISTS, gEnv->pConsole == 0 ? (void)0 : gEnv->pConsole->UnregisterVariable(_name))
+//   Preferred way to unregister a console command
+#define UNREGISTER_COMMAND(_name)                                                           (ASSERT_CONSOLE_EXISTS, gEnv->pConsole == 0 ? (void)0 : gEnv->pConsole->RemoveCommand(_name))
 
 ////////////////////////////////////////////////////////////////////////////////
 //

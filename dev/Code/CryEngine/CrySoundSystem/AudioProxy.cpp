@@ -56,8 +56,10 @@ namespace Audio
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     CAudioProxy::~CAudioProxy()
     {
-        // Just in case the callback was never recieved...
-        AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::RemoveRequestListener, &CAudioProxy::OnAudioEvent, this);
+        if ((m_nFlags & eAPF_WAITING_FOR_ID) != 0)
+        {
+            AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::RemoveRequestListener, &CAudioProxy::OnAudioEvent, this);
+        }
 
         AZ_Assert(m_nAudioObjectID == INVALID_AUDIO_OBJECT_ID, "Expected AudioObjectID [%d] to be invalid when the audio proxy is destructed.", m_nAudioObjectID);
         stl::free_container(m_aQueuedAudioCommands);
@@ -70,10 +72,10 @@ namespace Audio
         {
             if ((m_nFlags & eAPF_WAITING_FOR_ID) == 0)
             {
-                m_nFlags |= eAPF_WAITING_FOR_ID;
-
-                // Add the request listener to receive callback when the audio object has been created...
+                // Add the request listener to receive callback when the audio object ID has been registered with middleware...
                 AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::AddRequestListener, &CAudioProxy::OnAudioEvent, this, eART_AUDIO_MANAGER_REQUEST, eAMRT_RESERVE_AUDIO_OBJECT_ID);
+
+                m_nFlags |= eAPF_WAITING_FOR_ID;
 
                 SAudioRequest oRequest;
                 SAudioManagerRequestData<eAMRT_RESERVE_AUDIO_OBJECT_ID> oRequestData(&m_nAudioObjectID, sObjectName);
@@ -94,7 +96,7 @@ namespace Audio
         {
             SAudioRequest oRequest;
             SAudioManagerRequestData<eAMRT_RESERVE_AUDIO_OBJECT_ID> oRequestData(&m_nAudioObjectID, sObjectName);
-            oRequest.nFlags = eARF_PRIORITY_HIGH | eARF_EXECUTE_BLOCKING;
+            oRequest.nFlags = (eARF_PRIORITY_HIGH | eARF_EXECUTE_BLOCKING);
             oRequest.pData = &oRequestData;
 
             AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::PushRequestBlocking, oRequest);
@@ -109,9 +111,10 @@ namespace Audio
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
-    void CAudioProxy::ExecuteSourceTrigger(const TAudioControlID nTriggerID,
-        const Audio::TAudioControlID& sourceId,
-        const SAudioCallBackInfos & rCallbackInfos  /* = SAudioCallBackInfos::GetEmptyObject() */)
+    void CAudioProxy::ExecuteSourceTrigger(
+        TAudioControlID nTriggerID,
+        const SAudioSourceInfo& rSourceInfo,
+        const SAudioCallBackInfos& rCallbackInfos /* = SAudioCallBackInfos::GetEmptyObject() */)
     {
         if ((m_nFlags & eAPF_WAITING_FOR_ID) == 0)
         {
@@ -121,13 +124,11 @@ namespace Audio
             oRequest.nAudioObjectID = m_nAudioObjectID;
             oRequest.nFlags = rCallbackInfos.nRequestFlags;
 
-            SAudioObjectRequestData<eAORT_EXECUTE_SOURCE_TRIGGER> oRequestData(nTriggerID, sourceId);
-
+            SAudioObjectRequestData<eAORT_EXECUTE_SOURCE_TRIGGER> oRequestData(nTriggerID, rSourceInfo);
             oRequest.pOwner = (rCallbackInfos.pObjectToNotify != nullptr) ? rCallbackInfos.pObjectToNotify : this;
             oRequest.pUserData = rCallbackInfos.pUserData;
             oRequest.pUserDataOwner = rCallbackInfos.pUserDataOwner;
             oRequest.pData = &oRequestData;
-
             AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::PushRequest, oRequest);
         }
         else
@@ -138,7 +139,7 @@ namespace Audio
             oQueuedCommand.pUserData = rCallbackInfos.pUserData;
             oQueuedCommand.pUserDataOwner = rCallbackInfos.pUserDataOwner;
             oQueuedCommand.nRequestFlags = rCallbackInfos.nRequestFlags;
-            oQueuedCommand.nSourceID = sourceId;
+            oQueuedCommand.rSourceInfo = rSourceInfo;
             TryAddQueuedCommand(oQueuedCommand);
         }
     }
@@ -316,6 +317,28 @@ namespace Audio
     void CAudioProxy::SetPosition(const Vec3& refPosition)
     {
         SetPosition(SATLWorldPosition(refPosition));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    void CAudioProxy::SetMultiplePositions(const MultiPositionParams& params)
+    {
+        if ((m_nFlags & eAPF_WAITING_FOR_ID) == 0)
+        {
+            SAudioRequest request;
+            SAudioObjectRequestData<eAORT_SET_MULTI_POSITIONS> requestData(params);
+            request.nAudioObjectID = m_nAudioObjectID;
+            request.nFlags = eARF_PRIORITY_NORMAL;
+            request.pData = &requestData;
+            request.pOwner = this;
+
+            AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::PushRequest, request);
+        }
+        else
+        {
+            SQueuedAudioCommand oQueuedCommand = SQueuedAudioCommand(eQACT_SET_MULTI_POSITIONS);
+            oQueuedCommand.oMultiPosParams= params;
+            TryAddQueuedCommand(oQueuedCommand);
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -530,6 +553,9 @@ namespace Audio
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     void CAudioProxy::ExecuteQueuedCommands()
     {
+        // Remove the request listener once the audio system has properly reserved the audio object ID for this proxy.
+        AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::RemoveRequestListener, &CAudioProxy::OnAudioEvent, this);
+
         m_nFlags &= ~eAPF_WAITING_FOR_ID;
 
         if (!m_aQueuedAudioCommands.empty())
@@ -552,17 +578,12 @@ namespace Audio
                     case eQACT_EXECUTE_SOURCE_TRIGGER:
                     {
                         const SAudioCallBackInfos callbackInfos(refCommand.pOwnerOverride, refCommand.pUserData, refCommand.pUserDataOwner, refCommand.nRequestFlags);
-                        ExecuteSourceTrigger(refCommand.nTriggerID, refCommand.nSourceID, callbackInfos);
+                        ExecuteSourceTrigger(refCommand.nTriggerID, refCommand.rSourceInfo, callbackInfos);
                         break;
                     }
                     case eQACT_STOP_TRIGGER:
                     {
                         StopTrigger(refCommand.nTriggerID);
-                        break;
-                    }
-                    case eQACT_STOP_ALL_TRIGGERS:
-                    {
-                        StopAllTriggers();
                         break;
                     }
                     case eQACT_SET_SWITCH_STATE:
@@ -573,6 +594,11 @@ namespace Audio
                     case eQACT_SET_RTPC_VALUE:
                     {
                         SetRtpcValue(refCommand.nRtpcID, refCommand.fValue);
+                        break;
+                    }
+                    case eQACT_SET_POSITION:
+                    {
+                        SetPosition(refCommand.oPosition);
                         break;
                     }
                     case eQACT_SET_ENVIRONMENT_AMOUNT:
@@ -595,11 +621,6 @@ namespace Audio
                         ResetRtpcValues();
                         break;
                     }
-                    case eQACT_SET_POSITION:
-                    {
-                        SetPosition(refCommand.oPosition);
-                        break;
-                    }
                     case eQACT_RESET:
                     {
                         Reset();
@@ -613,6 +634,16 @@ namespace Audio
                     case eQACT_INITIALIZE:
                     {
                         Initialize(refCommand.sValue.c_str(), true);
+                        break;
+                    }
+                    case eQACT_STOP_ALL_TRIGGERS:
+                    {
+                        StopAllTriggers();
+                        break;
+                    }
+                    case eQACT_SET_MULTI_POSITIONS:
+                    {
+                        SetMultiplePositions(refCommand.oMultiPosParams);
                         break;
                     }
                     default:
@@ -667,7 +698,6 @@ namespace Audio
             case eQACT_EXECUTE_TRIGGER:
             case eQACT_EXECUTE_SOURCE_TRIGGER:
             case eQACT_STOP_TRIGGER:
-            case eQACT_STOP_ALL_TRIGGERS:
             {
                 // These type of commands get always pushed back!
                 break;
@@ -718,13 +748,8 @@ namespace Audio
             }
             case eQACT_RESET:
             {
-                TQueuedAudioCommands::const_iterator Iter(m_aQueuedAudioCommands.begin());
-                TQueuedAudioCommands::const_iterator const IterEnd(m_aQueuedAudioCommands.end());
-
-                for (; Iter != IterEnd; ++Iter)
+                for (const SQueuedAudioCommand& rLocalCommand : m_aQueuedAudioCommands)
                 {
-                    const SQueuedAudioCommand& rLocalCommand = (*Iter);
-
                     if (rLocalCommand.eType == eQACT_RELEASE)
                     {
                         // If eQACT_RELEASE is already queued up then there is no need for adding a eQACT_RESET command.
@@ -749,6 +774,25 @@ namespace Audio
                 m_aQueuedAudioCommands.push_back(SQueuedAudioCommand(eQACT_RESET));
                 break;
             }
+            case eQACT_STOP_ALL_TRIGGERS:
+            {
+                if (!m_aQueuedAudioCommands.empty())
+                {
+                    // only add if the last request is different...
+                    bAdd = (AZStd::find_if(m_aQueuedAudioCommands.end() - 1, m_aQueuedAudioCommands.end(), SFindCommand(refCommand.eType)) == m_aQueuedAudioCommands.end());
+                }
+                break;
+            }
+            case eQACT_SET_MULTI_POSITIONS:
+            {
+                if (!m_aQueuedAudioCommands.empty())
+                {
+                    // Find+Update or Add.
+                    // Can morph a SetPosition command into a Multi-Position command.
+                    bAdd = (AZStd::find_if(m_aQueuedAudioCommands.begin(), m_aQueuedAudioCommands.end(), SFindSetMultiplePositions(refCommand.oMultiPosParams)) == m_aQueuedAudioCommands.end());
+                }
+                break;
+            }
             default:
             {
                 g_audioLogger.Log(eALT_ERROR, "Unknown queued command type [%d] in CAudioProxy::TryAddQueuedCommand!", refCommand.eType);
@@ -759,14 +803,14 @@ namespace Audio
 
         if (bAdd)
         {
-            if (refCommand.eType != eQACT_SET_POSITION)
-            {
-                m_aQueuedAudioCommands.push_back(refCommand);
-            }
-            else
+            if (refCommand.eType == eQACT_SET_POSITION || refCommand.eType == eQACT_SET_MULTI_POSITIONS)
             {
                 // Make sure we set position first!
                 m_aQueuedAudioCommands.push_front(refCommand);
+            }
+            else
+            {
+                m_aQueuedAudioCommands.push_back(refCommand);
             }
         }
     }
@@ -785,8 +829,6 @@ namespace Audio
 
                 if (pAudioProxy)
                 {
-                    // Remove the request listener once the audio manager has reserved the audio object for this proxy.
-                    AudioSystemRequestBus::Broadcast(&AudioSystemRequestBus::Events::RemoveRequestListener, &CAudioProxy::OnAudioEvent, pAudioProxy);
                     pAudioProxy->ExecuteQueuedCommands();
                 }
             }

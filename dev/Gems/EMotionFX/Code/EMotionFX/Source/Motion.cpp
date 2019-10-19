@@ -22,21 +22,21 @@
 #include "EventManager.h"
 #include "EventHandler.h"
 #include "MotionEventTable.h"
-#include <MCore/Source/AttributeSet.h>
-
+#include <EMotionFX/Source/Allocators.h>
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(Motion, MotionAllocator, 0)
+
+
     // constructor
     Motion::Motion(const char* name)
         : BaseObject()
     {
         mCustomData             = nullptr;
-        mDefaultPlayBackInfo    = nullptr;
-        mAttributeSet           = MCore::AttributeSet::Create();
         mNameID                 = MCORE_INVALIDINDEX32;
         mID                     = MCore::GetIDGenerator().GenerateID();
-        mEventTable             = MotionEventTable::Create();
+        mEventTable             = aznew MotionEventTable();
         mUnitType               = GetEMotionFX().GetUnitType();
         mFileUnitType           = mUnitType;
         mExtractionFlags        = static_cast<EMotionExtractionFlags>(0);
@@ -50,6 +50,7 @@ namespace EMotionFX
         mMotionFPS              = 30.0f;
         mDirtyFlag              = false;
         mAutoUnregister         = true;
+        mIsAdditive             = false;
 
 #if defined(EMFX_DEVELOPMENT_BUILD)
         mIsOwnedByRuntime       = false;
@@ -72,17 +73,9 @@ namespace EMotionFX
             GetMotionManager().RemoveMotion(this, false);
         }
 
-        // get rid of the default playback info
-        delete mDefaultPlayBackInfo;
-
         if (mEventTable)
         {
             mEventTable->Destroy();
-        }
-
-        if (mAttributeSet)
-        {
-            mAttributeSet->Destroy();
         }
     }
 
@@ -129,10 +122,22 @@ namespace EMotionFX
         return mAutoUnregister;
     }
 
+    void Motion::SetIsAdditive(bool isAdditive)
+    {
+        mIsAdditive = isAdditive;
+    }
+
+    bool Motion::GetIsAdditive() const
+    {
+        return mIsAdditive;
+    }
+
     void Motion::SetIsOwnedByRuntime(bool isOwnedByRuntime)
     {
 #if defined(EMFX_DEVELOPMENT_BUILD)
         mIsOwnedByRuntime = isOwnedByRuntime;
+#else
+        AZ_UNUSED(isOwnedByRuntime);
 #endif
     }
 
@@ -177,34 +182,20 @@ namespace EMotionFX
     }
 
 
-    // allocate memory for the default playback info
-    void Motion::CreateDefaultPlayBackInfo()
-    {
-        if (mDefaultPlayBackInfo == nullptr)
-        {
-            mDefaultPlayBackInfo = new PlayBackInfo();
-        }
-    }
-
-
-    // set the default playback info to the given playback info
     void Motion::SetDefaultPlayBackInfo(const PlayBackInfo& playBackInfo)
     {
-        CreateDefaultPlayBackInfo();
-        *mDefaultPlayBackInfo = playBackInfo;
+        m_defaultPlayBackInfo = playBackInfo;
     }
 
 
-    // get a pointer to the default playback info
-    PlayBackInfo* Motion::GetDefaultPlayBackInfo() const
+    PlayBackInfo* Motion::GetDefaultPlayBackInfo()
     {
-        return mDefaultPlayBackInfo;
+        return &m_defaultPlayBackInfo;
     }
 
-
-    MCore::AttributeSet* Motion::GetAttributeSet() const
+    const PlayBackInfo* Motion::GetDefaultPlayBackInfo() const
     {
-        return mAttributeSet;
+        return &m_defaultPlayBackInfo;
     }
 
 
@@ -241,6 +232,15 @@ namespace EMotionFX
     MotionEventTable* Motion::GetEventTable() const
     {
         return mEventTable;
+    }
+
+    void Motion::SetEventTable(MotionEventTable* newTable)
+    {
+        if (mEventTable && mEventTable != newTable)
+        {
+            mEventTable->Destroy();
+        }
+        mEventTable = newTable;
     }
 
 

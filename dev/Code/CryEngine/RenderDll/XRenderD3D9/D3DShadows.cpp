@@ -32,7 +32,11 @@
 #endif
 
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(D3DShadows_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/D3DShadows_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/D3DShadows_cpp_provo.inl"
+    #endif
 #endif
 
 namespace
@@ -157,11 +161,7 @@ bool CD3D9Renderer::PrepareShadowGenForFrustum(ShadowMapFrustum* pCurFrustum, SR
     {
         return false;
     }
-    if (!(pCurFrustum->pCastersList))
-    {
-        return false;
-    }
-    if (pCurFrustum->pCastersList->Count() <= 0 && pCurFrustum->pJobExecutedCastersList->Count() <= 0 &&
+    if (pCurFrustum->m_castersList.IsEmpty() && pCurFrustum->m_jobExecutedCastersList.IsEmpty() &&
         !pCurFrustum->IsCached() && pCurFrustum->m_eFrustumType != ShadowMapFrustum::e_GsmDynamicDistance)
     {
         return false;
@@ -397,7 +397,6 @@ bool CD3D9Renderer::PrepareShadowGenForFrustum(ShadowMapFrustum* pCurFrustum, SR
             nRenderingFlags |= SRenderingPassInfo::DISABLE_RENDER_CHUNK_MERGE;
         }
 #endif
-
         // create a matching rendering pass info for shadows
         SRenderingPassInfo passInfo = SRenderingPassInfo::CreateShadowPassRenderingInfo(tmpCamera, pCurFrustum->m_Flags, pCurFrustum->nShadowMapLod,
                 pCurFrustum->IsCached(), pCurFrustum->bIsMGPUCopy, &pCurFrustum->nShadowGenMask, nS, nShadowGenID, nRenderingFlags);
@@ -458,13 +457,21 @@ void CD3D9Renderer::PrepareShadowGenForFrustumNonJobs(const int nFlags)
             }
 #endif
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+            if (IsRenderToTextureActive())
+            {
+                // the shadow render pass needs to know if we are rendering to texture
+                nRenderingFlags |= SRenderingPassInfo::RENDER_SCENE_TO_TEXTURE;
+            }
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
             // create a matching rendering pass info for shadows
             SRenderingPassInfo passInfo = SRenderingPassInfo::CreateShadowPassRenderingInfo(tmpCamera, pCurFrustum->m_Flags, pCurFrustum->nShadowMapLod,
                     pCurFrustum->IsCached(), pCurFrustum->bIsMGPUCopy, &pCurFrustum->nShadowGenMask, nS, pCurFrustum->nShadowGenID[nThreadID][nS], nRenderingFlags);
 
-            for (int casterIdx = 0; casterIdx < pCurFrustum->pCastersList->Count(); casterIdx++)
+            for (int casterIdx = 0; casterIdx < pCurFrustum->m_castersList.Count(); ++casterIdx)
             {
-                IShadowCaster* pEnt  = (*pCurFrustum->pCastersList)[casterIdx];
+                IShadowCaster* pEnt  = pCurFrustum->m_castersList[casterIdx];
 
                 //TOFIX reactivate OmniDirectionalShadow
                 if (pCurFrustum->bOmniDirectionalShadow)
@@ -962,14 +969,18 @@ bool CD3D9Renderer::PrepareDepthMap(ShadowMapFrustum* lof, int nLightFrustumID, 
                 nFirstShadowGenRI = SRendItem::m_ShadowsStartRI[nThreadID][nShadowRecur];
                 nLastShadowGenRI = SRendItem::m_ShadowsEndRI[nThreadID][nShadowRecur];
                 const bool bClearRequired = lof->IsCached() && !lof->bIncrementalUpdate;
-                if (nLastShadowGenRI - nFirstShadowGenRI < 1 && !bClearRequired)
+                // If there's something to render, sort by lights.
+                if (nLastShadowGenRI - nFirstShadowGenRI > 0)
                 {
+                    auto& renderItems = CRenderView::CurrentRenderView()->GetRenderItems(SG_SORT_GROUP, EFSLIST_SHADOW_GEN);
+                    SRendItem* pFirst = &renderItems[nFirstShadowGenRI];
+                    SRendItem::mfSortByLight(pFirst, nLastShadowGenRI - nFirstShadowGenRI, true, false, false);
+                }
+                else if (!bClearRequired)
+                {
+                    // Nothing to render and there's no need to clear, so we can just continue.
                     continue;
                 }
-
-                auto& renderItems = CRenderView::CurrentRenderView()->GetRenderItems(SG_SORT_GROUP, EFSLIST_SHADOW_GEN);
-                SRendItem* pFirst = &renderItems[nFirstShadowGenRI];
-                SRendItem::mfSortByLight(pFirst, nLastShadowGenRI - nFirstShadowGenRI, true, false, false);
             }
 
             depthTarget.nWidth = lof->nTextureWidth;
@@ -1097,7 +1108,7 @@ bool CD3D9Renderer::PrepareDepthMap(ShadowMapFrustum* lof, int nLightFrustumID, 
 #if defined(CRY_USE_METAL)
                     //Clear calls are cached until a draw call is made. If there is nothing in the caster list no draw calls will be made.
                     //Hence make a draw call to clear the render targets.
-                    if (lof->pCastersList->Count() == 0)
+                    if (lof->m_castersList.IsEmpty() && lof->m_jobExecutedCastersList.IsEmpty())
                     {
                         FX_Commit();
                         FX_ClearTargetRegion();
@@ -1184,7 +1195,7 @@ bool CD3D9Renderer::PrepareDepthMap(ShadowMapFrustum* lof, int nLightFrustumID, 
                 FX_ProcessRenderList(EFSLIST_GENERAL, 1, FX_FlushShader_ShadowGen, false);
             }
             else
-            if (lof->pCastersList)
+            if (!lof->m_castersList.IsEmpty() || !lof->m_jobExecutedCastersList.IsEmpty())
             {
                 FX_ProcessRenderList(nFirstShadowGenRI,
                     nLastShadowGenRI,
@@ -1458,7 +1469,7 @@ void CD3D9Renderer::ConfigShadowTexgen(int Num, ShadowMapFrustum* pFr, int nFrus
 
                 if (pFr->m_eFrustumType == ShadowMapFrustum::e_Nearest)
                 {
-                    fFilteredArea *= 0.1;
+                    fFilteredArea *= 0.1f;
                 }
 
                 m_cEF.m_TempVecs[4].x = fFilteredArea;
@@ -1570,7 +1581,7 @@ void CD3D9Renderer::FX_SetupShadowsForFog()
 }
 
 
-void CD3D9Renderer::FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int nLightID, bool bClearPool)
+bool CD3D9Renderer::FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int nLightID, bool bClearPool)
 {
     int nThreadID = m_RP.m_nProcessThreadID;
     int nCurRecLevel = SRendItem::m_RecurseLevel[nThreadID];
@@ -1578,13 +1589,21 @@ void CD3D9Renderer::FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int 
 
     if ((m_RP.m_TI[nThreadID].m_PersFlags & RBPF_NO_SHADOWGEN) != 0)
     {
-        return;
+        return false;
     }
 
     //render all valid shadow frustums
     const int nStartIdx = SRendItem::m_StartFrust[nThreadID][nLightID];
     const int nEndIdx = SRendItem::m_EndFrust[nThreadID][nLightID];
-    assert((nEndIdx - nStartIdx) <= MAX_GSM_LODS_NUM);
+    if (nStartIdx == nEndIdx)
+    {
+        return false;
+    }
+
+    AZ_Assert((nEndIdx - nStartIdx) <= MAX_GSM_LODS_NUM, "Number of shadow frustums is more than max GSM LODs supported.");
+
+    bool processedAtLeastOneShadow = false;
+
     for (int nFrustIdx = nEndIdx - 1; nFrustIdx >= nStartIdx; --nFrustIdx)
     {
         ShadowMapFrustum* pCurFrustum = &m_RP.m_SMFrustums[nThreadID][nCurRecLevel][nFrustIdx];
@@ -1658,12 +1677,14 @@ void CD3D9Renderer::FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int 
                 if (pCachedFrustum != pEnd)
                 {
                     FX_MergeShadowMaps(pCurFrustum, pCachedFrustum);
+                    processedAtLeastOneShadow = true;
                 }
             }
 
             if (PrepareDepthMap(pCurFrustum, nLightFrustumID, bClearPool))
             {
                 bClearPool = false;
+                processedAtLeastOneShadow = true;
             }
 
 #ifndef _RELEASE
@@ -1674,6 +1695,8 @@ void CD3D9Renderer::FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int 
 #endif
         }
     }
+
+    return processedAtLeastOneShadow;
 }
 
 void CD3D9Renderer::EF_PrepareCustomShadowMaps()
@@ -1696,6 +1719,19 @@ void CD3D9Renderer::EF_PrepareCustomShadowMaps()
         return;
     }
 
+    // Find AABB of all nearest objects. Compute once for all lights as this can be slow
+    AABB aabbCasters(AABB::RESET);
+    m_RP.m_arrCustomShadowMapFrustumData[nThreadID].CoalesceMemory();
+    size_t shadowMapArraySize = m_RP.m_arrCustomShadowMapFrustumData[nThreadID].size();
+    for (size_t i = 0; i < shadowMapArraySize; ++i)
+    {
+        aabbCasters.Add(m_RP.m_arrCustomShadowMapFrustumData[nThreadID][i].aabb);
+    }
+
+    // AABBs are added in world space but without camera position applied
+    aabbCasters.min += GetCamera().GetPosition();
+    aabbCasters.max += GetCamera().GetPosition();
+
     // add nearest frustum if it has been set up
     for (int nLightID = 0; nLightID < NumDynLights; nLightID++)
     {
@@ -1717,18 +1753,6 @@ void CD3D9Renderer::EF_PrepareCustomShadowMaps()
                 //prepare custom frustums for sun
                 if (!m_RP.m_arrCustomShadowMapFrustumData[nThreadID].empty())
                 {
-                    // find aabb of all nearest objects
-                    AABB aabbCasters(AABB::RESET);
-                    m_RP.m_arrCustomShadowMapFrustumData[nThreadID].CoalesceMemory();
-                    for (size_t i = 0; i < m_RP.m_arrCustomShadowMapFrustumData[nThreadID].size(); ++i)
-                    {
-                        aabbCasters.Add(m_RP.m_arrCustomShadowMapFrustumData[nThreadID][i].aabb);
-                    }
-
-                    // AABB's added in world space but without camera position applied
-                    aabbCasters.min += GetCamera().GetPosition();
-                    aabbCasters.max += GetCamera().GetPosition();
-
                     //copy sun frustum
                     ShadowMapFrustum* pCustomFrustum = arrFrustums.AddIndex(1);
                     ShadowMapFrustum* pSunFrustum =  &arrFrustums[nStartIdx];
@@ -1777,6 +1801,7 @@ void CD3D9Renderer::EF_PrepareAllDepthMaps()
         return;
     }
 
+    bool haveShadows = false;
     for (int nLightID = 0; nLightID < NumDynLights; nLightID++)
     {
         SRenderLight* pLight =  &m_RP.m_DLights[nThreadID][SRendItem::m_RecurseLevel[nThreadID]][nLightID];
@@ -1786,7 +1811,17 @@ void CD3D9Renderer::EF_PrepareAllDepthMaps()
             continue;
         }
 
-        FX_PrepareDepthMapsForLight(*pLight, nLightID);
+        haveShadows |= FX_PrepareDepthMapsForLight(*pLight, nLightID);
+    }
+
+    if (!haveShadows && m_clearShadowMaskTexture)
+    {
+        FX_ClearShadowMaskTexture();
+        m_clearShadowMaskTexture = false;
+    }
+    else
+    {
+        m_clearShadowMaskTexture = true;
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -1953,3 +1988,34 @@ void CD3D9Renderer::FX_MergeShadowMaps(ShadowMapFrustum* pDst, const ShadowMapFr
     pDst->fDepthTestBias = pSrc->fDepthTestBias;
     pDst->fDepthSlopeBias = pSrc->fDepthSlopeBias;
 }
+
+void CD3D9Renderer::FX_ClearShadowMaskTexture()
+{
+    const int arraySize = CTexture::s_ptexShadowMask->StreamGetNumSlices();
+    SResourceView curSliceRVDesc = SResourceView::RenderTargetView(CTexture::s_ptexShadowMask->GetTextureDstFormat(), 0, 1);
+    for (int i = 0; i < arraySize; ++i)
+    {
+        curSliceRVDesc.m_Desc.nFirstSlice = i;
+        SResourceView& firstSliceRV = CTexture::s_ptexShadowMask->GetResourceView(curSliceRVDesc);
+
+#if defined(CRY_USE_METAL)
+        static ICVar* pVar = iConsole->GetCVar("e_ShadowsClearShowMaskAtLoad");
+        if (pVar && pVar->GetIVal())
+        {
+            FX_ClearTarget(static_cast<D3DSurface*>(firstSliceRV.m_pDeviceResourceView), Clr_Transparent, 0, nullptr);
+            
+            // On metal we have to submit a draw call in order for a clear to take affect.
+            // Doing the commit/clear target region will produce the needed draw call for the clear.
+            FX_PushRenderTarget(0, static_cast<D3DSurface*>(firstSliceRV.m_pDeviceResourceView), nullptr);
+            
+            RT_SetViewport(0, 0, CTexture::s_ptexShadowMask->GetWidth(), CTexture::s_ptexShadowMask->GetHeight());
+            FX_Commit();
+            FX_ClearTargetRegion();
+            FX_PopRenderTarget(0);
+        }
+#else
+        FX_ClearTarget(static_cast<D3DSurface*>(firstSliceRV.m_pDeviceResourceView), Clr_Transparent, 0, nullptr);
+#endif
+    }
+}
+

@@ -35,7 +35,8 @@ namespace AssetProcessor
 
 Q_SIGNALS:
         void ScanningStateChanged(AssetProcessor::AssetScanningStatus status);
-        void FileOfInterestFound(QString filepath);
+        void FilesFound(QSet<AssetFileInfo> files); // QSet<QString> is a refcounted copy-on-write object, do not pass by ref.
+        void FoldersFound(QSet<AssetFileInfo> folders); // QSet<QString> is a refcounted copy-on-write object, do not pass by ref.
 
     public Q_SLOTS:
         void StartScan();
@@ -47,7 +48,8 @@ Q_SIGNALS:
 
     private:
         volatile bool m_doScan = true;
-        QSet<QString> m_fileList; // note:  neither QSet nor QString are qobject-derived
+        QSet<AssetFileInfo> m_fileList; // note:  neither QSet nor QString are qobject-derived
+        QSet<AssetFileInfo> m_folderList;
         PlatformConfiguration* m_platformConfiguration;
     };
 } // end namespace AssetProcessor

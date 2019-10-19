@@ -208,30 +208,17 @@ namespace UiSerialize
                 Field("a", &ColorB::a);
         }
 
-        // Vec2
+        // Vec2 (still used in UI Animation sequence splines)
         {
             if (serializeContext)
             {
                 serializeContext->Class<Vec2>()->
                     Field("x", &Vec2::x)->
                     Field("y", &Vec2::y);
-
-                // The only purpose of this EditContext stuff is to make things work in Push to Slice
-                AZ::EditContext* ec = serializeContext->GetEditContext();
-                if (ec)
-                {
-                    auto editInfo = ec->Class<Vec2>(0, "");
-                    editInfo->DataElement(0, &Vec2::x, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &Vec2::y, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                }
             }
         }
 
-        // Vec3
+        // Vec3 (possibly no longer used)
         {
             if (serializeContext)
             {
@@ -239,22 +226,6 @@ namespace UiSerialize
                     Field("x", &Vec3::x)->
                     Field("y", &Vec3::y)->
                     Field("z", &Vec3::z);
-
-                // The only purpose of this EditContext stuff is to make things work in Push to Slice
-                AZ::EditContext* ec = serializeContext->GetEditContext();
-                if (ec)
-                {
-                    auto editInfo = ec->Class<Vec3>(0, "");
-                    editInfo->DataElement(0, &Vec3::x, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &Vec3::y, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &Vec3::z, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                }
             }
         }
 
@@ -267,40 +238,30 @@ namespace UiSerialize
                     Field("top", &UiTransform2dInterface::Anchors::m_top)->
                     Field("right", &UiTransform2dInterface::Anchors::m_right)->
                     Field("bottom", &UiTransform2dInterface::Anchors::m_bottom);
-
-                // The only purpose of this EditContext stuff is to make things work in Push to Slice
-                AZ::EditContext* ec = serializeContext->GetEditContext();
-                if (ec)
-                {
-                    auto editInfo = ec->Class<UiTransform2dInterface::Anchors>(0, "");
-                    editInfo->DataElement(0, &UiTransform2dInterface::Anchors::m_left, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Anchors::m_top, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Anchors::m_right, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Anchors::m_bottom, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                }
             }
 
             if (behaviorContext)
             {
                 behaviorContext->Class<UiTransform2dInterface::Anchors>("UiAnchors")
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Constructor<>()
                     ->Constructor<float, float, float, float>()
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::Value)
                     ->Attribute(AZ::Script::Attributes::ConstructorOverride, &UiAnchorsScriptConstructor)
                     ->Property("left", BehaviorValueProperty(&UiTransform2dInterface::Anchors::m_left))
                     ->Property("top", BehaviorValueProperty(&UiTransform2dInterface::Anchors::m_top))
                     ->Property("right", BehaviorValueProperty(&UiTransform2dInterface::Anchors::m_right))
-                    ->Property("bottom", BehaviorValueProperty(&UiTransform2dInterface::Anchors::m_bottom));
+                    ->Property("bottom", BehaviorValueProperty(&UiTransform2dInterface::Anchors::m_bottom))
+                    ->Method("SetLeft", [](UiTransform2dInterface::Anchors* thisPtr, float left) { thisPtr->m_left = left; })
+                    ->Method("SetTop", [](UiTransform2dInterface::Anchors* thisPtr, float top) { thisPtr->m_top = top; })
+                    ->Method("SetRight", [](UiTransform2dInterface::Anchors* thisPtr, float right) { thisPtr->m_right = right; })
+                    ->Method("SetBottom", [](UiTransform2dInterface::Anchors* thisPtr, float bottom) { thisPtr->m_bottom = bottom; })
+                    ->Method("SetAnchors", [](UiTransform2dInterface::Anchors* thisPtr, float left, float top, float right, float bottom)
+                    {
+                        thisPtr->m_left = left;
+                        thisPtr->m_top = top;
+                        thisPtr->m_right = right;
+                        thisPtr->m_bottom = bottom;
+                    });
             }
         }
 
@@ -337,40 +298,30 @@ namespace UiSerialize
                     Field("top", &UiTransform2dInterface::Offsets::m_top)->
                     Field("right", &UiTransform2dInterface::Offsets::m_right)->
                     Field("bottom", &UiTransform2dInterface::Offsets::m_bottom);
-
-                // The only purpose of this EditContext stuff is to make things work in Push to Slice
-                AZ::EditContext* ec = serializeContext->GetEditContext();
-                if (ec)
-                {
-                    auto editInfo = ec->Class<UiTransform2dInterface::Offsets>(0, "");
-                    editInfo->DataElement(0, &UiTransform2dInterface::Offsets::m_left, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Offsets::m_top, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Offsets::m_right, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiTransform2dInterface::Offsets::m_bottom, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                }
             }
 
             if (behaviorContext)
             {
                 behaviorContext->Class<UiTransform2dInterface::Offsets>("UiOffsets")
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Constructor<>()
                     ->Constructor<float, float, float, float>()
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::Value)
                     ->Attribute(AZ::Script::Attributes::ConstructorOverride, &UiOffsetsScriptConstructor)
                     ->Property("left", BehaviorValueProperty(&UiTransform2dInterface::Offsets::m_left))
                     ->Property("top", BehaviorValueProperty(&UiTransform2dInterface::Offsets::m_top))
                     ->Property("right", BehaviorValueProperty(&UiTransform2dInterface::Offsets::m_right))
-                    ->Property("bottom", BehaviorValueProperty(&UiTransform2dInterface::Offsets::m_bottom));
+                    ->Property("bottom", BehaviorValueProperty(&UiTransform2dInterface::Offsets::m_bottom))
+                    ->Method("SetLeft", [](UiTransform2dInterface::Offsets* thisPtr, float left) { thisPtr->m_left = left; })
+                    ->Method("SetTop", [](UiTransform2dInterface::Offsets* thisPtr, float top) { thisPtr->m_top = top; })
+                    ->Method("SetRight", [](UiTransform2dInterface::Offsets* thisPtr, float right) { thisPtr->m_right = right; })
+                    ->Method("SetBottom", [](UiTransform2dInterface::Offsets* thisPtr, float bottom) { thisPtr->m_bottom = bottom; })
+                    ->Method("SetOffsets", [](UiTransform2dInterface::Offsets* thisPtr, float left, float top, float right, float bottom)
+                    {
+                        thisPtr->m_left = left;
+                        thisPtr->m_top = top;
+                        thisPtr->m_right = right;
+                        thisPtr->m_bottom = bottom;
+                    });
             }
         }
 
@@ -383,37 +334,27 @@ namespace UiSerialize
                     Field("top", &UiLayoutInterface::Padding::m_top)->
                     Field("right", &UiLayoutInterface::Padding::m_right)->
                     Field("bottom", &UiLayoutInterface::Padding::m_bottom);
-
-                // The only purpose of this EditContext stuff is to make things work in Push to Slice
-                AZ::EditContext* ec = serializeContext->GetEditContext();
-                if (ec)
-                {
-                    auto editInfo = ec->Class<UiLayoutInterface::Padding>(0, "");
-                    editInfo->DataElement(0, &UiLayoutInterface::Padding::m_left, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiLayoutInterface::Padding::m_top, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiLayoutInterface::Padding::m_right, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                    editInfo->DataElement(0, &UiLayoutInterface::Padding::m_bottom, "", "")
-                        ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::Hide)
-                        ->Attribute(AZ::Edit::Attributes::SliceFlags, AZ::Edit::UISliceFlags::PushableEvenIfInvisible);
-                }
             }
 
             if (behaviorContext)
             {
                 behaviorContext->Class<UiLayoutInterface::Padding>("UiPadding")
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::Value)
-                    ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                     ->Property("left", BehaviorValueProperty(&UiLayoutInterface::Padding::m_left))
                     ->Property("right", BehaviorValueProperty(&UiLayoutInterface::Padding::m_right))
                     ->Property("top", BehaviorValueProperty(&UiLayoutInterface::Padding::m_top))
-                    ->Property("bottom", BehaviorValueProperty(&UiLayoutInterface::Padding::m_bottom));
+                    ->Property("bottom", BehaviorValueProperty(&UiLayoutInterface::Padding::m_bottom))
+                    ->Method("SetLeft", [](UiLayoutInterface::Padding* thisPtr, int left) { thisPtr->m_left = left; })
+                    ->Method("SetTop", [](UiLayoutInterface::Padding* thisPtr, int top) { thisPtr->m_top = top; })
+                    ->Method("SetRight", [](UiLayoutInterface::Padding* thisPtr, int right) { thisPtr->m_right = right; })
+                    ->Method("SetBottom", [](UiLayoutInterface::Padding* thisPtr, int bottom) { thisPtr->m_bottom = bottom; })
+                    ->Method("SetPadding", [](UiLayoutInterface::Padding* thisPtr, int left, int top, int right, int bottom)
+                    {
+                        thisPtr->m_left = left;
+                        thisPtr->m_top = top;
+                        thisPtr->m_right = right;
+                        thisPtr->m_bottom = bottom;
+                    });
             }
         }
 
@@ -470,7 +411,6 @@ namespace UiSerialize
             UiInteractableComponent::Reflect(behaviorContext);
 
             behaviorContext->EBus<UiLayoutBus>("UiLayoutBus")
-                ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                 ->Event("GetHorizontalChildAlignment", &UiLayoutBus::Events::GetHorizontalChildAlignment)
                 ->Event("SetHorizontalChildAlignment", &UiLayoutBus::Events::SetHorizontalChildAlignment)
                 ->Event("GetVerticalChildAlignment", &UiLayoutBus::Events::GetVerticalChildAlignment)
@@ -478,76 +418,6 @@ namespace UiSerialize
                 ->Event("GetIgnoreDefaultLayoutCells", &UiLayoutBus::Events::GetIgnoreDefaultLayoutCells)
                 ->Event("SetIgnoreDefaultLayoutCells", &UiLayoutBus::Events::SetIgnoreDefaultLayoutCells);
         }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Helper function to change all owned UI elements to be referenced by EntityId
-    // and to copy the owned UI element entities' DataElementNodes to a container
-    bool MoveEntityAndDescendantsToListAndReplaceWithEntityId(AZ::SerializeContext& context,
-        AZ::SerializeContext::DataElementNode& elementNode,
-        AZStd::vector<AZ::SerializeContext::DataElementNode>& entities)
-    {
-        // Find the UiElementComponent on this entity
-        AZ::SerializeContext::DataElementNode* elementComponentNode =
-            LyShine::FindComponentNode(elementNode, UiElementComponent::TYPEINFO_Uuid());
-        if (!elementComponentNode)
-        {
-            return false;
-        }
-
-        // We must process the children first so that when we make a copy of this entity to the entities list
-        // it will already have had its child entities replaced with entity IDs
-
-        // find the m_children field
-        int childrenIndex = elementComponentNode->FindElement(AZ_CRC("Children", 0xa197b1ba));
-        if (childrenIndex == -1)
-        {
-            return false;
-        }
-        AZ::SerializeContext::DataElementNode& childrenNode = elementComponentNode->GetSubElement(childrenIndex);
-
-        // iterate through children and recursively call this function
-        int numChildren = childrenNode.GetNumSubElements();
-        for (int childIndex = 0; childIndex < numChildren; ++childIndex)
-        {
-            AZ::SerializeContext::DataElementNode& childElementNode = childrenNode.GetSubElement(childIndex);
-            MoveEntityAndDescendantsToListAndReplaceWithEntityId(context, childElementNode, entities);
-        }
-
-        // the children list has now been processed so it will now just contain entity IDs
-        // Now copy this node (elementNode) to the list we are building and then replace it
-        // with an Entity ID node
-
-        // copy this node to the list
-        entities.push_back(elementNode);
-
-        // Remember the name of this node (it could be "element" or "RootElement" for example)
-        AZStd::string elementFieldName = elementNode.GetNameString();
-
-        // Find the EntityId node within this entity
-        int entityIdIndex = elementNode.FindElement(AZ_CRC("Id", 0xbf396750));
-        if (entityIdIndex == -1)
-        {
-            return false;
-        }
-        AZ::SerializeContext::DataElementNode& elementIdNode = elementNode.GetSubElement(entityIdIndex);
-
-        // Find the sub node of the EntityID that actually stores the u64 and make a copy of it
-        int u64Index = elementIdNode.FindElement(AZ_CRC("id", 0xbf396750));
-        if (u64Index == -1)
-        {
-            return false;
-        }
-        AZ::SerializeContext::DataElementNode u64Node = elementIdNode.GetSubElement(u64Index);
-
-        // Convert this node (which was an entire Entity) into just an EntityId, keeping the same
-        // node name as it had
-        elementNode.Convert<AZ::EntityId>(context, elementFieldName.c_str());
-
-        // copy in the subNode that stores the actual u64 (that we saved a copy of above)
-        int newEntityIdIndex = elementNode.AddElement(u64Node);
-
-        return true;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -572,7 +442,7 @@ namespace UiSerialize
 
             // recursively process the root element and all of its child elements, copying their child entities to the
             // entities container and replacing them with EntityIds
-            if (!MoveEntityAndDescendantsToListAndReplaceWithEntityId(context, rootEntityNode, copiedEntities))
+            if (!UiElementComponent::MoveEntityAndDescendantsToListAndReplaceWithEntityId(context, rootEntityNode, -1, copiedEntities))
             {
                 return false;
             }

@@ -14,7 +14,7 @@
 // Description : Dialog for python script terminal
 
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "ScriptTermDialog.h"
 #include "ScriptHelpDialog.h"
 #include "Util/BoostPythonHelpers.h"
@@ -65,7 +65,7 @@ void CScriptTermDialog::InitCompleter()
         = CAutoRegisterPythonModuleHelper::s_modules;
     for (size_t i = 0; i < modules.size(); ++i)
     {
-        inputs.append(QtUtil::ToQString(modules[i].name.c_str()));
+        inputs.append(QtUtil::ToQString(modules[i].name));
     }
 
     // Add full command names to the auto-completion list.
@@ -73,7 +73,7 @@ void CScriptTermDialog::InitCompleter()
     while (pCurrent)
     {
         QString command = pCurrent->m_name;
-        QString fullCmd = CAutoRegisterPythonModuleHelper::s_modules[pCurrent->m_moduleIndex].name.c_str();
+        QString fullCmd = CAutoRegisterPythonModuleHelper::s_modules[pCurrent->m_moduleIndex].name;
         fullCmd += ".";
         fullCmd += command;
         fullCmd += "()";
@@ -142,7 +142,7 @@ void CScriptTermDialog::AppendText(const char* pText)
 
 void CScriptTermDialog::AppendError(const char* pText)
 {
-    AppendToConsole(QtUtil::ToQString(pText), QColor(150, 0, 0));
+    AppendToConsole(QtUtil::ToQString(pText), QColor(255, 64, 64));
 }
 
 void CScriptTermDialog::AppendToConsole(const QString& string, const QColor& color)

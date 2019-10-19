@@ -17,6 +17,13 @@
 #include "CommandLine.h"
 #include "CommandSyntax.h"
 
+#include <AzCore/RTTI/RTTI.h>
+
+namespace AZ
+{
+    class ReflectContext;
+}
+
 
 namespace MCore
 {
@@ -56,8 +63,7 @@ namespace MCore
     {                                                                                                                  \
         MCORE_MEMORYOBJECTCATEGORY(CLASSNAME, MCore::MCORE_DEFAULT_ALIGNMENT, MCore::MCORE_MEMCATEGORY_COMMANDSYSTEM); \
     public:                                                                                                            \
-        CLASSNAME(MCore::Command * orgCommand = nullptr)                                                               \
-            : MCore::Command(COMMANDSTRING, orgCommand) {}                                                             \
+        CLASSNAME(MCore::Command * orgCommand = nullptr);                                                              \
         virtual ~CLASSNAME();                                                                                          \
         bool Execute(const MCore::CommandLine & parameters, AZStd::string & outResult);                                \
         bool Undo(const MCore::CommandLine & parameters, AZStd::string & outResult);                                   \
@@ -69,27 +75,30 @@ namespace MCore
         OLDVALUETYPE& GetData() { return mData; }                                                                      \
     protected:                                                                                                         \
         OLDVALUETYPE mData;                                                                                            \
-    };
 
+#define MCORE_DEFINECOMMAND_1_END };
 
     // define for easy command class creation in two steps
-#define MCORE_DEFINECOMMAND_START(CLASSNAME, HISTORYNAME, ISUNDOABLE)                                                  \
+#define MCORE_DEFINECOMMAND_START_BASE(CLASSNAME, HISTORYNAME, ISUNDOABLE, BASECLASS)                                  \
     class DEFINECOMMAND_API CLASSNAME                                                                                  \
-        : public MCore::Command                                                                                        \
+        : public BASECLASS                                                                                             \
     {                                                                                                                  \
         MCORE_MEMORYOBJECTCATEGORY(CLASSNAME, MCore::MCORE_DEFAULT_ALIGNMENT, MCore::MCORE_MEMCATEGORY_COMMANDSYSTEM); \
     public:                                                                                                            \
         CLASSNAME(MCore::Command * orgCommand = nullptr);                                                              \
-        virtual ~CLASSNAME();                                                                                          \
-        bool Execute(const MCore::CommandLine & parameters, AZStd::string & outResult);                                \
-        bool Undo(const MCore::CommandLine & parameters, AZStd::string & outResult);                                   \
-        void InitSyntax();                                                                                             \
-        bool GetIsUndoable() const  { return ISUNDOABLE; }                                                             \
-        const char* GetHistoryName() const { return HISTORYNAME; }                                                     \
-        const char* GetDescription() const;                                                                            \
-        MCore::Command* Create() { return new CLASSNAME(this); }                                                       \
+        ~CLASSNAME() override;                                                                                         \
+        bool Execute(const MCore::CommandLine & parameters, AZStd::string & outResult) override;                       \
+        bool Undo(const MCore::CommandLine & parameters, AZStd::string & outResult) override;                          \
+        void InitSyntax() override;                                                                                    \
+        bool GetIsUndoable() const override { return ISUNDOABLE; }                                                     \
+        const char* GetHistoryName() const override { return HISTORYNAME; }                                            \
+        const char* GetDescription() const override;                                                                   \
+        MCore::Command* Create() override { return new CLASSNAME(this); }                                              \
     protected:
 #define MCORE_DEFINECOMMAND_END };
+
+#define MCORE_DEFINECOMMAND_START(CLASSNAME, HISTORYNAME, ISUNDOABLE)                                                  \
+    MCORE_DEFINECOMMAND_START_BASE(CLASSNAME, HISTORYNAME, ISUNDOABLE, MCore::Command)
 
 
     // define a command callback
@@ -116,6 +125,7 @@ namespace MCore
         MCORE_MEMORYOBJECTCATEGORY(Command, MCore::MCORE_DEFAULT_ALIGNMENT, MCORE_MEMCATEGORY_COMMANDSYSTEM);
 
     public:
+        AZ_RTTI(MCore::Command, "{49C636CE-7C0E-408A-A0F7-F7D12647EFBA}")
         /**
          * The command callback base class.
          * The callbacks get executed when executing a command, or when undoing a command.
@@ -186,6 +196,8 @@ namespace MCore
          */
         virtual ~Command();
 
+        static void Reflect(AZ::ReflectContext* context);
+
         /**
          * The do it method should call redo it to make the command happen. The redo it method should do the
          * actual work.
@@ -228,6 +240,8 @@ namespace MCore
          * On default the syntax will be empty, which means the command would have no parameters.
          */
         virtual void InitSyntax();
+
+        virtual bool SetCommandParameters(const CommandLine& parameters) { MCORE_UNUSED(parameters); return false; }
 
         /**
          * Get the command optional description.
@@ -315,6 +329,8 @@ namespace MCore
          */
         void RemoveAllCallbacks();
 
+        void SetOriginalCommand(Command* orgCommand) { mOrgCommand = orgCommand; }
+
         /**
          * Get the original command where this command has been cloned from.
          * The original command contains the syntax.
@@ -330,6 +346,19 @@ namespace MCore
             else
             {
                 return this;
+            }
+        }
+
+        template<class T>
+        void ExecuteParameter(AZStd::optional<T>& oldParameter, AZStd::optional<T>& parameter, T& value)
+        {
+            if (parameter.has_value())
+            {
+                if (!oldParameter.has_value())
+                {
+                    oldParameter = value;
+                }
+                value = parameter.value();
             }
         }
 

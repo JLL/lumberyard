@@ -352,6 +352,9 @@ namespace AZ
 
         bool IsPerpendicular(const Vector3& v, const VectorFloat& tolerance = g_simdTolerance) const;
 
+        /// Returns an (unnormalized) arbitrary vector which is orthogonal to this vector.
+        Vector3 GetOrthogonalVector() const;
+
         /// Project vector onto another. P = (a.Dot(b) / b.Dot(b)) * b
         AZ_MATH_FORCE_INLINE void           Project(const Vector3& rhs)                 { *this = rhs * (Dot(rhs) / rhs.Dot(rhs)); }
         /// Project vector onto a normal (faster function). P = (v.Dot(Normal) * normal)
@@ -382,6 +385,18 @@ namespace AZ
         float m_pad;                    //pad to 16 bytes, also for consistency with simd implementations
         #endif
     };
+
+    /// NON member functionality belonging to the AZ namespace
+
+    /// Degrees-Radians conversions on AZ::Vector3
+    AZ_MATH_FORCE_INLINE AZ::Vector3 Vector3RadToDeg(const AZ::Vector3& radians)
+    {
+        return radians * 180.f / AZ::Constants::Pi;
+    }
+    AZ_MATH_FORCE_INLINE AZ::Vector3 Vector3DegToRad(const AZ::Vector3& degrees)
+    {
+        return degrees * AZ::Constants::Pi / 180.f;
+    }
 }
 
 #ifndef AZ_PLATFORM_WINDOWS // Remove this once all compilers support POD (MSVC already does)

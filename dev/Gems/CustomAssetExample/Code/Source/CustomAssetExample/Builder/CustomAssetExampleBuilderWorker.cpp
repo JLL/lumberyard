@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-*or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+*or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 *WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -126,6 +126,27 @@ namespace CustomAssetExample
             response.m_result = AssetBuilderSDK::CreateJobsResultCode::Success;
             return;
         }
+        // This example shows how you would be able to declare job dependencies on source files inside a builder and
+        // forward that info to the asset processor.
+        // Basically here we are creating a job dependency such that the job with source file ./test.examplejob and 
+        // jobKey "Compile Example" depends on the fingerprint of the job with source file ./test.examplesource and jobkey "Compile Example". 
+
+        else if (AzFramework::StringFunc::Equal(ext.c_str(), "examplejob"))
+        {
+            for (const AssetBuilderSDK::PlatformInfo& platformInfo : request.m_enabledPlatforms)
+            {
+                AssetBuilderSDK::JobDescriptor descriptor;
+                descriptor.m_jobKey = "Compile Example";
+                descriptor.SetPlatformIdentifier(platformInfo.m_identifier.c_str());
+                AssetBuilderSDK::SourceFileDependency sourceFile;
+                sourceFile.m_sourceFileDependencyPath = "test.examplesource";
+                AssetBuilderSDK::JobDependency jobDependency("Compile Example", platformInfo.m_identifier.c_str(), AssetBuilderSDK::JobDependencyType::Fingerprint, sourceFile);
+                descriptor.m_jobDependencyList.push_back(jobDependency);
+                response.m_createJobOutputs.push_back(descriptor);
+            }
+            response.m_result = AssetBuilderSDK::CreateJobsResultCode::Success;
+            return;
+        }
 
         AZ_Assert(false, "Unhandled extension type in CustomExampleAssetBuilderWorker.");
         response.m_result = AssetBuilderSDK::CreateJobsResultCode::Failed;
@@ -164,6 +185,10 @@ namespace CustomAssetExample
         {
             AzFramework::StringFunc::Path::ReplaceExtension(fileName, "examplesourceprocessed");
         }
+        else if (AzFramework::StringFunc::Equal(ext.c_str(), "examplejob"))
+        {
+            AzFramework::StringFunc::Path::ReplaceExtension(fileName, "examplejobprocessed");
+        }
 
         // All your work should happen inside the tempDirPath.
         // The Asset Processor will handle taking the completed files you specify in JobProduct.m_outputProducts from the temp directory into the cache.
@@ -199,13 +224,26 @@ namespace CustomAssetExample
 
         // Note - you must also add the asset type to the JobProduct.
         // If you have direct access to the type within your gem, you can grab the asset type directly:
-        //     response.m_productAssetType = return AZ::AzTypeInfo<CustomAssetExample>::Uuid();
+        //     jobProduct.m_productAssetType = return AZ::AzTypeInfo<CustomAssetExample>::Uuid();
         // If you need to cross a gem boundary, you can use the AssetTypeInfo EBus and EBusFindAssetTypeByName:
         //     EBusFindAssetTypeByName assetType("customassetexample");
         //     AssetTypeInfoBus::BroadcastResult(assetType, &AssetTypeInfo::GetAssetType);
-        //     response.m_productAssetType = assetType.GetAssetType();
+        //     jobProduct.m_productAssetType = assetType.GetAssetType();
 
+        // You should also pick a unique "SubID" for each product.  The final address of an asset (the AssetId) is the combination
+        // of the subId you choose here and the source file's UUID, so if it is not unique, errors will be generated since your
+        // assets will shadow each other's address, and not be accessible via AssetId.
+        // you can pick whatever scheme you want but you should ensure stablility in your choice.
+        // For example, do not use random numbers - ideally no matter what happens, each time you run this process, the same
+        // subIds are chosen for the same logical asset (even if your builder starts emitting more or different assets out of the same source)
+        // You can use AssetBuilderSDK::ConstructSubID(...) helper function if you want to use various bits of the subID for things like LOD level
+        // or you can come up with your own scheme to ensure stability, using the 32-bit address space as you see fit.  It only has to be unique
+        // and stable within the confines of a single source file, it is not globally unique.
+        jobProduct.m_productSubID = 0;
+        
+        // once you've filled up the details of the product in jobProduct, add it to the result list:
         response.m_outputProducts.push_back(jobProduct);
+
         response.m_resultCode = AssetBuilderSDK::ProcessJobResult_Success;
     }
 }

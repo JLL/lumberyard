@@ -27,10 +27,14 @@
 #include "Image/DDSImage.h"
 
 #include "ImageExtensionHelper.h"
-#include <CryEngineAPI.h>
 #include <AzCore/Jobs/LegacyJobExecutor.h>
 #include <AzCore/std/parallel/atomic.h>
+#include <AzCore/std/containers/map.h>
+#include <AzCore/std/smart_ptr/unique_ptr.h>
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+#include <RenderContextConfig.h>
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #undef AZ_RESTRICTED_SECTION
@@ -41,6 +45,12 @@
 #define TEXTURE_H_SECTION_5 5
 #define TEXTURE_H_SECTION_6 6
 #define TEXTURE_H_SECTION_7 7
+#endif
+
+// Only the editor needs to use a unique mutex per texture.
+// In the editor, multiple worker threads could destroy device resource sets which point to the same texture
+#if defined(AZ_PLATFORM_WINDOWS)
+    #define USE_UNIQUE_MUTEX_PER_TEXTURE
 #endif
 
 class CTexture;
@@ -313,9 +323,9 @@ struct SDynTexture
     ETEX_Format GetFormat() { return m_eTF; }
     bool FreeTextures(bool bOldOnly, int nNeedSpace);
 
-    typedef std::multimap<unsigned int, CTexture*, std::less<unsigned int>, stl::STLPoolAllocator<std::pair<const unsigned int, CTexture*>, stl::PoolAllocatorSynchronizationSinglethreaded> > TextureSubset;
+    typedef AZStd::multimap<unsigned int, CTexture*, AZStd::less<unsigned int>, AZ::AZStdAlloc<AZ::LegacyAllocator>> TextureSubset;
     typedef TextureSubset::iterator TextureSubsetItor;
-    typedef std::multimap<unsigned int, TextureSubset*, std::less<unsigned int>, stl::STLPoolAllocator<std::pair<const unsigned int, TextureSubset*>, stl::PoolAllocatorSynchronizationSinglethreaded> >  TextureSet;
+    typedef AZStd::multimap<unsigned int, TextureSubset*, AZStd::less<unsigned int>, AZ::AZStdAlloc<AZ::LegacyAllocator>>  TextureSet;
     typedef TextureSet::iterator TextureSetItor;
 
     static TextureSet      s_availableTexturePool2D_BC1;
@@ -432,7 +442,7 @@ inline void SDynTexture::operator delete(void* ptr)
 
 //==============================================================================
 
-enum ETexPool
+enum ETexPool : int
 {
     eTP_Clouds,
     eTP_Sprites,
@@ -515,7 +525,7 @@ struct SDynTexture2
     virtual bool IsValid();
     bool _IsValid() { return IsValid(); }
 
-    ENGINE_API SDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool);
+    SDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool);
     SDynTexture2(const char* szSource, ETexPool eTexPool);
     ~SDynTexture2();
 
@@ -556,7 +566,7 @@ struct SDynTexture2
     typedef std::map<uint32, STextureSetFormat*>  TextureSet2;
     typedef TextureSet2::iterator TextureSet2Itor;
 
-    static TextureSet2 s_TexturePool[eTP_Max];
+    static AZStd::unique_ptr<TextureSet2>      s_TexturePool[eTP_Max];
     static int s_nMemoryOccupied[eTP_Max];
 
     static void ShutDown();
@@ -569,7 +579,7 @@ struct SDynTexture2
     static int GetPoolTexNum(ETexPool eTexPool)
     {
         int nT = 0;
-        for (TextureSet2Itor it = s_TexturePool[eTexPool].begin(); it != s_TexturePool[eTexPool].end(); it++)
+        for (TextureSet2Itor it = s_TexturePool[eTexPool]->begin(); it != s_TexturePool[eTexPool]->end(); it++)
         {
             STextureSetFormat* pF = it->second;
             nT += pF->m_TexPools.size();
@@ -891,7 +901,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_1
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
 
     IReadStreamPtr                  m_pStreams[MaxStreams];
@@ -946,7 +960,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_2
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
 };
 #endif
@@ -1339,7 +1357,11 @@ struct RenderTargetData
     };
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_3
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
     TArray<SResourceView> m_ResourceViews;
     CDeviceTexture* m_pDeviceTextureMSAA;
@@ -1350,7 +1372,11 @@ struct RenderTargetData
         m_nRTSetFrameID = -1;
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_4
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
     }
     ~RenderTargetData();
@@ -1520,8 +1546,10 @@ private:
     D3DShaderResourceView* m_pDeviceShaderResourceSRGB;
 
     typedef AZStd::function<void(uint32)> InvalidateCallbackType;
-    AZStd::vector<AZStd::pair<void*, InvalidateCallbackType> > m_invalidateCallbacks;
-    AZStd::mutex m_invalidateCallbacksMutex;
+    AZStd::unordered_multimap<void*, InvalidateCallbackType> m_invalidateCallbacks;
+
+    AZStd::mutex* m_invalidateCallbacksMutex = nullptr;
+    static StaticInstance<AZStd::mutex> m_staticInvalidateCallbacksMutex;
 
     bool m_bisTextureMissing = false;
 
@@ -1543,7 +1571,7 @@ private:
         int m_nLowResSystemCopyAtlasId;
     };
     typedef std::map<const CTexture*, SLowResSystemCopy> LowResSystemCopyType;
-    static LowResSystemCopyType s_LowResSystemCopy;
+    static StaticInstance<LowResSystemCopyType> s_LowResSystemCopy;
     void PrepareLowResSystemCopy(const byte* pTexData, bool bTexDataHasAllMips);
     const ColorB* GetLowResSystemCopy(uint16& nWidth, uint16& nHeight, int** ppLowResSystemCopyAtlasId);
 #endif
@@ -1642,6 +1670,20 @@ public:
         m_pRenderTargetData = (nFlags & FT_USAGE_RENDERTARGET) ? new RenderTargetData : NULL;
 
         COMPILE_TIME_ASSERT(MaxStreamTasks < 32767);
+
+#if defined(USE_UNIQUE_MUTEX_PER_TEXTURE)
+        // Only the editor needs to use a unique mutex per texture.
+        // In the editor, multiple worker threads could destroy device resource sets which point to the same texture
+        if (gEnv->IsEditor())
+        {
+            m_invalidateCallbacksMutex = new AZStd::mutex();
+        }
+#endif
+        // If we do not need a unique mutex per texture, use the StaticInstance
+        if (m_invalidateCallbacksMutex == nullptr)
+        {
+            m_invalidateCallbacksMutex = &m_staticInvalidateCallbacksMutex;
+        }
     }
 
 
@@ -1728,7 +1770,7 @@ public:
     virtual void SetMinColor(const ColorF& cMinColor)  { m_cMinColor = cMinColor; }
     virtual const ColorF& GetMaxColor() const { return m_cMaxColor; }
     virtual void SetMaxColor(const ColorF& cMaxColor)  { m_cMaxColor = cMaxColor; }
-    virtual const ColorF& GetClearColor() const { return m_cClearColor; }
+    virtual const ColorF& GetClearColor() const override { return m_cClearColor; }
     virtual void SetClearColor(const ColorF& cClearColor) { m_cClearColor = cClearColor; }
 
     virtual void GetMemoryUsage(ICrySizer* pSizer) const;
@@ -1746,8 +1788,8 @@ public:
     virtual const bool IsParticularMipStreamed(float fMipFactor) const;
 
     // Internal functions
-    const ETEX_Format GetDstFormat() const { return m_eTFDst; }
-    const ETEX_Format GetSrcFormat() const { return m_eTFSrc; }
+    const ETEX_Format GetDstFormat() const override { return m_eTFDst; }
+    const ETEX_Format GetSrcFormat() const override { return m_eTFSrc; }
     const ETEX_Type GetTexType() const { return m_eTT; }
     const uint32 StreamGetNumSlices() const
     {
@@ -1770,7 +1812,7 @@ public:
 
     void RT_ReleaseDevice();
 
-    static _inline bool IsTextureExist(const CTexture* pTex) { return pTex && pTex->GetDevTexture(); }
+    static _inline bool IsTextureExist(const ITexture* pTex) { return pTex && pTex->GetDevTexture(); }
 
     const bool IsNoTexture() const { return m_bNoTexture; };
     void SetNeedRestoring() { m_bNeedRestoring = true; }
@@ -1879,7 +1921,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_5
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
 
     bool IsFPFormat() const { return CImageExtensionHelper::IsRangeless(m_eTFDst); };
@@ -1954,7 +2000,7 @@ public:
     };
 
     static std::vector<WantedStat>* s_pStatsTexWantedLists;
-    static std::set<string> s_vTexReloadRequests;
+    static AZStd::set<string, AZStd::less<string>, AZ::StdLegacyAllocator> s_vTexReloadRequests;
     static CryCriticalSection s_xTexReloadLock;
 
     static CTextureStreamPoolMgr* s_pPoolMgr;
@@ -1965,7 +2011,7 @@ public:
     static SStreamFormatCode s_formatCodes[256];
     static uint32 s_nFormatCodes;
     typedef std::map<SStreamFormatCodeKey, uint32> TStreamFormatCodeKeyMap;
-    static TStreamFormatCodeKeyMap s_formatCodeMap;
+    static StaticInstance<TStreamFormatCodeKeyMap> s_formatCodeMap;
 
     static const int LOW_SPEC_PC;
     static const int MEDIUM_SPEC_PC;
@@ -2069,7 +2115,11 @@ public:
     static void CopySliceChain(CDeviceTexture* const pDevTexture, int ownerMips, int nDstSlice, int nDstMip, CDeviceTexture* pSrcDevTex, int nSrcSlice, int nSrcMip, int nSrcMips, int nNumMips);
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_6
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
 #if defined(TEXSTRM_DEFERRED_UPLOAD)
     ID3D11CommandList* StreamCreateDeferred(int nStartMip, int nEndMip, STexPoolItem* pNewPoolItem, STexPoolItem* pSrcPoolItem);
@@ -2148,7 +2198,7 @@ public:
         }
     }
 
-    ENGINE_API static void ApplyForID(int nID, int nTUnit, int nTState, int nTexMaterialSlot, int nSUnit, bool useWhiteDefault);
+    static void ApplyForID(int nID, int nTUnit, int nTState, int nTexMaterialSlot, int nSUnit, bool useWhiteDefault);
 
     static const CCryNameTSCRC& mfGetClassName();
     static CTexture* GetByID(int nID);
@@ -2159,11 +2209,11 @@ public:
     static CTexture* CreateTextureObject(const char* name, uint32 nWidth, uint32 nHeight, int nDepth, ETEX_Type eTT, uint32 nFlags, ETEX_Format eTF, int nCustomID = -1);
     
     // Methods exposed to external libraries
-    ENGINE_API static CTexture* CreateRenderTarget(const char* name, uint32 nWidth, uint32 nHeight, const ColorF& cClear, ETEX_Type eTT, uint32 nFlags, ETEX_Format eTF, int nCustomID = -1);
-    ENGINE_API static void ApplyDepthTextureState(int unit, int nFilter, bool clamp);
-    ENGINE_API static CTexture* GetZTargetTexture();
-    ENGINE_API static int GetTextureState(const STexState& TS);
-    ENGINE_API static uint32 TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, uint32 nMips, uint32 nSlices, const ETEX_Format eTF, ETEX_TileMode eTM = eTM_None);
+    static CTexture* CreateRenderTarget(const char* name, uint32 nWidth, uint32 nHeight, const ColorF& cClear, ETEX_Type eTT, uint32 nFlags, ETEX_Format eTF, int nCustomID = -1);
+    static void ApplyDepthTextureState(int unit, int nFilter, bool clamp);
+    static CTexture* GetZTargetTexture();
+    static int GetTextureState(const STexState& TS);
+    static uint32 TextureDataSize(uint32 nWidth, uint32 nHeight, uint32 nDepth, uint32 nMips, uint32 nSlices, const ETEX_Format eTF, ETEX_TileMode eTM = eTM_None);
 
     static void InitStreaming();
     static void InitStreamingDev();
@@ -2177,22 +2227,12 @@ public:
     static void ReleaseMiscTargets();
     static void ReleaseSystemTextures();
     static void LoadDefaultSystemTextures();
-    static inline void ResetTMUs()
-    {
-        for (int j = 0; j < eHWSC_Num; j++)
-        {
-            for (int i = 0; i < MAX_TMU; i++)
-            {
-                s_TexStateIDs[j][i] = -1;
-            }
-        }
-    }
 
     static bool ReloadFile(const char* szFileName);
     static bool ReloadFile_Request(const char* szFileName);
     static void ReloadTextures();
     static CTexture* Create2DTexture(const char* szName, int nWidth, int nHeight, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst, bool bAsyncDevTexCreation = false);
-    ENGINE_API static CTexture* Create3DTexture(const char* szName, int nWidth, int nHeight, int nDepth, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst);
+    static CTexture* Create3DTexture(const char* szName, int nWidth, int nHeight, int nDepth, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst);
     static CTexture* Create2DCompositeTexture(const char* szName, int nWidth, int nHeight, int nMips, int nFlags, ETEX_Format eTFDst, const STexComposition* pCompositions, size_t nCompositions);
     static void Update();
     static void RT_LoadingUpdate();
@@ -2223,7 +2263,7 @@ public:
     void UpdateTexStates();
     bool SetFilterMode(int nFilter);
     bool SetClampingMode(int nAddressU, int nAddressV, int nAddressW);
-    ENGINE_API void UpdateTextureRegion(const byte* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc);
+    void UpdateTextureRegion(const uint8_t* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc);
     void RT_UpdateTextureRegion(const byte* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc);
     bool Create2DTexture(int nWidth, int nHeight, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst);
     bool Create3DTexture(int nWidth, int nHeight, int nDepth, int nMips, int nFlags, const byte* pData, ETEX_Format eTFSrc, ETEX_Format eTFDst);
@@ -2282,15 +2322,20 @@ public:
     static D3DFormat ConvertToSignedFmt(D3DFormat fmt);
     static D3DFormat ConvertToTypelessFmt(D3DFormat fmt);
 
-    static SEnvTexture* FindSuitableEnvTex(Vec3& Pos, Ang3& Angs, bool bMustExist, int RendFlags, bool bUseExistingREs, CShader* pSH, CShaderResources* pRes, CRenderObject* pObj, bool bReflect, CRendElementBase* pRE, bool* bMustUpdate);
+    static SEnvTexture* FindSuitableEnvTex(Vec3& Pos, Ang3& Angs, bool bMustExist, int RendFlags, bool bUseExistingREs, CShader* pSH, CShaderResources* pRes, CRenderObject* pObj, bool bReflect, IRenderElement* pRE, bool* bMustUpdate);
     static bool RenderEnvironmentCMHDR(int size, Vec3& Pos, TArray<unsigned short>& vecData);
+
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    static bool RenderToTexture(int handle, const CCamera& camera, AzRTT::RenderContextId contextId);
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
     static void DrawCubeSide(Vec3& Pos, int tex_size, int side, float fMaxDist);
     static void DrawSceneToCubeSide(Vec3& Pos, int tex_size, int side);
     static void GetAverageColor(SEnvTexture* cm, int nSide);
 
 public:
 
-    static std::vector<STexState> s_TexStates;
+    static AZStd::vector<STexState, AZ::StdLegacyAllocator> s_TexStates;
     static int GetTexState(const STexState& TS)
     {
         uint32 i;
@@ -2307,7 +2352,7 @@ public:
 
         if (i == nTexStatesSize)
         {
-            ScopedSwitchToGlobalHeap useGlobalHeap;
+            
             s_TexStates.push_back(TS);
             s_TexStates[i].PostCreate();
         }
@@ -2321,7 +2366,6 @@ public:
 
     static STexState s_sDefState;
     static STexStageInfo s_TexStages[MAX_TMU];
-    static int s_TexStateIDs[eHWSC_Num][MAX_TMU];
     static uint32 s_TexState_MipSRGBMask[MAX_TMU];
 
     static ETEX_Format s_eTFZ;
@@ -2355,7 +2399,11 @@ public:
     static CTexture* s_ptexSceneSpecular;
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURE_H_SECTION_7
-#include AZ_RESTRICTED_FILE(Texture_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Texture_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Texture_h_provo.inl"
+    #endif
 #endif
     static CTexture* s_ptexAmbientLookup;
 
@@ -2459,8 +2507,8 @@ public:
     static CTexture* s_ptexDepthStencilRemapped;
     static SEnvTexture s_EnvCMaps[MAX_ENVCUBEMAPS];
     static SEnvTexture s_EnvTexts[MAX_ENVTEXTURES];
-    static TArray<SEnvTexture> s_CustomRT_2D;
-    static TArray<CTexture> s_ShaderTemplates;      // [Shader System TO DO] bad design - change (or shoot)
+    static StaticInstance<TArray<SEnvTexture>> s_CustomRT_2D;
+    static StaticInstance<TArray<CTexture>> s_ShaderTemplates;      // [Shader System TO DO] bad design - change (or shoot)
     static bool s_ShaderTemplatesInitialized;
 
     static CTexture* s_pTexNULL;

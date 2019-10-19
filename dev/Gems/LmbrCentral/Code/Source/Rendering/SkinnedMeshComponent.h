@@ -22,6 +22,7 @@
 
 #include <IEntityRenderState.h>
 
+#include <LmbrCentral/Rendering/RenderBoundsBus.h>
 #include <LmbrCentral/Rendering/MeshComponentBus.h>
 #include <LmbrCentral/Rendering/MaterialOwnerBus.h>
 #include <LmbrCentral/Rendering/RenderNodeBus.h>
@@ -157,6 +158,7 @@ namespace LmbrCentral
 
         //! Registers or unregisters our render node with the render.
         void RegisterWithRenderer(bool registerWithRenderer);
+
     protected:
 
         //! Calculates base LOD distance based on mesh characteristics.
@@ -250,11 +252,18 @@ namespace LmbrCentral
 
         //! Tracks if the object was moved so we can notify the renderer.
         bool m_objectMoved;
+
+        //! Editor-only flag to avoid duplicate asset loading during scene load.
+        //! Duplicate asset loading can occur if we call the following in order, within the same frame:
+        //! CreateMesh()... DestroyMesh()... CreateMesh()....
+        //! The flag ensures mesh destruction/loading only occurs once the mesh asset loading job completes.
+        bool m_isQueuedForDestroyMesh;
     };
 
     class SkinnedMeshComponent
         : public AZ::Component
         , private MeshComponentRequestBus::Handler
+        , private RenderBoundsRequestBus::Handler
         , private MaterialOwnerRequestBus::Handler
         , private RenderNodeRequestBus::Handler
         , private SkinnedMeshComponentRequestBus::Handler
@@ -274,9 +283,13 @@ namespace LmbrCentral
         //////////////////////////////////////////////////////////////////////////
 
         //////////////////////////////////////////////////////////////////////////
-        // MeshComponentRequestBus interface implementation
+        // RenderBoundsRequestBus interface implementation
         AZ::Aabb GetWorldBounds() override;
         AZ::Aabb GetLocalBounds() override;
+        //////////////////////////////////////////////////////////////////////////
+
+        //////////////////////////////////////////////////////////////////////////
+        // MeshComponentRequestBus interface implementation
         void SetMeshAsset(const AZ::Data::AssetId& id) override;
         AZ::Data::Asset<AZ::Data::AssetData> GetMeshAsset() override { return m_skinnedMeshRenderNode.GetMeshAsset(); }
         void SetVisibility(bool newVisibility) override;

@@ -12,9 +12,10 @@
 
 #pragma once
 
-#include "EMotionFXConfig.h"
 #include <AzCore/std/containers/vector.h>
-#include "AnimGraphNode.h"
+#include <EMotionFX/Source/AnimGraphNode.h>
+#include <EMotionFX/Source/EMotionFXConfig.h>
+#include <EMotionFX/Source/ObjectAffectedByParameterChanges.h>
 
 
 namespace EMotionFX
@@ -25,56 +26,65 @@ namespace EMotionFX
      */
     class EMFX_API BlendTreeParameterNode
         : public AnimGraphNode
+        , public ObjectAffectedByParameterChanges
     {
-        MCORE_MEMORYOBJECTCATEGORY(BlendTreeParameterNode, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_BLENDTREENODES);
-
     public:
-        AZ_RTTI(BlendTreeParameterNode, "{4510529A-323F-40F6-B773-9FA8FC4DE53D}", AnimGraphNode);
+        AZ_RTTI(BlendTreeParameterNode, "{4510529A-323F-40F6-B773-9FA8FC4DE53D}", AnimGraphNode, ObjectAffectedByParameterChanges)
+        AZ_CLASS_ALLOCATOR_DECL
 
-        enum
-        {
-            TYPE_ID = 0x00000007
-        };
+        BlendTreeParameterNode();
+        ~BlendTreeParameterNode() override;
 
-        enum
-        {
-            ATTRIB_MASK     = 0
-        };
-
-        static BlendTreeParameterNode* Create(AnimGraph* animGraph);
-
-        void InitForAnimGraph(AnimGraph* animGraph) override;
-        void OnParametersChanged(AnimGraph* animGraph);
-        void OnUpdateAttributes() override;
         void Reinit() override;
-
-        void RegisterPorts() override;
-        void RegisterAttributes() override;
-
-        const char* GetTypeString() const override;
-        AnimGraphObject* Clone(AnimGraph* animGraph) override;
-        AnimGraphObjectData* CreateObjectData() override;
-
-        uint32 GetVisualColor() const override;
+        bool InitAfterLoading(AnimGraph* animGraph) override;
+        
+        AZ::Color GetVisualColor() const override;
 
         const char* GetPaletteName() const override;
         AnimGraphObject::ECategory GetPaletteCategory() const override;
 
-        const MCore::Array<uint32>& GetParameterIndices() const;
+        const AZStd::vector<AZ::u32>& GetParameterIndices() const;
         uint32 GetParameterIndex(uint32 portNr) const;
-        uint32 GetPortForParameterIndex(uint32 parameterIndex) const;
-        uint32 CalcNewPortForParameterIndex(uint32 parameterIndex, const AZStd::vector<AZStd::string>& parametersToBeRemoved) const;
 
-        void CalcConnectedParameterNames(AZStd::vector<AZStd::string>& outParameterNames);
+        /// Add a parameter to the parameter mask and also add a port for it.
+        void AddParameter(const AZStd::string& parameterName);
+
+        /// Set the parameter mask and create ports for each of them. (An empty parameter list means that all parameters are shown).
+        void SetParameters(const AZStd::string& parameterNamesWithSemicolons);
+        void SetParameters(const AZStd::vector<AZStd::string>& parameterNames);
+
+        /// Construct a string containing all parameter names separated by semicolons.
+        AZStd::string ConstructParameterNamesString() const;
+        static AZStd::string ConstructParameterNamesString(const AZStd::vector<AZStd::string>& parameterNames);
+        static AZStd::string ConstructParameterNamesString(const AZStd::vector<AZStd::string>& parameterNames, const AZStd::vector<AZStd::string>& excludedParameterNames);
+
+        /// Remove the given parameter by name. This removes the parameter from the parameter mask and also deletes the port.
+        void RemoveParameterByName(const AZStd::string& parameterName);
+
+        /// Renames the given currentName parameter to newName
+        void RenameParameterName(const AZStd::string& currentName, const AZStd::string& newName);
+
+        /// Sort the parameter names based on the order of the parameters in the anim graph.
+        static void SortParameterNames(AnimGraph* animGraph, AZStd::vector<AZStd::string>& outParameterNames);
+
+        static void Reflect(AZ::ReflectContext* context);
+
+        // ParameterDrivenPorts
+        AZStd::vector<AZStd::string> GetParameters() const override;
+        AnimGraph* GetParameterAnimGraph() const override;
+        void ParameterMaskChanged(const AZStd::vector<AZStd::string>& newParameterMask) override;
+        void AddRequiredParameters(AZStd::vector<AZStd::string>& parameterNames) const override;
+        void ParameterAdded(size_t newParameterIndex) override;
+        void ParameterRenamed(const AZStd::string& oldParameterName, const AZStd::string& newParameterName) override;
+        void ParameterOrderChanged(const ValueParameterVector& beforeChange, const ValueParameterVector& afterChange) override;
+        void ParameterRemoved(const AZStd::string& oldParameterName) override;
 
     private:
-        MCore::Array<uint32>    mParameterIndices;              /**< The indices of the visible and available parameters. */
-        bool                    mUpdateParameterMaskLocked;
+        bool GetTypeSupportsFloat(uint32 parameterType);
 
-        BlendTreeParameterNode(AnimGraph* animGraph);
-        ~BlendTreeParameterNode();
+        AZStd::vector<AZStd::string>    m_parameterNames;
+        AZStd::vector<AZ::u32>          m_parameterIndices;              /**< The indices of the visible and available parameters. */
 
-        bool CheckIfParameterIndexUpdateNeeded() const;
         void Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
     };
-}   // namespace EMotionFX
+} // namespace EMotionFX

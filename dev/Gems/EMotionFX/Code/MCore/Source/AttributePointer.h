@@ -26,6 +26,8 @@ namespace MCore
     class MCORE_API AttributePointer
         : public Attribute
     {
+        AZ_CLASS_ALLOCATOR(AttributePointer, AttributeAllocator, 0)
+
         friend class AttributeFactory;
     public:
         enum
@@ -41,7 +43,6 @@ namespace MCore
 
         // overloaded from the attribute base class
         Attribute* Clone() const override                           { return AttributePointer::Create(mValue); }
-        Attribute* CreateInstance(void* destMemory) override        { return new(destMemory) AttributePointer(); }
         const char* GetTypeString() const override                  { return "AttributePointer"; }
         bool InitFrom(const Attribute* other) override
         {
@@ -78,15 +79,6 @@ namespace MCore
             MCORE_UNUSED(version);
 
             MCore::LogWarning("MCore::AttributePointer::ReadData() - Pointer attributes cannot be read from disk.");
-            return false;
-        }
-
-        // write to a stream
-        bool WriteData(MCore::Stream* stream, MCore::Endian::EEndianType targetEndianType) const override
-        {
-            MCORE_UNUSED(stream);
-            MCORE_UNUSED(targetEndianType);
-            MCore::LogWarning("MCore::AttributePointer::WriteData() - Pointer attributes cannot be written to a stream.");
             return false;
         }
     };

@@ -384,7 +384,7 @@ uint16 CLightVolumesMgr::RegisterVolume(const Vec3& vPos, f32 fRadius, uint8 nCl
 {
     DynArray<SLightVolInfo*>& lightVolsInfo = m_pLightVolsInfo[passInfo.ThreadID()];
 
-    IF ((m_bUpdateLightVolumes & (lightVolsInfo.size() < LV_MAX_COUNT)) && fRadius < 256.0f, 1)
+    IF ((m_bUpdateLightVolumes && (lightVolsInfo.size() < LV_MAX_COUNT)) && fRadius < 256.0f, 1)
     {
         FUNCTION_PROFILER_3DENGINE;
 
@@ -430,7 +430,7 @@ uint16 CLightVolumesMgr::RegisterVolume(const Vec3& vPos, f32 fRadius, uint8 nCl
 
 void CLightVolumesMgr::RegisterLight(const CDLight& pDL, uint32 nLightID, const SRenderingPassInfo& passInfo)
 {
-    IF ((m_bUpdateLightVolumes & !(pDL.m_Flags & LV_DLF_LIGHTVOLUMES_MASK)), 1)
+    IF ((m_bUpdateLightVolumes && !(pDL.m_Flags & LV_DLF_LIGHTVOLUMES_MASK)), 1)
     {
         FUNCTION_PROFILER_3DENGINE;
 
@@ -617,16 +617,19 @@ void CLightVolumesMgr::Update(const SRenderingPassInfo& passInfo)
                         continue;
                     }
 
-                    const SRenderLight& pDL = (*pLights)[nLightId];
-                    const int32 nNextLightId = lightCell.nLightID[(l + 1) & (LIGHTVOLUME_MAXLIGHTS - 1)];
-                    const SRenderLight& pNextDL = (*pLights)[nNextLightId];
-                    CryPrefetch(&pNextDL);
-                    CryPrefetch(&pNextDL.m_ObjMatrix);
-
-                    IF (lightProcessedStateArray[nLightId] != v + 1, 1)
+                    if (static_cast<uint32>(nLightId) < nLightCount)
                     {
-                        lightProcessedStateArray[nLightId] = v + 1;
-                        AddLight(pDL, &*lightVolsInfo[v], lightVols[v]);
+                        const SRenderLight& pDL = (*pLights)[nLightId];
+                        const int32 nNextLightId = lightCell.nLightID[(l + 1) & (LIGHTVOLUME_MAXLIGHTS - 1)];
+                        const SRenderLight& pNextDL = (*pLights)[nNextLightId];
+                        CryPrefetch(&pNextDL);
+                        CryPrefetch(&pNextDL.m_ObjMatrix);
+
+                        IF(lightProcessedStateArray[nLightId] != v + 1, 1)
+                        {
+                            lightProcessedStateArray[nLightId] = v + 1;
+                            AddLight(pDL, &*lightVolsInfo[v], lightVols[v]);
+                        }
                     }
                 }
             }

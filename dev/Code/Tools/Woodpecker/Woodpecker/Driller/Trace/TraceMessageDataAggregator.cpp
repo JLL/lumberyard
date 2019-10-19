@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "TraceMessageDataAggregator.hxx"
 #include <Woodpecker/Driller/Trace/TraceMessageDataAggregator.moc>
@@ -41,7 +41,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<TraceMessageDataAggregatorSavedState, AZ::UserSettings>()
+                serialize->Class<TraceMessageDataAggregatorSavedState>()
                     ->Field("m_activeViewCount", &TraceMessageDataAggregatorSavedState::m_activeViewCount)
                     ->Version(2);
             }
@@ -220,7 +220,7 @@ namespace Driller
 
             serialize->Class<TraceMessageDataAggregator>()
                 ->Version(1)
-                ->SerializerForEmptyClass();
+                ->SerializeWithNoData();
         }
     }
 } // namespace Driller

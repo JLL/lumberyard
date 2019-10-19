@@ -15,16 +15,29 @@ import json
 import os
 import re
 
-######################
-## Build Layout
-BINTEMP_FOLDER = 'BinTemp'
+########################################################################################################################
+# Global constants
+########################################################################################################################
+BINTEMP_FOLDER = 'BinTemp'             # Name of the of working build folder that will be created at the root folder
+WAF_FILE_GLOB_WARNING_THRESHOLD = 1000 # Define a warning threshold in number file files that were hit during a waf_file
 SOLUTION_FOLDER = 'Solutions'
 SOLUTION_NAME = 'Lumberyard'
+CACHE_FOLDER = 'Cache'
+
+
+# Version stamp (GUID) of lmbrwaf that is used to signal that a clean of bintemp is necessary
+# Only update this number if there are changes in WAF handling where it is not possible
+# to track stale intermediate files caused by the waf changes.  To ignore the bintemp
+# cleaning check, set this value to None.
+#
+# Note:  Only update this value as a last resort.  If there were WAF changes that do not affect the generation or
+#        tracking of intermediate of generated files, then there is no need to wipe out BinTemp
+LMBR_WAF_VERSION_TAG = "E7A426A7-350D-4B4A-A619-ED1DA4463DCA"
 
 
 # Optional additional table of copyrights.
-# To add a company specific copyright, add a name value pair below to define the desired copyright statement for generated binaries
-# and add the 'copyright_org' in your wscript definition
+# To add a company specific copyright, add a name value pair below to define the desired copyright statement for
+# generated binaries and add the 'copyright_org' in your wscript definition
 #
 # e.g.
 #
@@ -39,11 +52,48 @@ SOLUTION_NAME = 'Lumberyard'
 #    copyright_org = 'MyCompany'
 # ...
 # )
+########################################################################################################################
 ADDITIONAL_COPYRIGHT_TABLE = {
 }
 
 
-# Lumberyard version and build number information.  This value will be embedded outputs for the lumberyard build
+
+########################################################################################################################
+# Optional table of additional modules that will be loaded by WAF
+#
+# The table format is:
+#
+# <Key: Path of the directory for a set of waf modules> :
+#    [ < List of WAF python modules to load into the WAF build system, relative to the path directory from the key > ]
+#
+# For each of the modules in the python module list, they represent the relative full filename of the module to load.
+# To restrict modules to only load for a specific host platform
+#
+# e.g.
+#
+# ADDITIONAL_WAF_MODULES = {
+#    'Tools/Build/custom_build' : [
+#        'custom_a.py',
+#        'custom_b.py:win32',
+#        'custom_c.py:darwin'
+#    ]
+# }
+#
+# The above example will load 'custom_a.py' for all platforms, 'custom_b.py' for only win32 platforms, and 'custom_c.py'
+# for only darwin platforms
+#
+# Note:  The methods that are to exposed in the modules must be decorated accordingly, as they are generally used
+#        based on the context of the command, and not through regular python imports
+########################################################################################################################
+ADDITIONAL_WAF_MODULES = {
+
+}
+
+########################################################################################################################
+# Lumberyard version and build number information.
+# The following section extrapolates the version number from the engine configuration file and is used to embed the
+# value into the built binaries were applicable.
+########################################################################################################################
 LUMBERYARD_ENGINE_VERSION_CONFIG_FILENAME = 'engine.json'
 SCRIPT_PATH = os.path.dirname(__file__)
 
@@ -51,7 +101,8 @@ with open(os.path.join(SCRIPT_PATH, LUMBERYARD_ENGINE_VERSION_CONFIG_FILENAME)) 
     ENGINE_JSON_DATA = json.load(ENGINE_FILE)
 
 LUMBERYARD_VERSION = ENGINE_JSON_DATA.get('LumberyardVersion', '0.0.0.0').encode("ascii", "ignore")
-LUMBERYARD_BUILD = 608525
+LUMBERYARD_COPYRIGHT_YEAR = ENGINE_JSON_DATA.get('LumberyardCopyrightYear', 2017)
+LUMBERYARD_BUILD = 979871
 LUMBERYARD_ENGINE_PATH = os.path.normpath(ENGINE_JSON_DATA.get('ExternalEnginePath', '.').encode("ascii", "ignore"))
 
 # validate the Lumberyard version string above
@@ -59,100 +110,22 @@ VERSION_NUMBER_PATTERN = re.compile("^(\.?\d+)*$")
 if VERSION_NUMBER_PATTERN.match(LUMBERYARD_VERSION) is None:
     raise ValueError('Invalid version string for the Lumberyard Version ({})'.format(LUMBERYARD_VERSION))
 
-# Sub folder within the root folder to recurse into for the WAF build
+BINTEMP_CACHE_3RD_PARTY = '__cache_3p__'
+BINTEMP_CACHE_TOOLS = '__cache_tools_'
+BINTEMP_MODULE_DEF = 'module_def'
+
+########################################################################################################################
+# Sub folder within the root folder to recurse into for the WAF build.
+########################################################################################################################
 SUBFOLDERS = [
     'Code',
     'Engine',
 ]
 
-# Supported branch platforms/configurations This is a map of host platform -> target platforms
-# Target platforms can be removed here if they are meant to never be considered.
-# Caution: Do not remove the host platform.
-PLATFORMS = {
-    'darwin': [
-        'darwin_x64',
-        'android_armv7_clang',
-        'android_armv8_clang',
-        'ios',
-        'appletv'
-    ],
-    'win32' : [
-        'win_x64_vs2017',
-        'win_x64_vs2015',
-        'win_x64_vs2013',
-        'android_armv7_clang',
-        'android_armv8_clang'
-    ],
-    'linux': [
-        'linux_x64'
-    ]
-}
 
-
-
-
-# list of build configurations to generate for each supported platform
-CONFIGURATIONS = [ 'debug',           'profile',           'performance',           'release',
-                   'debug_dedicated', 'profile_dedicated', 'performance_dedicated', 'release_dedicated',
-                   'debug_test',      'profile_test',
-                   'debug_test_dedicated', 'profile_test_dedicated']
-
-# To handle configurations aliases that can map to one or more actual configurations (Above).
-# Make sure to maintain and update the alias based on updates to the CONFIGURATIONS
-# dictionary
-CONFIGURATION_SHORTCUT_ALIASES = {
-    'all': CONFIGURATIONS,
-    'debug_all': ['debug', 'debug_dedicated', 'debug_test', 'debug_test_dedicated'],
-    'profile_all': ['profile', 'profile_dedicated', 'profile_test', 'profile_test_dedicated'],
-    'performance_all': ['performance', 'performance_dedicated'],
-    'release_all': ['release', 'release_dedicated'],
-    'dedicated_all': ['debug_dedicated', 'profile_dedicated', 'performance_dedicated', 'release_dedicated'],
-    'non_dedicated': ['debug', 'profile', 'performance', 'release'],
-    'test_all': ['debug_test', 'debug_test_dedicated', 'profile_test', 'profile_test_dedicated'],
-    'non_test': ['debug', 'debug_dedicated', 'profile', 'profile_dedicated', 'performance', 'performance_dedicated',
-                 'release', 'release_dedicated']
-}
-
-# Keep the aliases in sync
-for configuration_alias_key in CONFIGURATION_SHORTCUT_ALIASES:
-    if configuration_alias_key in CONFIGURATIONS:
-        raise ValueError("Invalid configuration shortcut alias '{}' in waf_branch_spec.py. Duplicates an existing configuration.".format(configuration_alias_key))
-    configuration_alias_list = CONFIGURATION_SHORTCUT_ALIASES[configuration_alias_key]
-    for configuration_alias in configuration_alias_list:
-        if configuration_alias not in CONFIGURATIONS:
-            raise ValueError("Invalid configuration '{}' for configuration shortcut alias '{}' in waf_branch_spec.py".format(configuration_alias,configuration_alias_key))
-
-# build/clean commands are generated using PLATFORM_CONFIGURATION for all platform/configuration
-# not all platform/configuration commands are valid.
-# if an entry exists in this dictionary, only the configurations listed will be built
-PLATFORM_CONFIGURATION_FILTER = {
-    # Remove these as testing comes online for each platform
-    platform : CONFIGURATION_SHORTCUT_ALIASES['non_test'] for platform in ( 'android_armv7_gcc',
-                                                                            'android_armv7_clang',
-                                                                            'android_armv8_clang',
-                                                                            'ios',
-                                                                            'appletv')
-}
-
-## what conditions do you want a monolithic build ?  Uses the same matching rules as other settings
-## so it can be platform_configuration, or configuration, or just platform for the keys, and the Value is assumed
-## false by default.
-## monolithic builds produce just a statically linked executable with no dlls.
-
-MONOLITHIC_BUILDS = [
-    'win_x64_vs2017_release',
-    'win_x64_vs2015_release',
-    'win_x64_vs2013_release',
-    'release_dedicated',
-    'performance_dedicated',
-    'performance',
-    'ios',
-    'appletv',
-    'darwin_release',
-    'android_release',
-]
-
-## List of available launchers by spec module
+########################################################################################################################
+# List of available launchers by spec module
+########################################################################################################################
 AVAILABLE_LAUNCHERS = {
     'modules':
         [
@@ -162,6 +135,9 @@ AVAILABLE_LAUNCHERS = {
             'IOSLauncher',
             'AppleTVLauncher',
             'AndroidLauncher',
-            'LinuxLauncher'
+            'LinuxLauncher',
+
+            'ClientLauncher',
+            'ServerLauncher'
         ]
     }

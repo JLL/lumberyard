@@ -40,7 +40,7 @@ namespace AZ
 
 
         //////////////////////////////////////////////////////////////////////////
-        /// This connection policy will cause OnInputContextActivated to be called if 
+        /// This connection policy will cause OnInputContextActivated to be called if
         /// it is connecting to the currently active context
         template<class Bus>
         struct ConnectionPolicy
@@ -56,7 +56,6 @@ namespace AZ
                     AZ::InputRequestBus::BroadcastResult(currentInputContext, &AZ::InputRequestBus::Events::GetCurrentContext);
                     if (AZ::Crc32(currentInputContext.c_str()) == id)
                     {
-                        typename Bus::template CallstackEntryIterator<typename Bus::InterfaceType**> callstack(nullptr, &id); // Workaround for GetCurrentBusId in callee
                         handler->OnInputContextActivated();
                     }
                 }

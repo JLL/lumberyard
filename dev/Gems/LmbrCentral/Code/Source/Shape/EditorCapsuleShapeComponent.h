@@ -29,6 +29,7 @@ namespace LmbrCentral
         EditorCapsuleShapeComponent() = default;
 
         // AZ::Component
+        void Init() override;
         void Activate() override;
         void Deactivate() override;
 
@@ -46,10 +47,9 @@ namespace LmbrCentral
         AZ_DISABLE_COPY_MOVE(EditorCapsuleShapeComponent)
 
         // AzFramework::EntityDebugDisplayEventBus
-        void DisplayEntity(bool& handled) override;
-
-        // TransformNotificationBus
-        void OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world) override;
+        void DisplayEntityViewport(
+            const AzFramework::ViewportInfo& viewportInfo,
+            AzFramework::DebugDisplayRequests& debugDisplay) override;
 
         void ConfigurationChanged();
         void GenerateVertices();

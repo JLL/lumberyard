@@ -22,11 +22,14 @@
 
 #include <algorithm>
 
-#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_MAC)
 #include <libkern/OSAtomic.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
+#include <unistd.h>
+#else
+typedef int socklen_t;
 #endif
 
 namespace
@@ -90,13 +93,29 @@ struct CCrySimpleSock::Implementation
             AZStd::string::size_type maskLocation = address.rfind("/");
             if (maskLocation != AZStd::string::npos)
             {
+                //x.x.x.x/0 is all addresses
                 // For CIDR that specify the network mask, mask out the address that is 
                 // supplied here once instead of everytime we check the address during 
                 // accept calls. 
                 int mask = atoi(address.substr(maskLocation+1).c_str());
-                whitelistAddress.m_mask ^= (1 << (32 - mask)) - 1; 
-                whitelistAddress.m_mask = htonl(whitelistAddress.m_mask); 
-                whitelistAddress.m_address = inet_addr(address.substr(0, maskLocation).c_str()) & whitelistAddress.m_mask;
+                if (mask == 0)
+                {
+                    whitelistAddress.m_mask = 0;
+                    whitelistAddress.m_address = 0;
+
+                    static bool warnOnce = true;
+                    if (warnOnce)
+                    {
+                        warnOnce = false;
+                        printf("\nWARNING: Attempting to run the CrySCompileServer authorizing every IP. This is a security risk and not recommended.\nPlease use a more restrictive whitelist in the config.ini file by not using netmask 0.\n\n");
+                    }
+                }
+                else
+                {
+                    whitelistAddress.m_mask ^= (1 << (32 - mask)) - 1;
+                    whitelistAddress.m_mask = htonl(whitelistAddress.m_mask);
+                    whitelistAddress.m_address = inet_addr(address.substr(0, maskLocation).c_str()) & whitelistAddress.m_mask;
+                }
             }
             else
             {
@@ -247,11 +266,12 @@ CCrySimpleSock::CCrySimpleSock(uint16_t Port, const std::vector<AZStd::string>& 
     if (bind(m_pImpl->m_Socket, (sockaddr*)&SockAddr, sizeof(sockaddr_in)) == SOCKET_ERROR)
     {
 #if defined(AZ_PLATFORM_WINDOWS)
-        closesocket(m_pImpl->m_Socket);
+        AZ_Warning(0, false, "bind failed with error = %d", WSAGetLastError());
 #else
         shutdown(m_pImpl->m_Socket, SHUT_RDWR);
 #endif
-        CrySimple_ERROR("Could not bind server socket\n");
+        closesocket(m_pImpl->m_Socket);
+        CrySimple_ERROR("Could not bind server socket. This can happen if there is another process running already that is using this port or antivirus software/firewall is blocking the port.\n");
         return;
     }
 
@@ -303,6 +323,7 @@ void CCrySimpleSock::Release()
 
         // shutdown the server side of the connection since no more data will be sent
         shutdown(m_pImpl->m_Socket, SHUT_RDWR);
+        closesocket(m_pImpl->m_Socket);
 #endif
 
 #if defined(AZ_PLATFORM_WINDOWS)
@@ -312,11 +333,10 @@ void CCrySimpleSock::Release()
         WSAIoctl(m_pImpl->m_Socket, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidDisconnectEx,
             sizeof(GUID), &pDisconnectEx, sizeof(pDisconnectEx), &Bytes, NULL, NULL);
         pDisconnectEx(m_pImpl->m_Socket, NULL, 0, 0); // retrieve this function pointer with WSAIoctl(WSAID_DISCONNECTEX).
-
-        closesocket(m_pImpl->m_Socket);
 #else
         shutdown(m_pImpl->m_Socket, SHUT_RDWR);
 #endif
+        closesocket(m_pImpl->m_Socket);
         m_pImpl->m_Socket = INVALID_SOCKET;
         InterlockedDecrement(&numberOfOpenSockets);
     }
@@ -341,17 +361,17 @@ CCrySimpleSock* CCrySimpleSock::Accept()
     if (m_pImpl->m_Type != ECrySimpleST_ROOT)
     {
         CrySimple_ERROR("called Accept on non root socket");
-        return 0;
+        return nullptr;
     }
 
     while (true)
     {
         sockaddr_in connectingAddress;
         int addressSize = sizeof(connectingAddress);
-        SOCKET Sock = accept(m_pImpl->m_Socket, reinterpret_cast<sockaddr*>(&connectingAddress), &addressSize);
+        SOCKET Sock = accept(m_pImpl->m_Socket, reinterpret_cast<sockaddr*>(&connectingAddress), reinterpret_cast<socklen_t*>(&addressSize));
         if (Sock == INVALID_SOCKET)
         {
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
             switch (errno)
             {
             case EINTR:
@@ -366,7 +386,7 @@ CCrySimpleSock* CCrySimpleSock::Accept()
 #endif
             AZ_Warning(0, false, "Errno = %d", WSAGetLastError());
             CrySimple_ERROR("Accept recived invalid socket");
-            return 0;
+            return nullptr;
         }
 
         bool allowConnection = false;
@@ -406,7 +426,7 @@ CCrySimpleSock* CCrySimpleSock::Accept()
             closesocket(Sock);
             int Error = WSAGetLastError();
             CrySimple_ERROR("Couldn't create wsa event");
-            return 0;
+            return nullptr;
         }
 
         int Status = WSAEventSelect(Sock, wsaEvent, FD_CLOSE);
@@ -415,7 +435,7 @@ CCrySimpleSock* CCrySimpleSock::Accept()
             closesocket(Sock);
             int Error = WSAGetLastError();
             CrySimple_ERROR("Couldn't create wsa event");
-            return 0;
+            return nullptr;
         }
 
         return new CCrySimpleSock(Sock, this, wsaEvent);
@@ -423,6 +443,8 @@ CCrySimpleSock* CCrySimpleSock::Accept()
         return new CCrySimpleSock(Sock, this);
 #endif
     }
+    
+    return nullptr;
 }
 
 union CrySimpleRecvSize
@@ -450,7 +472,7 @@ int CCrySimpleSock::Recv(char* acData, int len, int flags)
                 if (waitingtime > MAX_TIME_TO_WAIT)
                 {
                     char acTmp[MAX_ERROR_MESSAGE_SIZE];
-                    sprintf(acTmp, "Error while reciving size of data - Timeout on blocking. (Error Code: %i)", WSAError);
+                    sprintf(acTmp, "Error while receiving size of data - Timeout on blocking. (Error Code: %i)", WSAError);
                     CrySimple_ERROR(acTmp);
 
                     return recived;
@@ -465,7 +487,7 @@ int CCrySimpleSock::Recv(char* acData, int len, int flags)
 #endif
             {
                 char acTmp[MAX_ERROR_MESSAGE_SIZE];
-                sprintf(acTmp, "Error while reciving size of data - Network error. (Error Code: %i)", WSAError);
+                sprintf(acTmp, "Error while receiving size of data - Network error. (Error Code: %i)", WSAError);
                 CrySimple_ERROR(acTmp);
 
                 return recived;
@@ -480,8 +502,8 @@ bool CCrySimpleSock::Recv(std::vector<uint8_t>& rVec)
 {
     CrySimpleRecvSize size;
 
-    int recived = Recv(reinterpret_cast<char*>(&size.m_Data8[0]), 8, 0);
-    if (recived != 8)
+    int received = Recv(reinterpret_cast<char*>(&size.m_Data8[0]), 8, 0);
+    if (received != 8)
     {
 #if defined(AZ_PLATFORM_WINDOWS)
         int WSAError = WSAGetLastError();
@@ -489,7 +511,7 @@ bool CCrySimpleSock::Recv(std::vector<uint8_t>& rVec)
         int WSAError = errno;
 #endif
         char acTmp[MAX_ERROR_MESSAGE_SIZE];
-        sprintf(acTmp, "Error while reciving size of data - Invalid size (Error Code: %i)", WSAError);
+        sprintf(acTmp, "Error while receiving size of data - Invalid size (Error Code: %i)", WSAError);
         CrySimple_ERROR(acTmp);
         return false;
     }
@@ -498,7 +520,7 @@ bool CCrySimpleSock::Recv(std::vector<uint8_t>& rVec)
     {
         int WSAError = WSAGetLastError();
         char acTmp[MAX_ERROR_MESSAGE_SIZE];
-        sprintf(acTmp, "Error while reciving size of data - Size of zero (Error Code: %i)", WSAError);
+        sprintf(acTmp, "Error while receiving size of data - Size of zero (Error Code: %i)", WSAError);
         CrySimple_ERROR(acTmp);
 
         return false;
@@ -508,7 +530,7 @@ bool CCrySimpleSock::Recv(std::vector<uint8_t>& rVec)
     {
         int WSAError = WSAGetLastError();
         char acTmp[MAX_ERROR_MESSAGE_SIZE];
-        sprintf(acTmp, "Error while reciving size of data - Size is greater than max support data size.");
+        sprintf(acTmp, "Error while receiving size of data - Size is greater than max support data size.");
         CrySimple_ERROR(acTmp);
 
         return false;
@@ -547,7 +569,7 @@ bool CCrySimpleSock::RecvResult()
     CrySimpleRecvSize size;
     if (recv(m_pImpl->m_Socket, reinterpret_cast<char*>(&size.m_Data8[0]), 8, 0) != 8)
     {
-        CrySimple_ERROR("Error while reciving result");
+        CrySimple_ERROR("Error while receiving result");
         return false;
     }
 
@@ -583,7 +605,7 @@ bool CCrySimpleSock::Backward(std::vector<uint8_t>& rVec)
     uint32_t size;
     if (recv(m_pImpl->m_Socket, reinterpret_cast<char*>(&size), 4, 0) != 4)
     {
-        CrySimple_ERROR("Error while reciving size of data");
+        CrySimple_ERROR("Error while receiving size of data");
         return false;
     }
 
@@ -595,7 +617,7 @@ bool CCrySimpleSock::Backward(std::vector<uint8_t>& rVec)
         int read = recv(m_pImpl->m_Socket, reinterpret_cast<char*>(&rVec[a]), size - a, 0);
         if (read <= 0)
         {
-            CrySimple_ERROR("Error while reciving tcp-data");
+            CrySimple_ERROR("Error while receiving tcp-data");
             return false;
         }
         a += read;
@@ -666,6 +688,10 @@ void CCrySimpleSock::Send(const std::string& rData)
         {
             int nLastSendError = WSAGetLastError();
             logmessage("Socket send error: %d", nLastSendError);
+        }
+        else
+        {
+            m_pImpl->m_bHasSendData = true;
         }
     }
 }

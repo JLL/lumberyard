@@ -12,6 +12,8 @@
 #pragma once
 
 #include <GraphCanvas/Components/Nodes/NodeBus.h>
+#include <GraphCanvas/Components/SceneBus.h>
+
 #include <Editor/GraphCanvas/Components/NodeDescriptors/NodeDescriptorComponent.h>
 
 #include <ScriptCanvas/Variable/VariableBus.h>
@@ -21,7 +23,7 @@ namespace ScriptCanvasEditor
 {
     class VariableNodeDescriptorComponent
         : public NodeDescriptorComponent
-        , public GraphCanvas::NodeNotificationBus::Handler
+        , public GraphCanvas::SceneMemberNotificationBus::Handler
         , public ScriptCanvas::VariableNotificationBus::Handler
         , public ScriptCanvas::VariableNodeNotificationBus::Handler
         , public VariableNodeDescriptorRequestBus::Handler
@@ -46,13 +48,11 @@ namespace ScriptCanvasEditor
 
         // VariableNodeNotificationBus
         void OnVariableIdChanged(const ScriptCanvas::VariableId& oldVariableId, const ScriptCanvas::VariableId& newVariableId) override;
-        ////
+        ////        
 
-        // NodeNotificationBus
-        void OnAddedToScene(const AZ::EntityId& sceneId) override;
-
-        void OnNodeAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization) override;
-        void OnNodeDeserialized(const AZ::EntityId& graphId, const GraphCanvas::GraphSerialization& graphSerialization) override;
+        // SceneMemberNotifications
+        void OnSceneMemberAboutToSerialize(GraphCanvas::GraphSerialization& graphSerialization) override;
+        void OnSceneMemberDeserialized(const AZ::EntityId& graphId, const GraphCanvas::GraphSerialization& graphSerialization) override;
         ////
 
         // VariableNodeDescriptorBus
@@ -64,6 +64,8 @@ namespace ScriptCanvasEditor
         ////
         
     protected:
+
+        void OnAddedToGraphCanvasGraph(const AZ::EntityId& sceneId, const AZ::EntityId& scriptCanvasEntityId) override;
     
         virtual void UpdateTitle(AZStd::string_view variableName);
 

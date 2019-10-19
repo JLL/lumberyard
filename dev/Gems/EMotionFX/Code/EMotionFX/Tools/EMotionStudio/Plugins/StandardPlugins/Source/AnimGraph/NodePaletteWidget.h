@@ -26,6 +26,8 @@ QT_FORWARD_DECLARE_CLASS(QVBoxLayout)
 
 namespace EMStudio
 {
+    class AnimGraphPlugin;
+
     class NodePaletteList
         : public QListWidget
     {
@@ -48,44 +50,48 @@ namespace EMStudio
     };
 
 
-    // the node palette widget
+
     class NodePaletteWidget
         : public QWidget
     {
         MCORE_MEMORYOBJECTCATEGORY(NodePaletteWidget, EMFX_DEFAULT_ALIGNMENT, MEMCATEGORY_STANDARDPLUGINS_ANIMGRAPH);
-        Q_OBJECT
+        Q_OBJECT // AUTOMOC
 
     public:
         class EventHandler
             : public EMotionFX::EventHandler
         {
         public:
-            static EventHandler* Create(NodePaletteWidget* widget);
+            AZ_CLASS_ALLOCATOR_DECL
 
+            EventHandler(NodePaletteWidget* widget);
+            ~EventHandler() override = default;
+
+            const AZStd::vector<EMotionFX::EventTypes> GetHandledEventTypes() const override { return { EMotionFX::EVENT_TYPE_ON_CREATED_NODE, EMotionFX::EVENT_TYPE_ON_REMOVED_CHILD_NODE }; }
             void OnCreatedNode(EMotionFX::AnimGraph* animGraph, EMotionFX::AnimGraphNode* node) override;
             void OnRemovedChildNode(EMotionFX::AnimGraph* animGraph, EMotionFX::AnimGraphNode* parentNode) override;
 
         private:
             NodePaletteWidget*  mWidget;
-
-            EventHandler(NodePaletteWidget* widget);
-            ~EventHandler();
         };
 
-        NodePaletteWidget();
+        NodePaletteWidget(AnimGraphPlugin* plugin);
         ~NodePaletteWidget();
 
         void Init(EMotionFX::AnimGraph* animGraph, EMotionFX::AnimGraphNode* node);
 
-        static AZStd::string GetNodeIconFileName(EMotionFX::AnimGraphNode* node);
+        static AZStd::string GetNodeIconFileName(const EMotionFX::AnimGraphNode* node);
 
     private slots:
         void OnChangeCategoryTab(int index);
+        void OnFocusChanged(const QModelIndex& newFocusIndex, const QModelIndex& newFocusParent, const QModelIndex& oldFocusIndex, const QModelIndex& oldFocusParent);
 
     private:
+        AZStd::vector<AZStd::pair<EMotionFX::AnimGraphNode::ECategory, QString>> m_categories;
+        AnimGraphPlugin*            mPlugin;
         NodePaletteList*            mList;
         QTabBar*                    mTabBar;
-        EMotionFX::AnimGraphNode*  mNode;
+        EMotionFX::AnimGraphNode*   mNode;
         EventHandler*               mEventHandler;
         QVBoxLayout*                mLayout;
         QLabel*                     mInitialText;

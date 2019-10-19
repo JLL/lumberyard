@@ -90,7 +90,7 @@ namespace GraphCanvas
         : public NodeFrameGraphicsWidget
     {
     public:
-        AZ_TYPE_INFO(GeneralNodeFrameGraphicsWidget, "{15200183-8316-4A7D-985E-5C3257CD2463}", NodeFrameGraphicsWidget);
+        AZ_RTTI(GeneralNodeFrameGraphicsWidget, "{15200183-8316-4A7D-985E-5C3257CD2463}", NodeFrameGraphicsWidget);
         AZ_CLASS_ALLOCATOR(GeneralNodeFrameGraphicsWidget, AZ::SystemAllocator, 0);
 
         // Do not allow Serialization of Graphics Ui classes
@@ -98,6 +98,10 @@ namespace GraphCanvas
 
         GeneralNodeFrameGraphicsWidget(const AZ::EntityId& nodeVisual);
         ~GeneralNodeFrameGraphicsWidget() override = default;
+
+        // SceneMemberUIRequestBus
+        QPainterPath GetOutline() const override;
+        ////
 
         // QGraphicsWidget
         void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = nullptr) override;

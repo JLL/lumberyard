@@ -510,7 +510,7 @@ def _determine_additional_properties(dispatch_object_stack):
     #    path
     #    swagger   (bottom)
     # 
-    # "additional_properties" property values are aggregated together, starting with 
+    # "additional-properties" property values are aggregated together, starting with 
     # the values at the bottom of the stack.
 
     additional_properties = {}
@@ -530,7 +530,7 @@ def _determine_additional_request_template_content(dispatch_object_stack):
     #    path
     #    swagger   (bottom)
     # 
-    # "additional_request_template_content" property values are aggregated together, 
+    # "additional-request-template-content" property values are aggregated together, 
     # starting with the values at the bottom of the stack.
 
     additional_request_template_content = ''
@@ -550,7 +550,7 @@ def _determine_additional_response_template_content(dispatch_object_stack):
     #    path
     #    swagger   (bottom)
     # 
-    # "additional_response_template_content" property values are aggregated together, 
+    # "additional-response-template-content" property values are aggregated together, 
     # starting with the values at the bottom of the stack.
 
     additional_response_template_content = {}
@@ -721,10 +721,11 @@ def _get_body_parameter_request_template_mapping(path, operation, parameter_obje
     name = parameter_object.get_string('name').value
 
     if operation in ['head', 'get']:
-        raise ValueError('Path {} operation {} defines {} parameter with location body. Cloud Canvas does not body parameters with this operation.'.format(
+        raise ValueError('{}/{} defines paramter "{}" with location body. Cloud Canvas does not allow body parameters with the {} operation.'.format(
             path,
-            operation,
-            name))
+            operation.upper(),
+            name,
+            operation))
     
     return BODY_PARAMETER_REQUEST_TEMPLATE_MAPPING.format(name=name, comma=not_a_dangling_comma)
 

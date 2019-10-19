@@ -22,13 +22,18 @@ def build(bld):
         target              = 'FrameworkTests',
         vs_filter           = 'AZ Framework/TestSuites',
         file_list           = 'frameworktests.waf_files',
-        platforms           = ['win'],
-        configurations      = ['test_all'],
+        platforms           = ['win', 'darwin'],
+        configurations      = ['all'],
+        test_only           = True,
         use                 = ['AzTest', 'AzToolsFramework'],
-        uselib              = [ 'QT5CORE',
-                                'QT5GUI',
-                                'QT5WIDGETS'],
+        uselib              = ['QT5CORE',
+                               'QT5GUI',
+                               'QT5WIDGETS'],
+        # Platform Roots
+        platform_roots      = [bld.PlatformRoot('Platform', export_includes=False)],
+        
+        # Platform Specific
         msvc_cxxflags       = ['/W4'],
     )
-    
+
     bld.recurse(SUBFOLDERS)

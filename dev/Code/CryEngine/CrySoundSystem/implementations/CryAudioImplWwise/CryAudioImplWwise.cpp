@@ -24,26 +24,21 @@
 #include <AudioSystemImpl_wwise.h>
 
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#undef AZ_RESTRICTED_SECTION
-#define CRYAUDIOIMPLWWISE_CPP_SECTION_1 1
-#define CRYAUDIOIMPLWWISE_CPP_SECTION_2 2
-#endif
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION CRYAUDIOIMPLWWISE_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(CryAudioImplWwise_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-
 namespace Audio
 {
     // Define global objects.
     CAudioWwiseImplCVars g_audioImplCVars_wwise;
     CAudioLogger g_audioImplLogger_wwise;
 
-#if defined(PROVIDE_WWISE_IMPL_SECONDARY_POOL)
+#if AZ_TRAIT_CRYAUDIOIMPLWWISE_PROVIDE_IMPL_SECONDARY_POOL
     tMemoryPoolReferenced g_audioImplMemoryPoolSecondary_wwise;
-#endif // PROVIDE_AUDIO_IMPL_SECONDARY_POOL
+#endif // AZ_TRAIT_CRYAUDIOIMPLWWISE_PROVIDE_IMPL_SECONDARY_POOL
+
+    namespace Platform
+    {
+        void* InitializeSecondaryMemoryPool(size_t& secondarySize, CAudioWwiseImplCVars& audioImplCVars_wwise);
+    }
+
 } // namespace Audio
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -78,26 +73,21 @@ class CEngineModule_CryAudioImplWwise
 
             // Generic Allocator:
             allocDesc.m_allocationRecords = true;
-            allocDesc.m_heap.m_numMemoryBlocks = 1;
-            allocDesc.m_heap.m_memoryBlocksByteSize[0] = poolSize;
+            allocDesc.m_heap.m_numFixedMemoryBlocks = 1;
+            allocDesc.m_heap.m_fixedMemoryBlocksByteSize[0] = poolSize;
 
-            allocDesc.m_heap.m_memoryBlocks[0] = AZ::AllocatorInstance<AZ::OSAllocator>::Get().Allocate(allocDesc.m_heap.m_memoryBlocksByteSize[0], allocDesc.m_heap.m_memoryBlockAlignment);
+            allocDesc.m_heap.m_fixedMemoryBlocks[0] = AZ::AllocatorInstance<AZ::OSAllocator>::Get().Allocate(allocDesc.m_heap.m_fixedMemoryBlocksByteSize[0], allocDesc.m_heap.m_memoryBlockAlignment);
 
             // Note: This allocator is destroyed in CAudioSystemImpl_wwise::Release() after the impl object has been freed.
             AZ::AllocatorInstance<Audio::AudioImplAllocator>::Create(allocDesc);
         }
 
-    #if defined(PROVIDE_WWISE_IMPL_SECONDARY_POOL)
+    #if AZ_TRAIT_CRYAUDIOIMPLWWISE_PROVIDE_IMPL_SECONDARY_POOL
         size_t nSecondarySize = 0;
-        void* pSecondaryMemory = nullptr;
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION CRYAUDIOIMPLWWISE_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(CryAudioImplWwise_cpp, AZ_RESTRICTED_PLATFORM)
-    #endif
+        void* pSecondaryMemory = Platform::InitializeSecondaryMemoryPool(nSecondarySize, g_audioImplCVars_wwise);
 
         g_audioImplMemoryPoolSecondary_wwise.InitMem(nSecondarySize, (uint8*)pSecondaryMemory);
-    #endif // PROVIDE_AUDIO_IMPL_SECONDARY_POOL
+    #endif // AZ_TRAIT_CRYAUDIOIMPLWWISE_PROVIDE_IMPL_SECONDARY_POOL
 
         auto implComponent = azcreate(CAudioSystemImpl_wwise, (), Audio::AudioImplAllocator, "AudioSystemImpl_wwise");
 

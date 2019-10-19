@@ -13,16 +13,17 @@
 #include "LyShine_precompiled.h"
 #include <platform_impl.h>
 
+#include "LyShineModule.h"
 #include "LyShineSystemComponent.h"
-
-#include <IGem.h>
 
 #include "UiCanvasComponent.h"
 #include "UiElementComponent.h"
 #include "UiTransform2dComponent.h"
 #include "UiImageComponent.h"
+#include "UiImageSequenceComponent.h"
 #include "UiTextComponent.h"
 #include "UiButtonComponent.h"
+#include "UiMarkupButtonComponent.h"
 #include "UiCheckboxComponent.h"
 #include "UiDraggableComponent.h"
 #include "UiDropTargetComponent.h"
@@ -55,17 +56,11 @@
 
 namespace LyShine
 {
-    class LyShineModule
-        : public CryHooksModule
+    LyShineModule::LyShineModule()
+        : CryHooksModule()
     {
-    public:
-        AZ_RTTI(LyShineModule, "{5B98FB11-A597-47DB-8BE8-74F44D957C67}", CryHooksModule);
-
-        LyShineModule()
-            : CryHooksModule()
-        {
-            // Push results of [MyComponent]::CreateDescriptor() into m_descriptors here.
-            m_descriptors.insert(m_descriptors.end(), {
+        // Push results of [MyComponent]::CreateDescriptor() into m_descriptors here.
+        m_descriptors.insert(m_descriptors.end(), {
                 LyShineSystemComponent::CreateDescriptor(),
                 UiCanvasAssetRefComponent::CreateDescriptor(),
                 UiCanvasProxyRefComponent::CreateDescriptor(),
@@ -74,8 +69,10 @@ namespace LyShine
                 UiElementComponent::CreateDescriptor(),
                 UiTransform2dComponent::CreateDescriptor(),
                 UiImageComponent::CreateDescriptor(),
+                UiImageSequenceComponent::CreateDescriptor(),
                 UiTextComponent::CreateDescriptor(),
                 UiButtonComponent::CreateDescriptor(),
+                UiMarkupButtonComponent::CreateDescriptor(),
                 UiCheckboxComponent::CreateDescriptor(),
                 UiDraggableComponent::CreateDescriptor(),
                 UiDropTargetComponent::CreateDescriptor(),
@@ -103,20 +100,19 @@ namespace LyShine
                 UiParticleEmitterComponent::CreateDescriptor(),
             });
 
-            // This is so the metrics system knows which component LyShine is registering
-            LyShineSystemComponent::SetLyShineComponentDescriptors(&m_descriptors);
-        }
+        // This is so the metrics system knows which component LyShine is registering
+        LyShineSystemComponent::SetLyShineComponentDescriptors(&m_descriptors);
+    }
 
-        /**
-         * Add required SystemComponents to the SystemEntity.
-         */
-        AZ::ComponentTypeList GetRequiredSystemComponents() const override
-        {
-            return AZ::ComponentTypeList {
-                       azrtti_typeid<LyShineSystemComponent>(),
-            };
-        }
-    };
+    /**
+     * Add required SystemComponents to the SystemEntity.
+     */
+    AZ::ComponentTypeList LyShineModule::GetRequiredSystemComponents() const
+    {
+        return AZ::ComponentTypeList {
+                   azrtti_typeid<LyShineSystemComponent>(),
+        };
+    }
 }
 
 // DO NOT MODIFY THIS LINE UNLESS YOU RENAME THE GEM

@@ -61,13 +61,15 @@ namespace Audio
 
         MOCK_METHOD3(UnprepareTriggerAsync, EAudioRequestStatus(IATLAudioObjectData* const, const IATLTriggerImplData* const, IATLEventData* const));
 
-        MOCK_METHOD4(ActivateTrigger, EAudioRequestStatus(IATLAudioObjectData* const, const IATLTriggerImplData* const, IATLEventData* const, const TAudioSourceId));
+        MOCK_METHOD4(ActivateTrigger, EAudioRequestStatus(IATLAudioObjectData* const, const IATLTriggerImplData* const, IATLEventData* const, const SATLSourceData* const));
 
         MOCK_METHOD2(StopEvent, EAudioRequestStatus(IATLAudioObjectData* const, const IATLEventData* const));
 
         MOCK_METHOD1(StopAllEvents, EAudioRequestStatus(IATLAudioObjectData* const));
 
         MOCK_METHOD2(SetPosition, EAudioRequestStatus(IATLAudioObjectData* const, const SATLWorldPosition&));
+
+        MOCK_METHOD2(SetMultiplePositions, EAudioRequestStatus(IATLAudioObjectData* const, const MultiPositionParams&));
 
         MOCK_METHOD3(SetRtpc, EAudioRequestStatus(IATLAudioObjectData* const, const IATLRtpcImplData* const, const float));
 
@@ -111,9 +113,9 @@ namespace Audio
 
         MOCK_METHOD1(DeleteAudioObjectData, void(IATLAudioObjectData* const));
 
-        MOCK_METHOD0(NewDefaultAudioListenerObjectData, IATLListenerData*());
+        MOCK_METHOD1(NewDefaultAudioListenerObjectData, IATLListenerData*(const TATLIDType));
 
-        MOCK_METHOD1(NewAudioListenerObjectData, IATLListenerData*(const uint));
+        MOCK_METHOD1(NewAudioListenerObjectData, IATLListenerData*(const TATLIDType));
 
         MOCK_METHOD1(DeleteAudioListenerObjectData, void(IATLListenerData* const));
 

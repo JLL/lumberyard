@@ -48,7 +48,7 @@ class ViewContext(object):
             ])
 
     def import_resource(self, name):
-        self._output_message('{name} imported sucessfully'.format(name=name))
+        self._output_message('{name} imported successfully'.format(name=name))
 
     def auto_added_resource(self, name):
         self._output_message('Added related resource with the name {name}'.format(name=name))
@@ -110,6 +110,18 @@ class ViewContext(object):
 
     def deleting_stack(self, stack_name, stack_id):
         self._output_message('\nDeleting stack {} ({})'.format(stack_name, stack_id))
+
+    def deleting_custom_resource_lambdas(self):
+        self._output_message('Deleting custom resource lambdas')
+
+    def deleting_lambda(self, lambda_name, version=None):
+        if version:
+            self._output_message('Deleting {}:{}'.format(lambda_name, version))
+        else:
+            self._output_message('Deleting {}'.format(lambda_name))
+
+    def deleting_lambdas_completed(self, delete_count):
+        self._output_message('Deleted {} lambdas.'.format(delete_count))
 
     def processing_lambda_code(self, description, function_name):
         self._output_message('\nProcessing code for the {} {} Lambda function.'.format(description, function_name))
@@ -197,7 +209,7 @@ created using Cloud Canvas and CloudFormation in the same manner as if you creat
 You only pay for what you use, as you use it; there are no minimum fees and no required upfront
 commitments, and most services include a free tier.
 
-Learn more at https://docs.aws.amazon.com/lumberyard/userguide/cloud-canvas.''')
+Learn more at https://docs.aws.amazon.com/lumberyard/latest/userguide/cloud-canvas-intro.html.''')
 
     def confirm_resource_deletion(self, resources, stack_description = None):
         '''Prompts the user to confirm that it is ok to delete the specified resources.

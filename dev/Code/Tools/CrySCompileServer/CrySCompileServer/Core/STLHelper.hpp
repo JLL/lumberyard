@@ -36,12 +36,12 @@ struct tdHash
 
 class CSTLHelper
 {
-    static  tdHash          Hash(const uint8_t* pData, const size_t Size);
+    static  tdHash              Hash(const uint8_t* pData, const size_t Size);
 public:
     static  void                Tokenize(tdEntryVec& rRet, const std::string& Tokens, const std::string& Separator);
-    static  tdToken         SplitToken(const std::string& rToken, const std::string& rSeparator);
+    static  tdToken             SplitToken(const std::string& rToken, const std::string& rSeparator);
     static  void                Splitizer(tdTokenList& rTokenList, const tdEntryVec& rFilter, const std::string& rSeparator);
-    static  void                Trim(std::string& rStr, char C);
+    static  void                Trim(std::string& rStr, const std::string& charsToTrim);
     static  void                Remove(std::string& rTokenDst, const std::string& rTokenSrc, const char C);
     static  void                Replace(std::vector<uint8_t>& rRet, const std::vector<uint8_t>& rTokenSrc, const std::string& rToReplace, const std::string& rReplacement);
     static  void                Replace(std::string& rRet, const std::string& rSrc, const std::string& rToReplace, const std::string& rReplacement);
@@ -97,13 +97,13 @@ public:
     }
 
 
-    static  void                Log(const std::string& rLog);
+    static  void            Log(const std::string& rLog);
 
-    static  tdHash          Hash(const std::string& rStr){return Hash(reinterpret_cast<const uint8_t*>(rStr.c_str()), rStr.size()); }
-    static  tdHash          Hash(const std::vector<uint8_t>& rData){return Hash(&rData[0], rData.size()); }
-    static  tdHash          Hash(const std::vector<uint8_t>& rData, size_t Size){return Hash(&rData[0], Size); }
+    static  tdHash          Hash(const std::string& rStr) { return Hash(reinterpret_cast<const uint8_t*>(rStr.c_str()), rStr.size()); }
+    static  tdHash          Hash(const std::vector<uint8_t>& rData) { return Hash(&rData[0], rData.size()); }
+    static  tdHash          Hash(const std::vector<uint8_t>& rData, size_t Size) { return Hash(&rData[0], Size); }
 
-    static  std::string Hash2String(const tdHash& rHash);
+    static  std::string     Hash2String(const tdHash& rHash);
     static  tdHash          String2Hash(const std::string& rStr);
 };
 

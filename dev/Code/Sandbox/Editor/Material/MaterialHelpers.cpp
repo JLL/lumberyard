@@ -44,32 +44,32 @@ namespace MaterialHelpers
             float minLimit, maxLimit;
             pVar->GetLimits(minLimit, maxLimit);
 
-            if (stricmp(element[1], "UIWidget") == 0)
+            if (azstricmp(element[1], "UIWidget") == 0)
             {
-                if (stricmp(element[2], "Color") == 0)
+                if (azstricmp(element[2], "Color") == 0)
                 {
                     pVar->SetDataType(IVariable::DT_COLOR);
                 }
             }
-            else if (stricmp(element[1], "UIHelp") == 0)
+            else if (azstricmp(element[1], "UIHelp") == 0)
             {
                 string help = element[2];
                 help.replace("\\n", "\n");
                 pVar->SetDescription(help);
             }
-            else if (stricmp(element[1], "UIName") == 0)
+            else if (azstricmp(element[1], "UIName") == 0)
             {
                 pVar->SetHumanName(element[2].c_str());
             }
-            else if (stricmp(element[1], "UIMin") == 0)
+            else if (azstricmp(element[1], "UIMin") == 0)
             {
                 pVar->SetLimits(atof(element[2]), maxLimit);
             }
-            else if (stricmp(element[1], "UIMax") == 0)
+            else if (azstricmp(element[1], "UIMax") == 0)
             {
                 pVar->SetLimits(minLimit, atof(element[2]));
             }
-            else if (stricmp(element[1], "UIStep") == 0)
+            else if (azstricmp(element[1], "UIStep") == 0)
             {
             }
 
@@ -88,7 +88,7 @@ namespace MaterialHelpers
             description += "\n";
         }
         description += "(Script Param Name = ";
-        description += pParam->m_Name;
+        description += pParam->m_Name.c_str();
         description += ")";
         pIVar->SetDescription(description);
     }
@@ -141,7 +141,7 @@ namespace MaterialHelpers
 
             if (pIVar)
             {
-                pIVar->SetName(pParam->m_Name);
+                pIVar->SetName(pParam->m_Name.c_str());
                 pPublicVars->AddVariable(pIVar);
 
                 if (pParam->m_Script.size())
@@ -178,7 +178,7 @@ namespace MaterialHelpers
             SShaderParam* pParam = NULL;
             for (int j = 0; j < pInputShaderResources.m_ShaderParams.size(); j++)
             {
-                if (QString::compare(pVar->GetName(), pInputShaderResources.m_ShaderParams[j].m_Name) == 0)
+                if (QString::compare(pVar->GetName(), pInputShaderResources.m_ShaderParams[j].m_Name.c_str()) == 0)
                 {
                     pParam = &pInputShaderResources.m_ShaderParams[j];
                     break;

@@ -51,8 +51,8 @@ namespace RenderGL
 
         MCORE_INLINE MCommon::Camera* GetCamera() const                                         { return mCamera; }
         MCORE_INLINE GLRenderUtil* GetRenderUtil()                                              { return mRenderUtil; }
-        MCORE_INLINE const char* GetDeviceName()                                                { return (const char*)glGetString(GL_VENDOR); }
-        MCORE_INLINE const char* GetDeviceVendor()                                              { return (const char*)glGetString(GL_RENDERER); }
+        const char* GetDeviceName();
+        const char* GetDeviceVendor();
         MCORE_INLINE RenderTexture* GetRenderTexture()                                          { return mRenderTexture; }
         MCORE_INLINE const char* GetShaderPath() const                                          { return mShaderPath.c_str(); }
         MCORE_INLINE TextureCache* GetTextureCache()                                            { return &mTextureCache; }
@@ -172,7 +172,8 @@ namespace RenderGL
         PostProcessShader*  mVSmartBlur;
 
         Texture*            mRandomVectorTexture;
-        AZ::Vector3         mRandomOffsets[64];
+        AZStd::vector<AZ::Vector3> mRandomOffsets;
+        static size_t       mNumRandomOffsets;
 
         GLRenderUtil*       mRenderUtil;    /**< The rendering utility. */
         TextureCache        mTextureCache;  /**< The texture manager used to load and manage textures. */

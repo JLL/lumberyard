@@ -17,6 +17,7 @@
 #include "StdAfx.h"
 #include "System.h"
 #include <time.h>
+#include <AzCore/IO/Streamer.h>
 #include <AzCore/IO/SystemFile.h>
 #include "CryLibrary.h"
 #include "IGemManager.h"
@@ -24,7 +25,7 @@
 #include <CrySystemBus.h>
 #include <ITimeDemoRecorder.h>
 #include <AzFramework/API/ApplicationAPI.h>
-#include <AzFramework/API/ApplicationAPI_win.h>
+#include <AzFramework/API/ApplicationAPI_Platform.h>
 #include <AzFramework/Input/Devices/Keyboard/InputDeviceKeyboard.h>
 
 
@@ -37,6 +38,7 @@
 #define SYSTEM_CPP_SECTION_5 5
 #define SYSTEM_CPP_SECTION_6 6
 #define SYSTEM_CPP_SECTION_7 7
+#define SYSTEM_CPP_SECTION_8 8
 #endif
 
 #if defined(_RELEASE) && AZ_LEGACY_CRYSYSTEM_TRAIT_USE_EXCLUDEUPDATE_ON_CONSOLE
@@ -48,6 +50,54 @@
 #define WIN32_LEAN_AND_MEAN
 // If app hasn't chosen, set to work with Windows 98, Windows Me, Windows 2000, Windows XP and beyond
 #include <windows.h>
+
+static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    CSystem* pSystem = 0;
+    if (gEnv)
+    {
+        pSystem = static_cast<CSystem*>(gEnv->pSystem);
+    }
+    if (pSystem && !pSystem->m_bQuit)
+    {
+        LRESULT result;
+        bool bAny = false;
+        for (std::vector<IWindowMessageHandler*>::const_iterator it = pSystem->m_windowMessageHandlers.begin(); it != pSystem->m_windowMessageHandlers.end(); ++it)
+        {
+            IWindowMessageHandler* pHandler = *it;
+            LRESULT maybeResult = 0xDEADDEAD;
+            if (pHandler->HandleMessage(hWnd, uMsg, wParam, lParam, &maybeResult))
+            {
+                assert(maybeResult != 0xDEADDEAD && "Message handler indicated a resulting value, but no value was written");
+                if (bAny)
+                {
+                    assert(result == maybeResult && "Two window message handlers tried to return different result values");
+                }
+                else
+                {
+                    bAny = true;
+                    result = maybeResult;
+                }
+            }
+        }
+        if (bAny)
+        {
+            // One of the registered handlers returned something
+            return result;
+        }
+    }
+
+    // Handle with the default procedure
+#if defined(UNICODE) || defined(_UNICODE)
+    assert(IsWindowUnicode(hWnd) && "Window should be Unicode when compiling with UNICODE");
+#else
+    if (!IsWindowUnicode(hWnd))
+    {
+        return DefWindowProcA(hWnd, uMsg, wParam, lParam);
+    }
+#endif
+    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+}
 #endif
 
 #if defined(LINUX) && !defined(ANDROID)
@@ -60,7 +110,11 @@
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
 
 
@@ -120,7 +174,6 @@
 #include "ServerThrottle.h"
 #include "ILocalMemoryUsage.h"
 #include "ResourceManager.h"
-#include "MemoryManager.h"
 #include "LoadingProfiler.h"
 #include "HMDBus.h"
 #include "OverloadSceneManager/OverloadSceneManager.h"
@@ -129,6 +182,7 @@
 #include "IZLibCompressor.h"
 #include "IZlibDecompressor.h"
 #include "ILZ4Decompressor.h"
+#include "IZStdDecompressor.h"
 #include "zlib.h"
 #include "RemoteConsole/RemoteConsole.h"
 #include "BootProfiler.h"
@@ -148,7 +202,7 @@ WATERMARKDATA(_m);
 
 #ifdef WIN32
 
-#include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_win.h>
+#include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_Platform.h>
 
 // To enable profiling with vtune (https://software.intel.com/en-us/intel-vtune-amplifier-xe), make sure the line below is not commented out
 //#define  PROFILE_WITH_VTUNE
@@ -163,7 +217,7 @@ WATERMARKDATA(_m);
 
 #include <CryProfileMarker.h>
 
-#include <../CryAction/ILevelSystem.h>
+#include <ILevelSystem.h>
 
 #include <CrtDebugStats.h>
 #include <AzFramework/IO/LocalFileIO.h>
@@ -188,7 +242,7 @@ CMTSafeHeap* g_pPakHeap = 0;// = &g_pakHeap;
 //////////////////////////////////////////////////////////////////////////
 #include "Validator.h"
 
-#include "../CryAction/IViewSystem.h"
+#include <IViewSystem.h>
 
 #include <AzCore/Module/Environment.h>
 #include <AzCore/Component/ComponentApplication.h>
@@ -266,6 +320,8 @@ struct SCVarsWhitelistConfigSink
 
 #if defined(AZ_MONOLITHIC_BUILD)
 SC_API struct SSystemGlobalEnvironment* gEnv = NULL;
+ComponentFactoryCreationNode* ComponentFactoryCreationNode::sm_head = nullptr;
+size_t ComponentFactoryCreationNode::sm_size = 0;
 #endif // AZ_MONOLITHIC_BUILD
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -370,10 +426,13 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_pValidator = NULL;
     m_pCmdLine = NULL;
     m_pDefaultValidator = NULL;
+    m_pLevelSystem = NULL;
+    m_pViewSystem = NULL;
     m_pIBudgetingSystem = NULL;
     m_pIZLibCompressor = NULL;
     m_pIZLibDecompressor = NULL;
     m_pILZ4Decompressor = NULL;
+    m_pIZStdDecompressor = nullptr;
     m_pLocalizationManager = NULL;
     m_pGemManager = nullptr;
     m_crypto = nullptr;
@@ -381,7 +440,11 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_sys_skip_input = nullptr;
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
     m_sys_min_step = 0;
     m_sys_max_step = 0;
@@ -412,10 +475,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_sys_profile_memory = NULL;
     m_sys_profile_sampler = NULL;
     m_sys_profile_sampler_max_samples = NULL;
-    m_sys_job_system_filter = NULL;
-    m_sys_job_system_enable = NULL;
-    m_sys_job_system_profiler = NULL;
-    m_sys_job_system_max_worker = NULL;
     m_sys_GraphicsQuality = NULL;
     m_sys_firstlaunch = NULL;
     m_sys_enable_budgetmonitoring = NULL;
@@ -455,6 +514,9 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_bInDevMode = false;
     m_bGameFolderWritable = false;
 
+    m_bDrawConsole = true;
+    m_bDrawUI = true;
+
     m_nServerConfigSpec = CONFIG_VERYHIGH_SPEC;
     m_nMaxConfigSpec = CONFIG_VERYHIGH_SPEC;
 
@@ -489,11 +551,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
 
     g_pPakHeap = new CMTSafeHeap;
 
-    m_PlatformOSCreateFlags = 0;
-
-    // create job manager
-    m_env.pJobManager = GetJobManagerInterface();
-
     if (!AZ::AllocatorInstance<AZ::OSAllocator>::IsReady())
     {
         m_initedOSAllocator = true;
@@ -508,8 +565,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
     m_UpdateTimesIdx = 0U;
     m_bNeedDoWorkDuringOcclusionChecks = false;
 
-    m_PlatformOSCreateFlags = 0;
-
     m_eRuntimeState = ESYSTEM_EVENT_LEVEL_UNLOAD;
 
     m_bHasRenderedErrorMessage = false;
@@ -521,8 +576,6 @@ CSystem::CSystem(SharedEnvironmentInstance* pSharedEnvironment)
 #endif
 
     m_ConfigPlatform = CONFIG_INVALID_PLATFORM;
-
-    m_GraphicsSettingsMap = nullptr;
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -583,12 +636,15 @@ void CSystem::Release()
 }
 
 //////////////////////////////////////////////////////////////////////////
-void CSystem::FreeLib(WIN_HMODULE hLibModule)
+void CSystem::FreeLib(AZStd::unique_ptr<AZ::DynamicModuleHandle>& hLibModule)
 {
     if (hLibModule)
     {
-        CryFreeLibrary(hLibModule);
-        (hLibModule) = NULL;
+        if (hLibModule->IsLoaded())
+        {
+            hLibModule->Unload();
+        }
+        hLibModule.release();
     }
 }
 
@@ -735,6 +791,8 @@ void CSystem::ShutDown()
     }
     //////////////////////////////////////////////////////////////////////////
 
+    CryLegacyAnimationRequestBus::Broadcast(&CryLegacyAnimationRequestBus::Events::ShutdownCharacterManager);
+
     // Shutdown resource manager.
     m_pResourceManager->Shutdown();
 
@@ -770,7 +828,10 @@ void CSystem::ShutDown()
     SAFE_RELEASE(m_pIZLibCompressor);
     SAFE_RELEASE(m_pIZLibDecompressor);
     SAFE_RELEASE(m_pILZ4Decompressor);
+    SAFE_RELEASE(m_pIZStdDecompressor);
     SAFE_RELEASE(m_pIBudgetingSystem);
+    SAFE_RELEASE(m_pViewSystem);
+    SAFE_RELEASE(m_pLevelSystem);
     SAFE_RELEASE(m_env.pCodeCheckpointMgr);
 
     //Can't kill renderer before we delete CryFont, 3DEngine, etc
@@ -818,10 +879,6 @@ void CSystem::ShutDown()
     SAFE_RELEASE(m_sys_profile_memory);
     SAFE_RELEASE(m_sys_profile_sampler);
     SAFE_RELEASE(m_sys_profile_sampler_max_samples);
-    SAFE_RELEASE(m_sys_job_system_filter);
-    SAFE_RELEASE(m_sys_job_system_enable);
-    SAFE_RELEASE(m_sys_job_system_profiler);
-    SAFE_RELEASE(m_sys_job_system_max_worker);
     SAFE_RELEASE(m_sys_GraphicsQuality);
     SAFE_RELEASE(m_sys_firstlaunch);
     SAFE_RELEASE(m_sys_skip_input);
@@ -830,7 +887,11 @@ void CSystem::ShutDown()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_3
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
 
     SAFE_RELEASE(m_sys_min_step);
@@ -933,11 +994,6 @@ void CSystem::Quit()
     {
         GetIRenderer()->RestoreGamma();
     }
-    
-#if CAPTURE_REPLAY_LOG
-    CryGetIMemReplay()->Stop();
-#endif
-
 
     /*
     * TODO: This call to _exit, _Exit, TerminateProcess etc. needs to
@@ -952,7 +1008,11 @@ void CSystem::Quit()
     */
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_4
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -1042,7 +1102,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_5
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
         while (true)
         {
@@ -1060,7 +1124,6 @@ public:
 #ifdef ENABLE_LW_PROFILERS
             QueryPerformanceCounter(&stepStart);
 #endif
-            IGameFramework* pIGameFramework = gEnv->pGame->GetIGameFramework();
             while ((step = m_stepRequested) > 0 || m_doZeroStep)
             {
                 stepped = true;
@@ -1082,7 +1145,11 @@ public:
                 }
                 step = min(step, pVars->maxWorldStep);
                 timeStart = CryGetTicks();
-                pIGameFramework->PrePhysicsTimeStep(step);
+                IGameFramework* pIGameFramework = gEnv->pGame ? gEnv->pGame->GetIGameFramework() : nullptr;
+                if (pIGameFramework)
+                {
+                    pIGameFramework->PrePhysicsTimeStep(step);
+                }
                 gEnv->pPhysicalWorld->TimeStep(step);
                 timeTaken = gEnv->pTimer->TicksToSeconds(CryGetTicks() - timeStart);
                 if (timeTaken > step * 0.9f)
@@ -1215,11 +1282,14 @@ void CSystem::CreatePhysicsThread()
         threadParams.nStackSizeKB = PHYSICS_STACK_SIZE >> 10;
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_6
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
 
-        {
-            ScopedSwitchToGlobalHeap globalHeap;
+        {            
             m_PhysThread = new CPhysicsThreadTask;
             GetIThreadTaskManager()->RegisterTask(m_PhysThread, threadParams);
         }
@@ -1441,6 +1511,12 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
         return false;
     }
 
+    // CryAction has been moved to the optional CryLegacy Gem, so if it doesn't exist we need to do this here
+    if (!gEnv->pGame || !gEnv->pGame->GetIGameFramework())
+    {
+        RenderBegin();
+    }
+
 #ifndef EXCLUDE_UPDATE_ON_CONSOLE
     // do the dedicated sleep earlier than the frame profiler to avoid having it counted
     if (gEnv->IsDedicated())
@@ -1452,21 +1528,8 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
 #endif // defined(MAP_LOADING_SLICING)
     }
 #endif //EXCLUDE_UPDATE_ON_CONSOLE
-#if CAPTURE_REPLAY_LOG
-    if (CryGetIMemoryManager() && CryGetIMemReplay())
-    {
-        CryGetIMemReplay()->AddFrameStart();
-        if ((--m_ttMemStatSS) <= 0)
-        {
-            CryGetIMemReplay()->AddScreenshot();
-            m_ttMemStatSS = 30;
-        }
-    }
-#endif //CAPTURE_REPLAY_LOG
 
     gEnv->pOverloadSceneManager->Update();
-
-    m_pPlatformOS->Tick(m_Time.GetRealFrameTime());
 
 #ifdef WIN32
     // enable/disable SSE fp exceptions (#nan and /0)
@@ -1506,8 +1569,6 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
     }
 #endif //EXCLUDE_UPDATE_ON_CONSOLE
        //////////////////////////////////////////////////////////////////////////
-
-    EBUS_EVENT(AzFramework::AssetSystemRequestBus, UpdateQueuedEvents);
 
     if (m_env.pLog)
     {
@@ -1602,6 +1663,57 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
         m_pStreamEngine->Update();
     }
 
+    if (g_cvars.az_streaming_stats)
+    {
+        SDrawTextInfo ti;
+        ti.flags = eDrawText_FixedSize | eDrawText_2D | eDrawText_Monospace;
+        ti.xscale = ti.yscale = 1.2f;
+
+        const int viewportHeight = GetViewCamera().GetViewSurfaceZ();
+        
+#if defined(AZ_RESTRICTED_PLATFORM)
+    #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_8
+    #if defined(AZ_PLATFORM_XENIA)
+    #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+    #include "Provo/System_cpp_provo.inl"
+    #endif
+#else
+    float y = static_cast<float>(viewportHeight) - 30.0f;
+#endif
+
+        AZStd::vector<AZ::IO::Statistic> stats;
+        AZ::IO::Streamer::Instance().CollectStatistics(stats);
+
+        for (AZ::IO::Statistic& stat : stats)
+        {
+            switch (stat.GetType())
+            {
+            case AZ::IO::Statistic::Type::FloatingPoint:
+                gEnv->pRenderer->DrawTextQueued(Vec3(10, y, 1.0f), ti, 
+                    AZStd::string::format("%s/%s: %.3f", stat.GetOwner().data(), stat.GetName().data(), stat.GetFloatValue()).c_str());
+                break;
+            case AZ::IO::Statistic::Type::Integer:
+                gEnv->pRenderer->DrawTextQueued(Vec3(10, y, 1.0f), ti,
+                    AZStd::string::format("%s/%s: %lli", stat.GetOwner().data(), stat.GetName().data(), stat.GetIntegerValue()).c_str());
+                break;
+            case AZ::IO::Statistic::Type::Percentage:
+                gEnv->pRenderer->DrawTextQueued(Vec3(10, y, 1.0f), ti,
+                    AZStd::string::format("%s/%s: %.2f (percent)", stat.GetOwner().data(), stat.GetName().data(), stat.GetPercentage()).c_str());
+                break;
+            default:
+                gEnv->pRenderer->DrawTextQueued(Vec3(10, y, 1.0f), ti, AZStd::string::format("Unsupported stat type: %i", stat.GetType()).c_str());
+                break;
+            }
+            y -= 12.0f;
+            if (y < 0.0f)
+            {
+                //Exit the loop because there's no purpose on rendering text outside of the visible area.
+                break;
+            }
+        }
+    }
+
 #ifndef EXCLUDE_UPDATE_ON_CONSOLE
     if (m_bIgnoreUpdates)
     {
@@ -1666,8 +1778,7 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
 
             if (maxFPS == 0 && vSync == 0)
             {
-                IGameFramework* pGameFrm = m_env.pGame ? m_env.pGame->GetIGameFramework() : 0;
-                ILevelSystem* pLvlSys = pGameFrm ? pGameFrm->GetILevelSystem() : 0;
+                ILevelSystem* pLvlSys = GetILevelSystem();
                 const bool inLevel = pLvlSys && pLvlSys->GetCurrentLevel() != 0;
                 maxFPS = !inLevel || IsPaused() ? 60 : 0;
             }
@@ -1766,7 +1877,7 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
 #endif //EXCLUDE_UPDATE_ON_CONSOLE
        //////////////////////////////////////////////////////////////////////
        //update sound system Part 1 if in Editor / in Game Mode Viewsystem updates the Listeners
-    if (!m_env.IsEditorGameMode() && m_env.pGame)
+    if (!m_env.IsEditorGameMode())
     {
         if ((updateFlags & ESYSUPDATE_EDITOR) != 0 && !bNoUpdate && nPauseMode != 1)
         {
@@ -1774,20 +1885,10 @@ bool CSystem::UpdatePreTickBus(int updateFlags, int nPauseMode)
             // Updating all views here is a bit of a workaround, since we need
             // to ensure that sound listeners owned by inactive views are also
             // marked as inactive. Ideally that should happen when exiting game mode.
-            if (IGameFramework* const pIGameFramework = m_env.pGame->GetIGameFramework())
+            if (GetIViewSystem())
             {
                 FRAME_PROFILER("SysUpdate:UpdateSoundListeners", this, PROFILE_SYSTEM);
-                pIGameFramework->GetIViewSystem()->UpdateSoundListeners();
-
-                /*if (IView* const pActiveView = pIGameFramework->GetIViewSystem()->GetActiveView())
-                {
-                    EntityId const nListenerID = pActiveView->GetSoundListenerID();
-
-                    if (nListenerID != INVALID_ENTITYID)
-                    {
-                        pIGameFramework->GetIViewSystem()->UpdateSoundListeners();
-                    }
-                }*/
+                GetIViewSystem()->UpdateSoundListeners();
             }
         }
     }
@@ -2173,8 +2274,6 @@ bool CSystem::UpdatePostTickBus(int updateFlags, int nPauseMode)
     }
 
     {
-        ScopedSwitchToGlobalHeap globalHeap;
-
         if (it != m_updateTimes.begin())
         {
             m_updateTimes.erase(m_updateTimes.begin(), it);
@@ -2196,13 +2295,56 @@ bool CSystem::UpdatePostTickBus(int updateFlags, int nPauseMode)
         gEnv->pCryPak->DisableRuntimeFileAccess(true);
     }
 
+    // CryAction has been moved to the optional CryLegacy Gem, so if it doesn't exist we need to do all this here
+    if (!gEnv->pGame || !gEnv->pGame->GetIGameFramework())
+    {
+        if (GetIViewSystem())
+        {
+            GetIViewSystem()->Update(min(gEnv->pTimer->GetFrameTime(), 0.1f));
+        }
+
+        if (gEnv->pLyShine)
+        {
+            // Tell the UI system the size of the viewport we are rendering to - this drives the
+            // canvas size for full screen UI canvases. It needs to be set before either pLyShine->Update or
+            // pLyShine->Render are called. It must match the viewport size that the input system is using.
+            AZ::Vector2 viewportSize;
+            viewportSize.SetX(static_cast<float>(gEnv->pRenderer->GetOverlayWidth()));
+            viewportSize.SetY(static_cast<float>(gEnv->pRenderer->GetOverlayHeight()));
+            gEnv->pLyShine->SetViewportSize(viewportSize);
+
+            bool isUiPaused = gEnv->pTimer->IsTimerPaused(ITimer::ETIMER_UI);
+            if (!isUiPaused)
+            {
+                gEnv->pLyShine->Update(gEnv->pTimer->GetFrameTime(ITimer::ETIMER_UI));
+            }
+        }
+
+        // Begin occlusion job after setting the correct camera.
+        gEnv->p3DEngine->PrepareOcclusion(GetViewCamera());
+
+        CrySystemNotificationBus::Broadcast(&CrySystemNotifications::OnPreRender);
+
+        Render();
+
+        gEnv->p3DEngine->EndOcclusion();
+
+        RenderEnd();
+
+        gEnv->p3DEngine->SyncProcessStreamingUpdate();
+
+        if (NeedDoWorkDuringOcclusionChecks())
+        {
+            DoWorkDuringOcclusionChecks();
+        }
+    }
+
     return !m_bQuit;
 }
 
 
 bool CSystem::UpdateLoadtime()
 {
-    m_pPlatformOS->Tick(m_Time.GetRealFrameTime());
     return !m_bQuit;
 }
 
@@ -2275,9 +2417,9 @@ void CSystem::UpdateMovieSystem(const int updateFlags, const float fFrameTime, c
 //////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////
-XmlNodeRef CSystem::CreateXmlNode(const char* sNodeName, bool bReuseStrings)
+XmlNodeRef CSystem::CreateXmlNode(const char* sNodeName, bool bReuseStrings, bool bIsProcessingInstruction)
 {
-    return new CXmlNode(sNodeName, bReuseStrings);
+    return new CXmlNode(sNodeName, bReuseStrings, bIsProcessingInstruction);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -2460,6 +2602,14 @@ void CSystem::GetLocalizedPath(const char* sLanguage, string& sLocalizedPath)
     // Omit the trailing slash!
     string sLocalizationFolder(string().assign(PathUtil::GetLocalizationFolder(), 0, PathUtil::GetLocalizationFolder().size() - 1));
 
+    int locFormat = 0;
+    LocalizationManagerRequestBus::BroadcastResult(locFormat, &LocalizationManagerRequestBus::Events::GetLocalizationFormat);
+    if(locFormat == 1)
+    {
+        sLocalizedPath = sLocalizationFolder + "/" + sLanguage + ".loc.agsxml";
+    }
+    else
+    {
     if (sLocalizationFolder.compareNoCase("Languages") != 0)
     {
         sLocalizedPath = sLocalizationFolder + "/" + sLanguage + "_xml.pak";
@@ -2467,6 +2617,7 @@ void CSystem::GetLocalizedPath(const char* sLanguage, string& sLocalizedPath)
     else
     {
         sLocalizedPath = string("Localized/") + sLanguage + "_xml.pak";
+        }
     }
 }
 
@@ -2564,7 +2715,11 @@ void CSystem::debug_GetCallStackRaw(void** callstack, uint32& callstackLength)
     callstackLength = RtlCaptureStackBackTrace(nNumStackFramesToSkip, callstackCapacity, callstack, NULL);
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEM_CPP_SECTION_7
-#include AZ_RESTRICTED_FILE(System_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/System_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/System_cpp_provo.inl"
+    #endif
 #endif
 
     if (callstackLength > 0)
@@ -2586,8 +2741,15 @@ void CSystem::ApplicationTest(const char* szParam)
     m_pTestSystem->ApplicationTest(szParam);
 }
 
-void CSystem::ExecuteCommandLine()
+void CSystem::ExecuteCommandLine(bool deferred)
 {
+    if (m_executedCommandLine)
+    {
+        return;
+    }
+
+    m_executedCommandLine = true;
+
     // auto detect system spec (overrides profile settings)
     if (m_pCmdLine->FindArg(eCLAT_Pre, "autodetect"))
     {
@@ -2600,7 +2762,6 @@ void CSystem::ExecuteCommandLine()
     assert(pCmdLine);
 
     const int iCnt = pCmdLine->GetArgCount();
-
     for (int i = 0; i < iCnt; ++i)
     {
         const ICmdLineArg* pCmd = pCmdLine->GetArg(i);
@@ -2619,7 +2780,7 @@ void CSystem::ExecuteCommandLine()
                 }
 
                 GetILog()->Log("Executing command from command line: \n%s\n", sLine.c_str()); // - the actual command might be executed much later (e.g. level load pause)
-                GetIConsole()->ExecuteString(sLine.c_str(), false, true);
+                GetIConsole()->ExecuteString(sLine.c_str(), false, deferred);
             }
 #if defined(DEDICATED_SERVER)
 #if defined(CVARS_WHITELIST)
@@ -2700,18 +2861,6 @@ void CSystem::SetConfigPlatform(const ESystemConfigPlatform platform)
 ESystemConfigPlatform CSystem::GetConfigPlatform() const
 {
     return m_ConfigPlatform;
-}
-
-//////////////////////////////////////////////////////////////////////////
-void CSystem::SetGraphicsSettingsMap(AZStd::unordered_map<AZStd::string, CVarInfo>* map)
-{
-    m_GraphicsSettingsMap = map;
-}
-
-//////////////////////////////////////////////////////////////////////////
-AZStd::unordered_map<AZStd::string, CVarInfo>* CSystem::GetGraphicsSettingsMap() const
-{
-    return m_GraphicsSettingsMap;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -2849,14 +2998,19 @@ bool CSystem::SteamInit()
         return true;
     }
 
+    AZStd::string_view binFolderName;
+    AzFramework::ApplicationRequests::Bus::BroadcastResult(binFolderName, &AzFramework::ApplicationRequests::GetBinSubfolder);
+
     ////////////////////////////////////////////////////////////////////////////
     // ** DEVELOPMENT ONLY ** - creates the appropriate steam_appid.txt file needed to call SteamAPI_Init()
 #if !defined(RELEASE)
 #if defined(WIN64)
-    FILE* pSteamAppID = fopen(BINFOLDER_NAME "/steam_appid.txt", "wt");
+    AZStd::string appidPath = AZStd::string::format("%s/steam_appid.txt", binFolderName.data());
+    azfopen(&pSteamAppID, appidPath.c_str(), "wt");
 #else
 #if defined(WIN32)
-    FILE* pSteamAppID = fopen("Bin32/steam_appid.txt", "wt");
+    FILE* pSteamAppID = nullptr;
+    azfopen(&pSteamAppID, "Bin32/steam_appid.txt", "wt");
 #endif // defined(WIN32)
 #endif // defined(WIN64)
     fprintf(pSteamAppID, "%d", g_cvars.sys_steamAppId);
@@ -2875,7 +3029,7 @@ bool CSystem::SteamInit()
     // ** DEVELOPMENT ONLY ** - deletes the appropriate steam_appid.txt file as it's no longer needed
 #if !defined(RELEASE)
 #if defined(WIN64)
-    remove(BINFOLDER_NAME "/steam_appid.txt");
+    remove(appidPath.c_str());
 #else
 #if defined(WIN32)
     remove("Bin32/steam_appid.txt");
@@ -2902,10 +3056,18 @@ void CSystem::OnLanguageCVarChanged(ICVar* language)
         {
             const char* lang = language->GetString();
 
-            pSys->CloseLanguagePak(pSys->GetLocalizationManager()->GetLanguage());
+            // Hook up Localization initialization
+            int locFormat = 0;
+            LocalizationManagerRequestBus::BroadcastResult(locFormat, &LocalizationManagerRequestBus::Events::GetLocalizationFormat);
+            if (locFormat == 0)
+            {
+                const char* locLanguage = nullptr;
+                LocalizationManagerRequestBus::BroadcastResult(locLanguage, &LocalizationManagerRequestBus::Events::GetLanguage);
             pSys->OpenLanguagePak(lang);
-            pSys->GetLocalizationManager()->SetLanguage(lang);
-            pSys->GetLocalizationManager()->ReloadData();
+            }
+
+            LocalizationManagerRequestBus::Broadcast(&LocalizationManagerRequestBus::Events::SetLanguage, lang);
+            LocalizationManagerRequestBus::Broadcast(&LocalizationManagerRequestBus::Events::ReloadData);
 
             if (gEnv->pCryFont)
             {
@@ -3200,8 +3362,8 @@ bool CSystem::HandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, 
         const UINT rawInputHeaderSize = sizeof(RAWINPUTHEADER);
         GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &rawInputSize, rawInputHeaderSize);
 
-        LPBYTE rawInputBytes = new BYTE[rawInputSize];
-        CRY_ASSERT(rawInputBytes);
+        AZStd::array<BYTE, sizeof(RAWINPUT)> rawInputBytesArray;
+        LPBYTE rawInputBytes = rawInputBytesArray.data();
 
         const UINT bytesCopied = GetRawInputData((HRAWINPUT)lParam, RID_INPUT, rawInputBytes, &rawInputSize, rawInputHeaderSize);
         CRY_ASSERT(bytesCopied == rawInputSize);
@@ -3209,21 +3371,22 @@ bool CSystem::HandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, 
         RAWINPUT* rawInput = (RAWINPUT*)rawInputBytes;
         CRY_ASSERT(rawInput);
 
-        EBUS_EVENT(AzFramework::RawInputNotificationBusWin, OnRawInputEvent, *rawInput);
+        AzFramework::RawInputNotificationBusWindows::Broadcast(&AzFramework::RawInputNotificationsWindows::OnRawInputEvent, *rawInput);
+
         return false;
     }
     case WM_DEVICECHANGE:
     {
         if (wParam == 0x0007) // DBT_DEVNODES_CHANGED
         {
-            EBUS_EVENT(AzFramework::RawInputNotificationBusWin, OnRawInputDeviceChangeEvent);
+            AzFramework::RawInputNotificationBusWindows::Broadcast(&AzFramework::RawInputNotificationsWindows::OnRawInputDeviceChangeEvent);
         }
         return true;
     }
     case WM_CHAR:
     {
         const unsigned short codeUnitUTF16 = static_cast<unsigned short>(wParam);
-        EBUS_EVENT(AzFramework::RawInputNotificationBusWin, OnRawInputCodeUnitUTF16Event, codeUnitUTF16);
+        AzFramework::RawInputNotificationBusWindows::Broadcast(&AzFramework::RawInputNotificationsWindows::OnRawInputCodeUnitUTF16Event, codeUnitUTF16);
         return true;
     }
 
@@ -3237,57 +3400,6 @@ bool CSystem::HandleMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, 
 
 #endif
 
-//////////////////////////////////////////////////////////////////////////
-#if defined(WIN32)
-static LRESULT WINAPI WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    CSystem* pSystem = 0;
-    if (gEnv)
-    {
-        pSystem = static_cast<CSystem*>(gEnv->pSystem);
-    }
-    if (pSystem && !pSystem->m_bQuit)
-    {
-        LRESULT result;
-        bool bAny = false;
-        for (std::vector<IWindowMessageHandler*>::const_iterator it = pSystem->m_windowMessageHandlers.begin(); it != pSystem->m_windowMessageHandlers.end(); ++it)
-        {
-            IWindowMessageHandler* pHandler = *it;
-            LRESULT maybeResult = 0xDEADDEAD;
-            if (pHandler->HandleMessage(hWnd, uMsg, wParam, lParam, &maybeResult))
-            {
-                assert(maybeResult != 0xDEADDEAD && "Message handler indicated a resulting value, but no value was written");
-                if (bAny)
-                {
-                    assert(result == maybeResult && "Two window message handlers tried to return different result values");
-                }
-                else
-                {
-                    bAny = true;
-                    result = maybeResult;
-                }
-            }
-        }
-        if (bAny)
-        {
-            // One of the registered handlers returned something
-            return result;
-        }
-    }
-
-    // Handle with the default procedure
-#if defined(UNICODE) || defined(_UNICODE)
-    assert(IsWindowUnicode(hWnd) && "Window should be Unicode when compiling with UNICODE");
-#else
-    if (!IsWindowUnicode(hWnd))
-    {
-        return DefWindowProcA(hWnd, uMsg, wParam, lParam);
-    }
-#endif
-    return DefWindowProcW(hWnd, uMsg, wParam, lParam);
-}
-#endif
-
 std::shared_ptr<AZ::IO::FileIOBase> CSystem::CreateLocalFileIO()
 {
     return std::make_shared<AZ::IO::LocalFileIO>();
@@ -3296,6 +3408,16 @@ std::shared_ptr<AZ::IO::FileIOBase> CSystem::CreateLocalFileIO()
 const char* CSystem::GetAssetsPlatform() const
 {
     return m_assetPlatform.c_str();
+}
+
+IViewSystem* CSystem::GetIViewSystem()
+{
+    return (m_env.pGame && m_env.pGame->GetIGameFramework()) ? m_env.pGame->GetIGameFramework()->GetIViewSystem() : m_pViewSystem;
+}
+
+ILevelSystem* CSystem::GetILevelSystem()
+{
+    return (m_env.pGame && m_env.pGame->GetIGameFramework()) ? m_env.pGame->GetIGameFramework()->GetILevelSystem() : m_pLevelSystem;
 }
 
 #undef EXCLUDE_UPDATE_ON_CONSOLE

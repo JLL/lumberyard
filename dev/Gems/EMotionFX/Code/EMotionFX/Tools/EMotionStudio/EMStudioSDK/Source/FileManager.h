@@ -58,7 +58,7 @@ namespace EMStudio
         void OnCatalogAssetRemoved(const AZ::Data::AssetId& assetId) override;
 
         // Editor asset system API
-        void SourceFileChanged(AZStd::string relativePath, AZStd::string scanFolder, AZ::Uuid sourceUuid) override;
+        void SourceFileChanged(AZStd::string relativePath, AZStd::string scanFolder, AZ::TypeId sourceTypeId) override;
 
         // helpers
         void RelocateToAssetCacheFolder(AZStd::string& filename);
@@ -86,7 +86,7 @@ namespace EMStudio
         // motion file dialogs
         AZStd::string LoadMotionFileDialog(QWidget* parent);
         AZStd::vector<AZStd::string> LoadMotionsFileDialog(QWidget* parent);
-        void SaveMotion(EMotionFX::Motion* motion);
+        void SaveMotion(AZ::u32 motionId);
 
         // node mapping files
         AZStd::string LoadNodeMapFileDialog(QWidget* parent);

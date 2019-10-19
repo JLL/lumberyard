@@ -16,17 +16,13 @@
 import sys
 
 # you can uncomment this to make debugging build command lines easier.
-#sys.stdout.write('[WAF] Command line: ' + str(sys.argv))
+# sys.stdout.write('[WAF] Command line: ' + str(sys.argv))
 
 import os
+import time
 
 from waflib import Configure, Logs, Utils, Options, ConfigSet
 from waflib.Build import BuildContext, CleanContext, Context
-
-from waflib.Tools import c_aliases, c
-from waflib.Task import Task, RUN_ME, SKIP_ME
-from waflib.Configure import conf, ConfigurationContext
-from waflib.Errors import BuildError, WafError
 
 # Attempt to import the aztest module
 try:
@@ -55,7 +51,7 @@ except Exception:
     print traceback.print_exc()
 
 # Load globals from branch spec file if we must
-from waf_branch_spec import SUBFOLDERS, PLATFORM_CONFIGURATION_FILTER, MONOLITHIC_BUILDS, LUMBERYARD_ENGINE_PATH
+from waf_branch_spec import SUBFOLDERS, LUMBERYARD_ENGINE_PATH
 
 ###############################################################################
 Configure.autoconfig = True
@@ -96,8 +92,7 @@ def options(opt):
     # Lastly, load data driven settings
     opt.load_lmbr_data_driven_modules()
 
-###############################################################################
-## Configure 'configure' step
+
 def configure(conf):
     if BUILD_METRICS_SUPPORTED:
         build_metrics_reporter.set_build_command(conf.cmd)
@@ -105,21 +100,19 @@ def configure(conf):
     # Read the required lmbr configuration
     conf.calculate_engine_path()
 
+    conf.mark_3rd_party_config_for_autoconf()
+
     conf.load_user_settings()
 
     conf.initialize_third_party_settings()
 
     if conf.is_option_true('update_user_settings'):
         conf.update_settings_options_file()
-
+    
     # Run the WAF configure workflow
     conf.run_bootstrap()
 
-    conf.configure_settings()
-
-    conf.add_game_projects_to_specs()
-
-    conf.add_gems_to_specs()
+    conf.load_lmbr_data_driven_modules()
 
     try:
         import restricted
@@ -127,21 +120,37 @@ def configure(conf):
     except ImportError:
         pass
 
-    conf.load_compile_rules_for_supported_platforms(PLATFORM_CONFIGURATION_FILTER)
+    conf.add_game_projects_to_specs()
 
-    conf.update_validated_platforms()
+    conf.add_gems_to_specs()
 
-    conf.process_custom_configure_commands()
+    conf.load_compile_rules_for_enabled_platforms()
 
     # Recurse into sub-folders for auto conf when any wscript changes
-    recurse_subfolders(conf)
+    recurse_subfolders = []
+    for subfolder in SUBFOLDERS:
+        if os.path.isabs(subfolder):
+            recurse_subfolders.append(subfolder)
+        else:
+            recurse_subfolders.append(os.path.join(conf.engine_path,subfolder))
+
+    configure_timer = Utils.Timer()
+    Logs.info("[WAF] 'Configure Projects' starting...")
+
+    conf.recurse(dirs=recurse_subfolders)
 
     conf.configure_game_projects()
 
+    conf.process_additional_code_folders()
+
     conf.process_gems()
 
+    conf.configure_game_projects()
+
+    Logs.info("[WAF] 'Configure Projects' successful ({})".format(str(configure_timer)))
+
     conf.clear_waf_timestamp_files()
-        
+
 
 def post_command_exec(bld):
     # [post project gen]
@@ -170,28 +179,36 @@ stored_output_file = ''
 ###############################################################################
 # Run 'build' step
 def build(bld):
-    if BUILD_METRICS_SUPPORTED:
-        build_metrics_reporter.add_output_directory(bld.get_variant_dir())
-        build_metrics_reporter.set_build_command(bld.cmd)
-
     if not isinstance(bld, BuildContext):
         bld.fatal("[Error] Invalid build command: '{}'.  Type in '{} --help' for more information"
                   .format(bld.cmd if hasattr(bld, 'cmd') else str(bld), CURRENT_WAF_EXECUTABLE))
 
+    if BUILD_METRICS_SUPPORTED:
+        build_metrics_reporter.add_output_directory(bld.get_variant_dir())
+        build_metrics_reporter.set_build_command(bld.cmd)
+        
     # Read the required lmbr configuration
     bld.calculate_engine_path()
 
-    bld.validate_build_command()
+    bld.mark_3rd_party_config_for_autoconf()
 
-    #If the user wants to build a monolithic build for Mac add the platform to the list
-    if bld.is_option_true('mac_build_monolithic'):
-        MONOLITHIC_BUILDS.append( 'darwin')
+    bld.validate_build_command()
 
     bld.load_user_settings()
 
+    # Validate if the platform is enabled since it could be disabled after the build command was instantiated
+    build_platform = bld.env['PLATFORM']
+    if build_platform and build_platform != 'project_generator':
+        if not bld.env['BUILD_ENABLED']:
+            bld.fatal("[Error] Target platform '{}' not available for builds.".format(build_platform))
+
     bld.initialize_third_party_settings()
 
+    bld.load('artifacts_cache', tooldir=[CRY_WAF_TOOL_DIR])
+
     bld.options.project_spec = bld.options.project_spec.strip()  # remove spaces
+
+    bld.load_lmbr_data_driven_modules()
 
     # Create a post build message container
     bld.post_build_msg_info = []
@@ -241,22 +258,25 @@ def build(bld):
 
     bld.setup_game_projects()
 
+    bld.process_additional_code_folders()
+
+    bld.validate_monolithic_specified_targets()
+
     # Save current build environment so that later commands in a chain can make use of the information (ex. run_tests)
     if 'build' in bld.cmd:
         bld.env.store(os.path.join(bld.cache_dir, 'last_build_cache.py'))
 
-    if bld.is_option_true('package_projects_automatically') and bld.env['CONFIGURATION'] != 'project_generator':
-        package_cmd = 'package_{}_{}'.format(bld.env['PLATFORM'], bld.env['CONFIGURATION'])
-        if package_cmd in Options.commands:
-            return 
-        Options.commands.append(package_cmd)
-
 def package(pkg):
     pkg.options.project_spec = pkg.options.project_spec.strip()  # remove spaces
+
     pkg.calculate_engine_path()
     pkg.load_user_settings()
     pkg.initialize_third_party_settings()
     pkg.prepare_build_environment()
+
+    # Perform a pre-validation on the platforms availability
+    pkg.update_platform_availability_from_options()
+
     pkg.add_gems_to_specs()
     pkg.add_game_projects_to_specs()
     pkg.game_project = pkg.project
@@ -269,25 +289,26 @@ def package(pkg):
     recurse_subfolders(pkg)
 
 
-def package_darwin_x64(pkg):
-    package(pkg)
-
-
 def deploy(ctx):
-    if not ctx.variant:
-        ctx.fatal('Deploy task does not have a variant specified, cannot continue')
-    if not hasattr(ctx, 'features') or ctx.features is None:
-        ctx.fatal('Deploy task does not have any deployment features attached to it')
-    (platform, configuration) = ctx.get_platform_and_configuration()
-
-    # Read the required lmbr configuration
     ctx.calculate_engine_path()
-
+    ctx.load_user_settings()
     ctx.initialize_third_party_settings()
+    ctx.prepare_build_environment()
 
-    ctx.env['PLATFORM'] = platform
-    ctx.env['CONFIGURATION'] = configuration
-    ctx(features=ctx.features)
+    # Perform a pre-validation on the platforms availability
+    ctx.update_platform_availability_from_options()
+
+    ctx.add_gems_to_specs()
+    ctx.add_game_projects_to_specs()
+    ctx.game_project = ctx.project
+
+    ctx.check_module_load_options()
+
+    ctx.process_gems()
+    ctx.setup_game_projects()
+
+    recurse_subfolders(ctx)
+
 
 ###############################################################################
 def show_option_dialog(ctx):
@@ -330,29 +351,40 @@ if AZ_TEST_SUPPORTED:
         fun = 'run_tests'
 
 
-def wrap_execute(execute_method):
-    """
-    Decorator used to set the commands that can be configured automatically
+def clean_stale_cached_artifacts(ctx):
+    def should_delete(folder_path, days_to_keep):
+        if not os.path.isdir(folder_path):
+            return False
+        last_access_timestamp = os.stat(folder_path).st_mtime
+        current_timestamp = time.time()
+        days_since_last_access = (current_timestamp - last_access_timestamp) / 60 / 60 / 24
+        if days_since_last_access > days_to_keep:
+            return True
+        return False
 
-    :param execute_method:     The method to execute
-    """
-    def execute(self):
-        # Make sure to create all needed temp folders
-        bin_temp = self.get_bintemp_folder_node()
-        bin_temp.mkdir()
-        tmp_files_folder = bin_temp.make_node('TempFiles')
-        tmp_files_folder.mkdir()
+    whitelist = ['wafpickle']
+    artifacts_cache = ctx.options.artifacts_cache
+    artifacts_cache_days_to_keep = int(ctx.options.artifacts_cache_days_to_keep)
+    if ctx.is_option_true('artifacts_cache_wipeout'):
+        artifacts_cache_days_to_keep = -1
+        whitelist = []
+    success = True
+    for dir in os.listdir(artifacts_cache):
+        folder_path = os.path.join(artifacts_cache, dir)
+        if dir not in whitelist and should_delete(folder_path, artifacts_cache_days_to_keep):
+            Logs.info('Deleting stale artifacts {}'.format(folder_path))
+            try:
+                if Utils.is_win32:
+                    os.system('rmdir /S /Q {}'.format(folder_path))
+                else:
+                    os.system('rm -fr {}'.format(folder_path))
+            except Exception as e:
+                Logs.warn('Failed to delete stale artifacts {}. {}'.format(dir, str(e)))
+                success = False
+    if not success:
+        Logs.warn('Failed to delete all stale artifacts, make sure you have the correct permission to clean the cache and the cache is not in use.')
 
-        # Before executing any build or configure commands, check for config file
-        # and for bootstrap updates
-        self.load_user_settings()
 
-        if getattr(self, "do_auto_configure", None):
-            if self.do_auto_configure():
-                return
-
-        return execute_method(self)
-    return execute
-
-BuildContext.execute = wrap_execute(BuildContext.execute)
-ConfigurationContext.execute = wrap_execute(ConfigurationContext.execute)
+class CleanStaleCachedArtifacts(BuildContext):
+    cmd = 'clean_stale_cached_artifacts'
+    fun = 'clean_stale_cached_artifacts'

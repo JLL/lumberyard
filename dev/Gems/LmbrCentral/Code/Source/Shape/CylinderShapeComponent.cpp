@@ -21,6 +21,23 @@
 
 namespace LmbrCentral
 {
+    void CylinderShapeComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+    {
+        provided.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        provided.push_back(AZ_CRC("CylinderShapeService", 0x507c688e));
+    }
+
+    void CylinderShapeComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
+    {
+        incompatible.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        incompatible.push_back(AZ_CRC("CylinderShapeService", 0x507c688e));
+    }
+
+    void CylinderShapeComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
+    {
+        required.push_back(AZ_CRC("TransformService", 0x8ee22c50));
+    }
+
     void CylinderShapeDebugDisplayComponent::Reflect(AZ::ReflectContext* context)
     {
         if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
@@ -32,9 +49,21 @@ namespace LmbrCentral
         }
     }
 
-    void CylinderShapeDebugDisplayComponent::Draw(AzFramework::EntityDebugDisplayRequests* displayContext)
+    void CylinderShapeDebugDisplayComponent::Activate()
     {
-        DrawCylinderShape(g_defaultShapeDrawParams, m_cylinderShapeConfig, *displayContext);
+        EntityDebugDisplayComponent::Activate();
+        ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
+    }
+
+    void CylinderShapeDebugDisplayComponent::Deactivate() 
+    {
+        ShapeComponentNotificationsBus::Handler::BusDisconnect();
+        EntityDebugDisplayComponent::Deactivate();
+    }
+
+    void CylinderShapeDebugDisplayComponent::Draw(AzFramework::DebugDisplayRequests& debugDisplay)
+    {
+        DrawCylinderShape(m_cylinderShapeConfig.GetDrawParams(), m_cylinderShapeConfig, debugDisplay);
     }
 
     bool CylinderShapeDebugDisplayComponent::ReadInConfig(const AZ::ComponentConfig* baseConfig)
@@ -57,6 +86,14 @@ namespace LmbrCentral
         return false;
     }
 
+    void CylinderShapeDebugDisplayComponent::OnShapeChanged(ShapeChangeReasons changeReason)
+    {
+        if (changeReason == ShapeChangeReasons::ShapeChanged)
+        {
+            CylinderShapeComponentRequestsBus::EventResult(m_cylinderShapeConfig, GetEntityId(), &CylinderShapeComponentRequests::GetCylinderConfiguration);
+        }
+    }
+
     namespace ClassConverters
     {
         static bool DeprecateCylinderColliderConfiguration(AZ::SerializeContext& context, AZ::SerializeContext::DataElementNode& classElement);
@@ -74,8 +111,8 @@ namespace LmbrCentral
                 &ClassConverters::DeprecateCylinderColliderConfiguration)
                 ;
 
-            serializeContext->Class<CylinderShapeConfig>()
-                ->Version(1)
+            serializeContext->Class<CylinderShapeConfig, ShapeComponentConfig>()
+                ->Version(2)
                 ->Field("Height", &CylinderShapeConfig::m_height)
                 ->Field("Radius", &CylinderShapeConfig::m_radius)
                 ;

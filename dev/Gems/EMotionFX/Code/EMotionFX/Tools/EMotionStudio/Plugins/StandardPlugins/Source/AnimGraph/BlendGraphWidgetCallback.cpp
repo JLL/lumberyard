@@ -81,7 +81,7 @@ namespace EMStudio
             for (uint32 i = 0; i < numNodes; ++i)
             {
                 GraphNode*                  graphNode   = activeGraph->GetNode(i);
-                EMotionFX::AnimGraphNode*  emfxNode    = currentNode->RecursiveFindNodeByID(graphNode->GetID());
+                EMotionFX::AnimGraphNode*  emfxNode    = currentNode->RecursiveFindNodeById(graphNode->GetId());
 
                 // skip invisible graph nodes
                 if (graphNode->GetIsVisible() == false)
@@ -202,7 +202,7 @@ namespace EMStudio
         NodeGraph*                activeGraph  = mBlendGraphWidget->GetActiveGraph();
         EMotionFX::AnimGraphNode* currentNode  = mBlendGraphWidget->GetCurrentNode();
 
-        if (!activeGraph || !currentNode || currentNode->GetType() != EMotionFX::BlendTree::TYPE_ID)
+        if (!activeGraph || !currentNode || azrtti_typeid(currentNode) != azrtti_typeid<EMotionFX::BlendTree>())
         {
             return;
         }
@@ -228,7 +228,7 @@ namespace EMStudio
         for (uint32 i = 0; i < numNodes; ++i)
         {
             GraphNode*                  graphNode   = activeGraph->GetNode(i);
-            EMotionFX::AnimGraphNode*  emfxNode    = currentNode->RecursiveFindNodeByID(graphNode->GetID());
+            EMotionFX::AnimGraphNode*   emfxNode    = currentNode->RecursiveFindNodeById(graphNode->GetId());
 
             // make sure the corresponding anim graph node is valid
             if (emfxNode == nullptr)
@@ -244,9 +244,9 @@ namespace EMStudio
 
                 // get the source and target nodes
                 GraphNode*                  sourceNode      = visualConnection->GetSourceNode();
-                EMotionFX::AnimGraphNode*  emfxSourceNode  = currentNode->RecursiveFindNodeByID(sourceNode->GetID());
+                EMotionFX::AnimGraphNode*   emfxSourceNode  = currentNode->RecursiveFindNodeById(sourceNode->GetId());
                 GraphNode*                  targetNode      = visualConnection->GetTargetNode();
-                EMotionFX::AnimGraphNode*  emfxTargetNode  = currentNode->RecursiveFindNodeByID(targetNode->GetID());
+                EMotionFX::AnimGraphNode*   emfxTargetNode  = currentNode->RecursiveFindNodeById(targetNode->GetId());
 
                 //QColor color(255,0,255);
                 QColor color = visualConnection->GetTargetNode()->GetInputPort(visualConnection->GetInputPortNr())->GetColor();
@@ -278,7 +278,7 @@ namespace EMStudio
                 {
                     MCore::AttributeVector2* vecAttribute = static_cast<MCore::AttributeVector2*>(attribute);
                     AZ::Vector2 vec = vecAttribute->GetValue();
-                    m_tempStringA = AZStd::string::format("(%.2f, %.2f)", vec.GetX(), vec.GetY());
+                    m_tempStringA = AZStd::string::format("(%.2f, %.2f)", static_cast<float>(vec.GetX()), static_cast<float>(vec.GetY()));
                     break;
                 }
 
@@ -287,7 +287,7 @@ namespace EMStudio
                 {
                     MCore::AttributeVector3* vecAttribute = static_cast<MCore::AttributeVector3*>(attribute);
                     AZ::PackedVector3f vec = vecAttribute->GetValue();
-                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f)", vec.GetX(), vec.GetY(), vec.GetZ());
+                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f)", static_cast<float>(vec.GetX()), static_cast<float>(vec.GetY()), static_cast<float>(vec.GetZ()));
                     break;
                 }
 
@@ -296,7 +296,7 @@ namespace EMStudio
                 {
                     MCore::AttributeVector4* vecAttribute = static_cast<MCore::AttributeVector4*>(attribute);
                     AZ::Vector4 vec = vecAttribute->GetValue();
-                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f, %.2f)", vec.GetX(), vec.GetY(), vec.GetZ(), vec.GetW());
+                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f, %.2f)", static_cast<float>(vec.GetX()), static_cast<float>(vec.GetY()), static_cast<float>(vec.GetZ()), static_cast<float>(vec.GetW()));
                     break;
                 }
 
@@ -309,10 +309,11 @@ namespace EMStudio
                 }
 
                 // rotation attributes
-                case EMotionFX::AttributeRotation::TYPE_ID:
+                case MCore::AttributeQuaternion::TYPE_ID:
                 {
-                    EMotionFX::AttributeRotation* rotAttribute = static_cast<EMotionFX::AttributeRotation*>(attribute);
-                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f)", rotAttribute->GetRotationAngles().GetX(), rotAttribute->GetRotationAngles().GetY(), rotAttribute->GetRotationAngles().GetZ());
+                    MCore::AttributeQuaternion* quatAttribute = static_cast<MCore::AttributeQuaternion*>(attribute);
+                    const AZ::Vector3 eulerAngles = quatAttribute->GetValue().ToEuler();
+                    m_tempStringA = AZStd::string::format("(%.2f, %.2f, %.2f)", static_cast<float>(eulerAngles.GetX()), static_cast<float>(eulerAngles.GetY()), static_cast<float>(eulerAngles.GetZ()));
                     break;
                 }
 
@@ -320,19 +321,8 @@ namespace EMStudio
                 // pose attribute
                 case EMotionFX::AttributePose::TYPE_ID:
                 {
-                    //color = QColor( 0, 255, 0 );
-
-                    /*if (emfxSourceNode->GetType() == EMotionFX::BlendTreeMotionNode::TYPE_ID)
-                    {
-                        EMotionFX::BlendTreeMotionNode* motionNode = static_cast<EMotionFX::BlendTreeMotionNode*>(emfxSourceNode);
-                        EMotionFX::MotionInstance* motionInstance = motionNode->FindMotionInstance(animGraphInstance);
-
-                        color = QColor( 0, 255, 0 );
-                        mTempString = AZStd::string::format("%.2f", motionInstance->GetWeight());
-                    }*/
-
                     // handle blend 2 nodes
-                    if (emfxTargetNode->GetType() == EMotionFX::BlendTreeBlend2Node::TYPE_ID)
+                    if (azrtti_typeid(emfxTargetNode) == azrtti_typeid<EMotionFX::BlendTreeBlend2Node>())
                     {
                         // type-cast the target node to our blend node
                         EMotionFX::BlendTreeBlend2Node* blendNode = static_cast<EMotionFX::BlendTreeBlend2Node*>(emfxTargetNode);
@@ -353,7 +343,7 @@ namespace EMStudio
                     }
 
                     // handle blend N nodes
-                    if (emfxTargetNode->GetType() == EMotionFX::BlendTreeBlendNNode::TYPE_ID)
+                    if (azrtti_typeid(emfxTargetNode) == azrtti_typeid<EMotionFX::BlendTreeBlendNNode>())
                     {
                         // type-cast the target node to our blend node
                         EMotionFX::BlendTreeBlendNNode* blendNode = static_cast<EMotionFX::BlendTreeBlendNNode*>(emfxTargetNode);

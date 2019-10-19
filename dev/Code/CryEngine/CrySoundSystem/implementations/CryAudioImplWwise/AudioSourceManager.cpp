@@ -13,18 +13,14 @@
 #include "StdAfx.h"
 
 #include "AudioSourceManager.h"
-#include "AudioInput/AudioInputFile.h"
-#include "AudioInput/AudioInputMicrophone.h"
+#include <AudioInput/AudioInputFile.h>
+#include <AudioInput/AudioInputMicrophone.h>
+#include <AudioInput/AudioInputStream.h>
 
 #include <AzCore/std/parallel/lock.h>
 
 #include <AK/AkWwiseSDKVersion.h>
-
-#if (AK_WWISESDK_VERSION_MAJOR >= 2016)
-    #include <AK/Plugin/AkAudioInputPlugin.h>
-#else
-    #include <AK/Plugin/AkAudioInputSourceFactory.h>
-#endif // AK_WWISESDK_VERSION_MAJOR
+#include <AK/Plugin/AkAudioInputPlugin.h>
 
 namespace Audio
 {
@@ -85,6 +81,11 @@ namespace Audio
                 speakerConfig = AK_SPEAKER_SETUP_STEREO;
                 break;
             }
+            case 6:
+            {
+                speakerConfig = AK_SPEAKER_SETUP_5POINT1;
+                break;
+            }
             default:
             {
                 // TODO: Test more channels
@@ -116,12 +117,7 @@ namespace Audio
             }
         }
 
-    #if (AK_WWISESDK_VERSION_MAJOR >= 2016)
         AkChannelConfig akChannelConfig(m_config.m_numChannels, speakerConfig);
-    #else
-        AkChannelConfig akChannelConfig;
-        akChannelConfig.SetStandardOrAnonymous(m_config.m_numChannels, speakerConfig);
-    #endif // AK_WWISESDK_VERSION_MAJOR
 
         format.SetAll(
             m_config.m_sampleRate,
@@ -207,8 +203,12 @@ namespace Audio
                 ptr.reset(aznew AudioInputMicrophone(sourceConfig));
                 break;
             }
-            case AudioInputSourceType::Synthesis:       // Will need to allow setting a user-defined Generate callback.
             case AudioInputSourceType::ExternalStream:
+            {
+                ptr.reset(aznew AudioInputStreaming(sourceConfig));
+                break;
+            }
+            case AudioInputSourceType::Synthesis:       // Will need to allow setting a user-defined Generate callback.
             default:
             {
                 AZ_TracePrintf("AudioSourceManager", "AudioSourceManager::CreateSource - The type of AudioInputSource requested is not supported yet!\n");

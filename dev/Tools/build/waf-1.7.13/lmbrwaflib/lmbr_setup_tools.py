@@ -23,6 +23,9 @@ LMBR_SETUP_QT_FILTERS = {
             "Qt5Widgets",
             "Qt5Concurrent",
             "Qt5WinExtras",
+            "Qt5Xml",
+            "libEGL",
+            "libGLESv2"
         ],
 
         "qtlibs": {
@@ -98,7 +101,8 @@ LMBR_SETUP_QT_FILTERS = {
                     "QtQuick.framework",
                     "QtSvg.framework",
                     "QtWidgets.framework",
-                    "QtXml.framework"
+                    "QtXml.framework",
+					"QtMacExtras.framework"
                 ],
                 "plugins": [
                     "imageformats/libqdds.dylib",
@@ -137,7 +141,8 @@ LMBR_SETUP_QT_FILTERS = {
                     "QtQuick.framework",
                     "QtSvg.framework",
                     "QtWidgets.framework",
-                    "QtXml.framework"
+                    "QtXml.framework",
+					"QtMacExtras.framework"
                 ],
                 "plugins": [
                     "imageformats/libqdds_debug.dylib",

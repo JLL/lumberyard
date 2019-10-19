@@ -57,9 +57,12 @@ namespace AzFramework
         {
         public:
             static Implementation* Create();
+            static const char* GetAppRootPath(); // static because called before construction of the pimpl
+
             virtual ~Implementation() = default;
             virtual void PumpSystemEventLoopOnce() = 0;
             virtual void PumpSystemEventLoopUntilEmpty() = 0;
+            virtual void TerminateOnError(int errorCode) { exit(errorCode); }
         };
 
         AZ_RTTI(Application, "{0BD2388B-F435-461C-9C84-D0A96CAF32E4}", AZ::ComponentApplication);
@@ -119,6 +122,7 @@ namespace AzFramework
         virtual void CalculateAppRoot(const char* appRootOverride = nullptr);
 
         AZ::ComponentTypeList GetRequiredSystemComponents() const override;
+        void CreateStaticModules(AZStd::vector<AZ::Module*>& outModules) override;
 
         //////////////////////////////////////////////////////////////////////////
         //! ApplicationRequests::Bus::Handler
@@ -139,11 +143,18 @@ namespace AzFramework
         void NormalizePathKeepCase(AZStd::string& path) override;
         void PumpSystemEventLoopOnce() override;
         void PumpSystemEventLoopUntilEmpty() override;
+        void PumpSystemEventLoopWhileDoingWorkInNewThread(const AZStd::chrono::milliseconds& eventPumpFrequency,
+                                                          const AZStd::function<void()>& workForNewThread,
+                                                          const char* newThreadName) override;
         void RunMainLoop() override;
-        void ExitMainLoop() { m_exitMainLoopRequested = true; }
-        bool WasExitMainLoopRequested() { return m_exitMainLoopRequested; }
+        void ExitMainLoop() override { m_exitMainLoopRequested = true; }
+        bool WasExitMainLoopRequested() override { return m_exitMainLoopRequested; }
+        void TerminateOnError(int errorCode) override;
         AZ::Uuid GetComponentTypeId(const AZ::EntityId& entityId, const AZ::ComponentId& componentId) override;
         //////////////////////////////////////////////////////////////////////////
+
+        // Convenience function that should be called instead of the standard exit() function to ensure platform requirements are met.
+        static void Exit(int errorCode) { ApplicationRequests::Bus::Broadcast(&ApplicationRequests::TerminateOnError, errorCode); }
 
         //////////////////////////////////////////////////////////////////////////
         //! NetSystemEventBus::Handler
@@ -182,12 +193,7 @@ namespace AzFramework
 
         //////////////////////////////////////////////////////////////////////////
         //! UserSettingsFileLocatorBus
-        AZStd::string ResolveFilePath(AZ::u32 providerId) override
-        {
-            (void)providerId;
-
-            return AZStd::string(GetAppRoot()) + "/UserSettings.xml";
-        }
+        AZStd::string ResolveFilePath(AZ::u32 providerId) override;
         //////////////////////////////////////////////////////////////////////////
 
         AZ::Component* EnsureComponentAdded(AZ::Entity* systemEntity, const AZ::Uuid& typeId);

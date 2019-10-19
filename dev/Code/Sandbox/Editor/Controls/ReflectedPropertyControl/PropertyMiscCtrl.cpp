@@ -1,4 +1,15 @@
-#include "stdafx.h"
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
+#include "StdAfx.h"
 
 #include "PropertyMiscCtrl.h"
 #include "QtViewPaneManager.h"
@@ -87,7 +98,7 @@ void UserPropertyEditor::onEditClicked()
 QWidget* UserPopupWidgetHandler::CreateGUI(QWidget *pParent)
 {
     UserPropertyEditor* newCtrl = aznew UserPropertyEditor(pParent);
-    connect(newCtrl, &UserPropertyEditor::ValueChanged, [newCtrl]()
+    connect(newCtrl, &UserPropertyEditor::ValueChanged, newCtrl, [newCtrl]()
     {
         EBUS_EVENT(AzToolsFramework::PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
     });
@@ -139,7 +150,7 @@ LensFlarePropertyWidget::LensFlarePropertyWidget(QWidget *pParent /*= nullptr*/)
     QToolButton *mainButton = new QToolButton;
     mainButton->setText("D");
     connect(mainButton, &QToolButton::clicked, this, &LensFlarePropertyWidget::OnEditClicked);
-    connect(m_valueEdit, &QLineEdit::editingFinished, [this] () {emit ValueChanged(m_valueEdit->text());});
+    connect(m_valueEdit, &QLineEdit::editingFinished, m_valueEdit, [this] () {emit ValueChanged(m_valueEdit->text());});
 
     QHBoxLayout *mainLayout = new QHBoxLayout(this);
     mainLayout->addWidget(m_valueEdit, 1);
@@ -171,7 +182,7 @@ void LensFlarePropertyWidget::OnEditClicked()
 QWidget* LensFlareHandler::CreateGUI(QWidget *pParent)
 {
     LensFlarePropertyWidget* newCtrl = aznew LensFlarePropertyWidget(pParent);
-    connect(newCtrl, &LensFlarePropertyWidget::ValueChanged, [newCtrl]()
+    connect(newCtrl, &LensFlarePropertyWidget::ValueChanged, newCtrl, [newCtrl]()
     {
         EBUS_EVENT(AzToolsFramework::PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
     });

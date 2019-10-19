@@ -28,13 +28,13 @@ namespace EMotionFX
     /**
      * The transformation data class.
      * This class holds all transformation data for each node.
-     * This includes local space transforms, local space matrices as well as global space matrices.
-     * If for example you wish to get the global space matrices for all nodes, to be used for rendering, you will have to use this class.
+     * This includes local space transforms, local space matrices as well as world space matrices.
+     * If for example you wish to get the world space matrices for all nodes, to be used for rendering, you will have to use this class.
      */
     class EMFX_API TransformData
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(TransformData, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_TRANSFORMDATA);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         /**
@@ -66,32 +66,18 @@ namespace EMotionFX
         void Release();
 
         /**
-         * Get the global space matrices (including the global actor transformation taken into account).
+         * Get the skinning matrices (offset from the pose).
          * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of global space matrices.
+         * @result The array of skinning matrices.
          */
-        MCORE_INLINE MCore::Matrix* GetGlobalInclusiveMatrices()                                        { return mGlobalMatrices; }
+        MCORE_INLINE MCore::Matrix* GetSkinningMatrices() { return mSkinningMatrices; }
 
         /**
-         * Get the global space matrices (including the global actor transformation taken into account), in read-only (const) mode.
+         * Get the skinning matrices (offset from the pose), in read-only (const) mode.
          * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of global space matrices.
+         * @result The array of skinning matrices.
          */
-        MCORE_INLINE const MCore::Matrix* GetGlobalInclusiveMatrices() const                            { return mGlobalMatrices; }
-
-        /**
-         * Get the local space space matrices.
-         * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of local space matrices.
-         */
-        MCORE_INLINE MCore::Matrix* GetLocalMatrices()                                                  { return mLocalMatrices; }
-
-        /**
-         * Get the local space space matrices, in read-only (const) mode.
-         * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of local space matrices.
-         */
-        MCORE_INLINE const MCore::Matrix* GetLocalMatrices() const                                      { return mLocalMatrices; }
+        MCORE_INLINE const MCore::Matrix* GetSkinningMatrices() const { return mSkinningMatrices; }
 
         MCORE_INLINE Pose* GetBindPose() const                                                          { return mBindPose; }
         MCORE_INLINE const Pose* GetCurrentPose() const                                                 { return &mPose; }
@@ -101,7 +87,7 @@ namespace EMotionFX
          * Reset the local space transform of a given node to its bind pose local space transform.
          * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
          */
-        void ResetToBindPoseTransformation(uint32 nodeIndex)                                            { mPose.SetLocalTransform(nodeIndex, mBindPose->GetLocalTransform(nodeIndex)); }
+        void ResetToBindPoseTransformation(uint32 nodeIndex)                                            { mPose.SetLocalSpaceTransform(nodeIndex, mBindPose->GetLocalSpaceTransform(nodeIndex)); }
 
         /**
          * Reset all local space transforms to the local space transforms of the bind pose.
@@ -110,110 +96,28 @@ namespace EMotionFX
         {
             for (uint32 i = 0; i < mNumTransforms; ++i)
             {
-                mPose.SetLocalTransform(i, mBindPose->GetLocalTransform(i));
+                mPose.SetLocalSpaceTransform(i, mBindPose->GetLocalSpaceTransform(i));
             }
         }
-
-        /**
-         * Get the global space position for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @result The global space position.
-         */
-        MCORE_INLINE AZ::Vector3 GetGlobalPosition(uint32 nodeIndex) const                              { return mGlobalMatrices[nodeIndex].GetTranslation(); }
-
-        /**
-         * Get the global space transformation matrix for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @result The global space transformation matrix.
-         */
-        MCORE_INLINE const MCore::Matrix& GetGlobalInclusiveMatrix(uint32 nodeIndex)                    { return mGlobalMatrices[nodeIndex]; }
-
-        /**
-         * Get the local space transformation matrix for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @result The local space transformation matrix.
-         */
-        MCORE_INLINE const MCore::Matrix& GetLocalMatrix(uint32 nodeIndex)                              { return mLocalMatrices[nodeIndex]; }
 
         EMFX_SCALECODE
         (
-            void SetBindPoseLocalScaleInherit(uint32 nodeIndex, const AZ::Vector3 & scale);
-            void SetBindPoseLocalScale(uint32 nodeIndex, const AZ::Vector3 & scale);
+            void SetBindPoseLocalScaleInherit(uint32 nodeIndex, const AZ::Vector3& scale);
+            void SetBindPoseLocalScale(uint32 nodeIndex, const AZ::Vector3& scale);
         )
 
-        MCORE_INLINE ActorInstance * GetActorInstance() const            {
-            return mPose.GetActorInstance();
-        }
+        MCORE_INLINE ActorInstance * GetActorInstance() const            { return mPose.GetActorInstance(); }
         MCORE_INLINE uint32 GetNumTransforms() const                    { return mNumTransforms; }
 
         void MakeBindPoseTransformsUnique();
-        void UpdateNodeFlags();
-
-        /**
-         * Get the node optimization flags.
-         * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of node optimization flags.
-         */
-        MCORE_INLINE ENodeFlags* GetNodeFlags()                                                         { return mFlags; }
-
-        /**
-         * Get the node optimization flags, in read-only (const) mode.
-         * The size of the returned array is equal to the amount of nodes in the actor or the value returned by GetNumTransforms()
-         * @result The array of node optimization flags.
-         */
-        MCORE_INLINE const ENodeFlags* GetNodeFlags() const                                             { return mFlags; }
-
-        /**
-         * Reset all node optimization flags.
-         */
-        MCORE_INLINE void ResetNodeFlags()                                                              { MCore::MemSet(mFlags, 0, sizeof(ENodeFlags) * mNumTransforms); }
-
-        /**
-         * Get the node optimization flags for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @result The currently used flags for the given node.
-         */
-        MCORE_INLINE ENodeFlags GetNodeFlags(uint32 nodeIndex) const                                    { return mFlags[nodeIndex]; }
-
-        /**
-         * Set the node flags for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @param flags The flags to use for this node.
-         */
-        MCORE_INLINE void SetNodeFlags(uint32 nodeIndex, ENodeFlags flags)                              { mFlags[nodeIndex] = flags; }
-
-        /**
-         * Enable or disable specific node optimization flags for a given node.
-         * @param nodeIndex The node number, which must be in range of [0..GetNumTransforms()-1].
-         * @param flags The flags to enable or disable.
-         * @param enable Set to true to enable the specified flags, or set to false to disable them.
-         */
-        MCORE_INLINE void SetNodeFlag(uint32 nodeIndex, ENodeFlags flags, bool enable)
-        {
-            uint32 curFlags = (uint32)mFlags[nodeIndex];
-
-            if (enable)
-            {
-                curFlags |= (uint32)flags;
-            }
-            else
-            {
-                curFlags &= (uint32) ~flags;
-            }
-
-            mFlags[nodeIndex] = (ENodeFlags)curFlags;
-        }
-
 
         void SetNumMorphWeights(uint32 numMorphWeights);
 
 
     private:
-        Pose            mPose;                  /**< The current pose, used to calculate the local and global matrices. */
+        Pose            mPose;                  /**< The current pose. */
         Pose*           mBindPose;              /**< The bind pose, which can be unique or point to the bind pose in the actor. */
-        MCore::Matrix*  mGlobalMatrices;        /**< The global space matrices, inclusive the global transformation of the actor instance. */
-        MCore::Matrix*  mLocalMatrices;         /**< The local space matrices (transforms relative to the parent node, non-inclusive of the actor instance global transformation). */
-        ENodeFlags*     mFlags;                 /**< The flags for each node. */
+        MCore::Matrix*  mSkinningMatrices;      /**< The matrices used for skinning. They are the offset to the bind pose. */
         uint32          mNumTransforms;         /**< The number of transforms, which is equal to the number of nodes in the linked actor instance. */
         bool            mHasUniqueBindPose;     /**< Do we have a unique bind pose (when set to true) or do we use the one from the Actor object (when set to false)? */
 

@@ -42,8 +42,6 @@ CCodeCheckpointMgr::~CCodeCheckpointMgr()
 /// Used by code checkpoints to register themselves with the manager.
 void CCodeCheckpointMgr::RegisterCheckpoint(CCodeCheckpoint* pCheckpoint)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     CRY_ASSERT(pCheckpoint);
     CRY_ASSERT(pCheckpoint->Name() != NULL);
     CRY_ASSERT(pCheckpoint->HitCount() == 0);
@@ -112,7 +110,7 @@ size_t CCodeCheckpointMgr::GetCheckpointIndex(const char* name)
         // Create a dynamic string buffer for a NULL terminated copy of the name
         char* nameCopy = new char[nameLength + 1];
 
-        strcpy(nameCopy, name);
+        azstrcpy(nameCopy, nameLength + 1, name);
 
         newRec.m_name = nameCopy;
 

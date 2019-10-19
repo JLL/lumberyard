@@ -14,7 +14,9 @@
 #include "PropertyQTConstants.h"
 #include "DHQComboBox.hxx"
 #include <QtWidgets/QComboBox>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -49,7 +51,13 @@ namespace AzToolsFramework
     {
         m_pComboBox->blockSignals(true);
 
-        bool indexWasFound = str.empty(); // Value may just not be populated. Don't warn if that's the case.
+        bool indexWasFound = false;
+        if (str.empty())
+        {
+            // Value may just not be populated. Don't warn if that's the case.
+            indexWasFound = true;
+            m_pComboBox->setCurrentIndex(-1);
+        }
 
         for (size_t enumValIndex = 0; enumValIndex < m_values.size(); enumValIndex++)
         {
@@ -61,9 +69,17 @@ namespace AzToolsFramework
             }
         }
 
-        if (!indexWasFound && m_pComboBox->isEditable())
+        if (!indexWasFound)
         {
-            m_pComboBox->setEditText(QString(str.c_str()));
+            if (m_pComboBox->isEditable())
+            {
+                m_pComboBox->setEditText(QString(str.c_str()));
+            }
+            else
+            {
+                // item not found void out the combo box
+                m_pComboBox->setCurrentIndex(-1);
+            }
         }
 
         AZ_Warning("AzToolsFramework", indexWasFound == true, "No index in property enum for value %s", str.c_str());
@@ -178,6 +194,7 @@ namespace AzToolsFramework
         connect(newCtrl, &PropertyStringComboBoxCtrl::valueChanged, this, [newCtrl]()
             {
                 EBUS_EVENT(PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
+                AzToolsFramework::PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::Bus::Handler::OnEditingFinished, newCtrl);
             });
         return newCtrl;
     }

@@ -25,14 +25,17 @@ def build(bld):
         target          = 'NewsShared',
         vs_filter       = 'Tools/News',
         file_list       = 'news_shared.waf_files',
-        export_includes = '.', 
+        export_includes = '.',
         platforms       = ['win', 'darwin'],
-        configurations  = ['debug', 'debug_test', 'profile', 'profile_test'],
+        client_only     = True,
+        exclude_monolithic = True,
         features        = ['qt5'],
         use             = [ 'AzQtComponents' ],
         uselib          = [ 'QT5CORE',
                             'QT5GUI',
                             'QT5NETWORK',
-                            'QT5WIDGETS' ]
+                            'QT5WIDGETS' ],
+
+        win_x64_clang_enable_rtti = True,
     )
-    
+

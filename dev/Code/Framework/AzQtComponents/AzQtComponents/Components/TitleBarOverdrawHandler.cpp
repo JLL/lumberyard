@@ -52,7 +52,7 @@ TitleBarOverdrawHandler::~TitleBarOverdrawHandler()
 
 #ifndef Q_OS_WIN
 
-TitleBarOverdrawHandler* TitleBarOverdrawHandler::createHandler(QApplication* application, QObject* parent)
+TitleBarOverdrawHandler* TitleBarOverdrawHandler::createHandler(QApplication*, QObject* parent)
 {
     return new TitleBarOverdrawHandler(parent);
 }
@@ -242,7 +242,7 @@ void TitleBarOverdrawHandlerWindows::applyOverdrawMargins(QPlatformWindow* windo
         {
             const auto exStyle = GetWindowLongPtr(hWnd, GWL_EXSTYLE);
             const auto monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONULL);
-            const auto margins = customTitlebarMargins(monitor, style, exStyle, maximized);
+            const auto margins = customTitlebarMargins(monitor, static_cast<int>(style), static_cast<int>(exStyle), maximized);
             RECT rect;
             GetWindowRect(hWnd, &rect);
             pni->setWindowProperty(window, QStringLiteral("WindowsCustomMargins"), qVariantFromValue(margins));

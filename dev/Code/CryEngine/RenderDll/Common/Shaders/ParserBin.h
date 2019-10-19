@@ -18,13 +18,10 @@
 #define CRYINCLUDE_CRYENGINE_RENDERDLL_COMMON_SHADERS_PARSERBIN_H
 #pragma once
 
-#include <CryEngineAPI.h>
-
 #include "ShaderCache.h"
 #include "ShaderAllocator.h"
 
 extern TArray<bool> sfxIFDef;
-extern TArray<bool> sfxIFIgnore;
 
 typedef TArray<uint32> ShaderTokensVec;
 
@@ -503,7 +500,7 @@ enum EToken
     eT_TechniqueThickness,
 
     eT_TechniqueMax,
-	//-------------------------------------------------------------------------
+    //-------------------------------------------------------------------------
 
     eT_KeyFrameParams,
     eT_KeyFrameRandColor,
@@ -565,7 +562,11 @@ enum EToken
     eT__LT_3_TYPE,
     eT__TT_TEXCOORD_MATRIX,
     eT__TT_TEXCOORD_PROJ,
-    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DIFFUSE,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE_MULT,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_DETAIL,
+    eT__TT_TEXCOORD_GEN_OBJECT_LINEAR_CUSTOM,
     eT__VT_TYPE,
     eT__VT_TYPE_MODIF,
     eT__VT_BEND,
@@ -644,7 +645,6 @@ enum EToken
     eT_DURANGO, // ACCEPTED_USE
     eT_PCDX11,
     eT_GL4,
-    eT_OSXGL4,
     eT_GLES3,
     eT_METAL,
     eT_OSXMETAL,
@@ -691,12 +691,6 @@ enum EToken
 
     eT_Global,
 
-    eT_GMEM,
-    eT_GMEM_PLS,
-    eT_GMEM_256BPP,
-    eT_GMEM_128BPP,
-
-    eT_FIXED_POINT,
     eT_GLES3_0,
 
     eT_Load,
@@ -706,8 +700,6 @@ enum EToken
     eT_GatherGreen,
     eT_GatherBlue,
     eT_GatherAlpha,
-
-    eT_NoDepthClipping,
 
     eT_max,
     eT_user_first = eT_max + 1
@@ -744,13 +736,13 @@ extern const char* g_KeyTokens[];
 
 struct SMacroBinFX
 {
-    std::vector<uint32> m_Macro;
+    AZStd::vector<uint32, AZ::StdLegacyAllocator> m_Macro;
     uint64 m_nMask;
 };
 
 class CParserBin;
 
-typedef std::map<uint32, SMacroBinFX> FXMacroBin;
+typedef AZStd::unordered_map<uint32, SMacroBinFX, AZStd::hash<uint32>, AZStd::equal_to<uint32>, AZ::StdLegacyAllocator> FXMacroBin;
 typedef FXMacroBin::iterator FXMacroBinItor;
 
 struct SParserFrame
@@ -840,7 +832,14 @@ struct SortByToken
 #define SF_PLATFORM 0xfc000000
 
 class CParserBin
+    : public ISystemEventListener
 {
+    //////////////////////////////////////////////////////////////////////////
+    // ISystemEventListener interface implementation.
+    //////////////////////////////////////////////////////////////////////////
+    virtual void OnSystemEvent(ESystemEvent event, UINT_PTR wparam, UINT_PTR lparam);
+    //////////////////////////////////////////////////////////////////////////
+
     friend class CShaderManBin;
     friend class CHWShader_D3D;
     friend struct SFXParam;
@@ -873,10 +872,12 @@ class CParserBin
 
     static FXMacroBin m_StaticMacros;
 
+    TArray<bool> sfxIFIgnore;
+
 public:
     CParserBin(SShaderBin* pBin);
     CParserBin(SShaderBin* pBin, CShader* pSH);
-
+    ~CParserBin();
     SParserFrame& GetData() {return m_Data; }
     const char* GetString(uint32 nToken, bool bOnlyKey = false);
     string GetString(SParserFrame& Frame);
@@ -918,7 +919,7 @@ public:
         if (szStr[0] == '0' && szStr[1] == 'x')
         {
             int i = 0;
-            int res = sscanf(&szStr[2], "%x", &i);
+            int res = azsscanf(&szStr[2], "%x", &i);
             assert(res != 0);
             return i;
         }
@@ -996,6 +997,11 @@ public:
     static uint32 fxToken(const char* szToken, bool* bKey = NULL);
     static uint32 fxTokenKey(const char* szToken, EToken eT = eT_unknown);
     static uint32 GetCRC32(const char* szStr);
+    //! Gets the next token from the buffer
+    //! @param buf The buffer that is being parsed
+    //! @param com Buffer into which the complete token is written
+    //! @param bKey Set to true if the token is a 'key' token, false otherwise. Key tokens are enumerated by EToken, with corresponding string values set int CParserBin::Init().
+    //! @return Returns the enum of the key token if bKey is true, eT_unknown otherwise
     static uint32 NextToken(char*& buf, char* com, bool& bKey);
     static void Init();
     static void RemovePlatformDefines();
@@ -1004,15 +1010,17 @@ public:
     static void SetupForD3D11();
     static void SetupForGL4();
     static void SetupForGLES3();
-    // Confetti Nicholas Baldwin: adding metal shader language support
     static void SetupForMETAL();
+    static void SetupTargetPlatform();
     // Confetti David Srour: sets up GMEM path related macros
     // 0 = no gmem, 1 = 256bpp, 2 = 128bpp (matches the r_enableGMEMPath cvar)
-    static void SetupForGMEM(int gmemPath, int& curMacroNum);
+    static void SetupForGMEM(int gmemPath);
+    static void SetupGMEMCommonStaticFlags();
+    static void RemoveGMEMStaticFlags();
     static void SetupForDurango(); // ACCEPTED_USE
     static void SetupFeatureDefines();
+    static void SetupShadersCacheAndFilter();
     static CCryNameTSCRC GetPlatformSpecName(CCryNameTSCRC orgName);
-    static const char* GetPlatformShaderlistName();
 
     static bool PlatformSupportsConstantBuffers(){return (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4 || CParserBin::m_nPlatform == SF_GLES3 || CParserBin::m_nPlatform == SF_METAL); }; // ACCEPTED_USE
     static bool PlatformSupportsGeometryShaders(){return (CParserBin::m_nPlatform == SF_D3D11 || CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_DURANGO || CParserBin::m_nPlatform == SF_GL4); } // ACCEPTED_USE
@@ -1026,7 +1034,8 @@ public:
     static bool PlatformIsConsole(){return (CParserBin::m_nPlatform == SF_ORBIS || CParserBin::m_nPlatform == SF_DURANGO); }; // ACCEPTED_USE
 
     static bool m_bEditable;
-    static uint32 m_nPlatform;
+    static uint32 m_nPlatform;                  // Shader language
+    static AZ::PlatformID m_targetPlatform;     // Platform
     static bool m_bEndians;
     static bool m_bParseFX;
     static bool m_bShaderCacheGen;

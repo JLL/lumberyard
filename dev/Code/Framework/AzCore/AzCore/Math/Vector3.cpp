@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Math/Vector3.h>
 #include <AzCore/Math/MathUtils.h>
@@ -49,4 +48,9 @@ void Vector3::BuildTangentBasis(Vector3& tangent, Vector3& bitangent) const
     bitangent.Normalize();
 }
 
-#endif // #ifndef AZ_UNITY_BUILD
+Vector3 Vector3::GetOrthogonalVector() const
+{
+    // for stability choose an axis which has a small component in this vector
+    const Vector3 axis = (GetX() * GetX() < 0.5f * GetLengthSq()) ? Vector3::CreateAxisX() : Vector3::CreateAxisY();
+    return Cross(axis);
+}

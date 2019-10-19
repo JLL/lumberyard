@@ -302,6 +302,7 @@ void UiTooltipDisplayComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiTooltipDisplayComponent>("TooltipDisplay", "A component that handles how the tooltip element is to be displayed.");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiTooltipDisplay.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiTooltipDisplay.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -344,7 +345,6 @@ void UiTooltipDisplayComponent::Reflect(AZ::ReflectContext* context)
             ->Enum<(int)UiTooltipDisplayInterface::AutoPositionMode::OffsetFromElement>("eUiTooltipDisplayAutoPositionMode_OffsetFromElement");
 
         behaviorContext->EBus<UiTooltipDisplayBus>("UiTooltipDisplayBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetAutoPosition", &UiTooltipDisplayBus::Events::GetAutoPosition)
             ->Event("SetAutoPosition", &UiTooltipDisplayBus::Events::SetAutoPosition)
             ->Event("GetAutoPositionMode", &UiTooltipDisplayBus::Events::GetAutoPositionMode)

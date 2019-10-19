@@ -107,19 +107,29 @@ namespace CloudGemAWSScriptBehaviors
 
         auto job = S3UploadRequestJob::Create(
             [](S3UploadRequestJob* job) // OnSuccess handler
-        {
-            AZStd::string content("File Uploaded");
-            EBUS_EVENT(AWSBehaviorS3UploadNotificationsBus, OnSuccess, content.c_str());
-        },
+            {
+                AZStd::function<void()> notifyOnMainThread = []()
+                {
+                    AWSBehaviorS3UploadNotificationsBus::Broadcast(&AWSBehaviorS3UploadNotificationsBus::Events::OnSuccess, "File Uploaded");
+                };
+                AZ::TickBus::QueueFunction(notifyOnMainThread);
+            },
             [](S3UploadRequestJob* job) // OnError handler
-        {
-            EBUS_EVENT(AWSBehaviorS3UploadNotificationsBus, OnError, job->error.GetMessage().c_str());
-        },
+            {
+                Aws::String errorMessage = job->error.GetMessage();
+                AZStd::function<void()> notifyOnMainThread = [errorMessage]()
+                {
+                    AWSBehaviorS3UploadNotificationsBus::Broadcast(&AWSBehaviorS3UploadNotificationsBus::Events::OnError, errorMessage.c_str());
+                };
+                AZ::TickBus::QueueFunction(notifyOnMainThread);
+            },
             &config
-            );
+        );
 
-        Aws::String awsLocalFileName(m_localFileName.c_str());
-        std::shared_ptr<Aws::IOStream> fileToUpload = Aws::MakeShared<Aws::FStream>(UPLOAD_CLASS_TAG, awsLocalFileName.c_str(), std::ios::binary | std::ios::in);
+        AZStd::array<char, AZ::IO::MaxPathLength> resolvedPath;
+        AZ::IO::FileIOBase::GetInstance()->ResolvePath(m_localFileName.c_str(), resolvedPath.data(), resolvedPath.size());
+
+        std::shared_ptr<Aws::IOStream> fileToUpload = Aws::MakeShared<Aws::FStream>(UPLOAD_CLASS_TAG, resolvedPath.data(), std::ios::binary | std::ios::in);
 
         if (fileToUpload->good())
         {
@@ -132,7 +142,9 @@ namespace CloudGemAWSScriptBehaviors
         else
         {
             Aws::StringStream ss;
-            ss << strerror(errno);
+            char buf[1024];
+            azstrerror_s(buf, sizeof(buf), errno);
+            ss << buf;
             EBUS_EVENT(AWSBehaviorS3UploadNotificationsBus, OnError, ss.str().c_str());
         }
     }

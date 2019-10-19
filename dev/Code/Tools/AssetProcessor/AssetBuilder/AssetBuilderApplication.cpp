@@ -74,16 +74,28 @@ void AssetBuilderApplication::RegisterCoreComponents()
 
 void AssetBuilderApplication::StartCommon(AZ::Entity* systemEntity)
 {
+    InstallCtrlHandler();
+
     AzToolsFramework::ToolsApplication::StartCommon(systemEntity);
 
     AZStd::string configFilePath;
     AZStd::string gameRoot;
     
+#if defined(AZ_PLATFORM_APPLE_OSX)
+    // The asset builder needs to start astcenc as a child process to compress textures.
+    // astcenc is started by the PVRTexLib dynamic library. In order for it to be able to find
+    // the executable, we need to set the PATH environment variable.
+    AZStd::string binFullPath, binFolder;
+    AZ::ComponentApplicationBus::BroadcastResult(binFolder, &AZ::ComponentApplicationBus::Events::GetBinFolder);
+    AzFramework::StringFunc::Path::Join(GetAppRoot(), binFolder.c_str(), binFullPath);
+    setenv("PATH", binFullPath.c_str(), 1);
+#endif // AZ_PLATFORM_APPLE_OSX
+
     if (m_commandLine.GetNumSwitchValues("gameRoot") > 0)
     {
         gameRoot = m_commandLine.GetSwitchValue("gameRoot", 0);
     }
-    
+
     if (gameRoot.empty())
     {
         if (IsInDebugMode())
@@ -101,7 +113,7 @@ void AssetBuilderApplication::StartCommon(AZ::Entity* systemEntity)
             AZ_Printf(AssetBuilderSDK::InfoWindow, "gameRoot is best specified as the full path to the game's asset folder.");
         }
     }
-    
+
     AZ::IO::FileIOBase* fileIO = AZ::IO::FileIOBase::GetInstance();
     if (fileIO)
     {

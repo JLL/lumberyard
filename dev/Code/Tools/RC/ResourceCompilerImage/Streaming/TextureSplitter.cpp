@@ -15,7 +15,7 @@
 //               file from file with list of resources
 
 
-#include "StdAfx.h"
+#include "stdafx.h"
 #include <IConfig.h>
 #include "TextureSplitter.h"
 #include "IResCompiler.h"
@@ -41,7 +41,7 @@
 
 #if defined(AZ_PLATFORM_WINDOWS)
 static const unsigned long MIN_TEX_SIZE = 1ul;
-#elif defined(AZ_PLATFORM_APPLE)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE
 static const unsigned int MIN_TEX_SIZE = 1u;
 #endif
 
@@ -176,7 +176,8 @@ bool CTextureSplitter::SaveFile(const string& sFileName, const void* pBuffer, co
     }
 
     // create file
-    FILE* file = fopen(sFileName, "wb");
+    FILE* file = nullptr; 
+    azfopen(&file, sFileName, "wb");
     if (!file)
     {
         RCLogError("Error '%s': Failed to create file '%s'\n", strerror(errno), sFileName.c_str());
@@ -421,7 +422,8 @@ void CTextureSplitter::PostLoadProcessTexture(std::vector<uint8>& fileContent)
 bool CTextureSplitter::LoadTexture(const char* fileName, std::vector<uint8>& fileContent)
 {
     // try to open file
-    FILE* file = fopen(fileName, "rb");
+    FILE* file = nullptr; 
+    azfopen(&file, fileName, "rb");
     if (file == NULL)
     {
         RCLogError("Error: Cannot open texture file: '%s'\n", fileName);
@@ -758,11 +760,6 @@ void CTextureSplitter::Release()
 
 bool CTextureSplitter::Process()
 {
-    // Warning: this one is not multithread-safe (even if we
-    // return true in SupportsMultithreading()) if platforms
-    // specified for different CTextureSplitter compilers are
-    // different.
-
     const PlatformInfo* const pPlatformInfo = m_CC.pRC->GetPlatformInfo(m_CC.platform);
 
     m_currentEndian = pPlatformInfo->bBigEndian ? eBigEndian : eLittleEndian;
@@ -884,11 +881,6 @@ ICompiler* CTextureSplitter::CreateCompiler()
     }
     CTextureSplitter* pNewSplitter = new CTextureSplitter();
     return pNewSplitter;
-}
-
-bool CTextureSplitter::SupportsMultithreading() const
-{
-    return true;
 }
 
 void CTextureSplitter::ProcessPlatformSpecificConversions(std::vector<STexture>& resourcesOut, byte* fileContent, const size_t fileSize)
@@ -1064,13 +1056,13 @@ void CTextureSplitter::ProcessPlatformSpecificConversions(std::vector<STexture>&
         }
 
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
-#define AZ_TOOLS_RESTRICTED_PLATFORM_EXPANSION(PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
+#define AZ_RESTRICTED_PLATFORM_EXPANSION(CodeName, CODENAME, codename, PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
         if (m_targetType == eTT_##PrivateName)\
         {\
             ProcessPlatformSpecificConversions_##PrivateName(resource, dwSides, dwWidth, dwHeight, dwDepth, dwMips, format, bBlockCompressed, nBitsPerPixel);\
         }
         AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
-#undef AZ_TOOLS_RESTRICTED_PLATFORM_EXPANSION
+#undef AZ_RESTRICTED_PLATFORM_EXPANSION
 #endif
     }
 

@@ -24,7 +24,7 @@ namespace GraphCanvas
     ///////////////////////////
     // ExecutionSlotComponent
     ///////////////////////////
-	
+
     void ExecutionSlotComponent::Reflect(AZ::ReflectContext* reflectContext)
     {
         AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(reflectContext);
@@ -93,7 +93,16 @@ namespace GraphCanvas
     {
     }
 
-    AZ::Entity* ExecutionSlotComponent::ConstructConnectionEntity(const Endpoint& sourceEndpoint, const Endpoint& targetEndpoint, bool createModelConnection) const
+    SlotConfiguration* ExecutionSlotComponent::CloneSlotConfiguration() const
+    {
+        ExecutionSlotConfiguration* executionConfiguration = aznew ExecutionSlotConfiguration();
+
+        PopulateSlotConfiguration((*executionConfiguration));
+
+        return executionConfiguration;
+    }
+
+    AZ::Entity* ExecutionSlotComponent::ConstructConnectionEntity(const Endpoint& sourceEndpoint, const Endpoint& targetEndpoint, bool createModelConnection)
     {    
         const AZStd::string k_connectionSubStyle = ".logicFlow";
 

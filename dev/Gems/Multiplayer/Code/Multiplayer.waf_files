@@ -7,7 +7,6 @@
     },
     "auto": {
         "Include": [
-            "Include/Multiplayer/FlowMultiplayerNodes.h",
             "Include/Multiplayer/IMultiplayerGem.h",
             "Include/Multiplayer/MultiplayerLobbyComponent.h",
             "Include/Multiplayer/MultiplayerEventsComponent.h",
@@ -33,13 +32,9 @@
             "Source/MultiplayerCVars.cpp",
             "Source/GameLiftListener.h",
             "Source/GameLiftListener.cpp",
-            "Source/MultiplayerEventsComponent.cpp"
-        ],
-        "Source/FlowGraph": [
-            "Source/FlowMultiplayerNodes.cpp",
-            "Source/FlowMultiplayerEventNodes.cpp",
-            "Source/FlowMultiplayerFunctionNodes.cpp",
-            "Source/GameLiftFlowNodes.cpp"
+            "Source/MultiplayerEventsComponent.cpp",
+            "Source/MultiplayerGameLiftClient.h",
+            "Source/MultiplayerGameLiftClient.cpp"
         ],
         "Source/MultiplayerLobbyServiceWrapper": [
             "Source/MultiplayerLobbyServiceWrapper/MultiplayerLobbyLANServiceWrapper.cpp",

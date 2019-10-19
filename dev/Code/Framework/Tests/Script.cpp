@@ -10,13 +10,12 @@
 *
 */
 
-#include <Tests/TestTypes.h>
-
 #include <AzCore/Asset/AssetManagerComponent.h>
 #include <AzCore/RTTI/BehaviorContext.h>
 #include <AzCore/Script/ScriptAsset.h>
 #include <AzCore/Script/ScriptSystemComponent.h>
 #include <AzCore/Script/ScriptContext.h>
+#include <AzCore/UnitTest/TestTypes.h>
 #include <AzToolsFramework/ToolsComponents/ScriptEditorComponent.h>
 
 #include "EntityTestbed.h"
@@ -112,6 +111,8 @@ namespace UnitTest
                 systemEntity->Init();
                 systemEntity->Activate();
 
+                ScriptComponent::CreateDescriptor(); // descriptor is deleted by app
+
                 ScriptContext* scriptContext = nullptr;
                 EBUS_EVENT_RESULT(scriptContext, ScriptSystemRequestBus, GetContext, DefaultScriptContextId);
 
@@ -199,8 +200,18 @@ namespace UnitTest
                     Data::Asset<ScriptAsset> scriptAsset2(aznew ScriptAsset(scriptAsset1.GetId()));
                     scriptAsset2.Get()->m_scriptBuffer.insert(scriptAsset2.Get()->m_scriptBuffer.begin(), script2.begin(), script2.end());
 
+                    // When reloading script assets from files, ScriptSystemComponent would clear old script caches automatically in the
+                    // function `ScriptSystemComponent::LoadAssetData()`. But here we are changing script directly in memory, therefore we 
+                    // need to clear old cache manually.
+                    AZ::ScriptSystemRequestBus::Broadcast(&AZ::ScriptSystemRequestBus::Events::ClearAssetReferences, scriptAsset1.GetId());
+
                     // trigger reload
                     Data::AssetManager::Instance().ReloadAssetFromData(scriptAsset2);
+                    
+                    // ReloadAssetFromData is (now) a queued event
+                    // Need to tick subsystems here to receive reload event.
+                    app.Tick();
+                    app.TickSystem();
 
                     // test value with the reloaded value
                     EXPECT_EQ(5, myReloadValue);

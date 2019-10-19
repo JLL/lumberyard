@@ -16,6 +16,8 @@
             "AudioInput/AudioInputFile.h",
             "AudioInput/AudioInputMicrophone.cpp",
             "AudioInput/AudioInputMicrophone.h",
+            "AudioInput/AudioInputStream.cpp",
+            "AudioInput/AudioInputStream.h",
             "AudioInput/WavParser.cpp",
             "AudioInput/WavParser.h"
         ],
@@ -26,7 +28,8 @@
             "AudioSystemImpl_wwise.h",
             "AudioSystemImplCVars.h",
             "Common_wwise.h",
-            "FileIOHandler_wwise.h"
+            "FileIOHandler_wwise.h",
+            "PluginRegistration_wwise.h"
         ],
         "Source Files":
         [

@@ -42,6 +42,9 @@
 #define std__hash AZStd::hash
 #define std__unordered_map AZStd::unordered_map
 
+template <class T, class Destructor>
+class StaticInstance;
+
 // auto-cleaner: upon destruction, calls the clear() method
 template <class T>
 class CAutoClear
@@ -233,7 +236,7 @@ namespace stl
     template <class Container, class Value>
     inline bool find_and_erase(Container& container, const Value& value)
     {
-        typename Container::iterator it = std::find(container.begin(), container.end(), value);
+        typename Container::iterator it = AZStd::find(container.begin(), container.end(), value);
         if (it != container.end())
         {
             container.erase(it);
@@ -306,7 +309,7 @@ namespace stl
     template <class Container, class Value>
     inline bool push_back_unique(Container& container, const Value& value)
     {
-        if (std::find(container.begin(), container.end(), value) == container.end())
+        if (AZStd::find(container.begin(), container.end(), value) == container.end())
         {
             container.push_back(value);
             return true;
@@ -322,7 +325,7 @@ namespace stl
     {
         typename CONTAINER::iterator    end = container.end();
 
-        if (std::find_if(container.begin(), end, predicate) == end)
+        if (AZStd::find_if(container.begin(), end, predicate) == end)
         {
             container.push_back(value);
 
@@ -790,6 +793,12 @@ namespace stl
         new(&t)T;
     }
 
+    template <class T, class D>
+    inline void reconstruct(StaticInstance<T, D>& instance)
+    {
+        reconstruct(*instance);
+    }
+
     template <typename T, typename A1>
     inline void reconstruct(T& t, const A1& a1)
     {
@@ -834,15 +843,19 @@ namespace stl
     template <class T, class A>
     inline void free_container(std::deque<T, A>& t)
     {
-        ScopedSwitchToGlobalHeap GlobalHeap;
         reconstruct(t);
     }
 
     template <class K, class D, class H, class A>
     inline void free_container(std__hash_map<K, D, H, A>& t)
     {
-        ScopedSwitchToGlobalHeap GlobalHeap;
         reconstruct(t);
+    }
+
+    template <class T, class D>
+    inline void free_container(StaticInstance<T, D>& instance)
+    {
+        reconstruct(*instance);
     }
 
     struct container_freer
@@ -884,6 +897,15 @@ namespace stl
         std::for_each(&buffer[0], &buffer[Length], func);
     }
 
+    template <typename T, typename D, size_t Length, typename Func>
+    inline void for_each_array(StaticInstance<T, D>(&buffer)[Length], Func func)
+    {
+        for (size_t idx = 0; idx < Length; ++idx)
+        {
+            func(*buffer[idx]);
+        }
+    }
+
     template <typename T>
     inline void destruct(T* p)
     {
@@ -891,14 +913,9 @@ namespace stl
     }
 }
 
-#if _MSC_VER >= 1800
-#define DEFINE_INTRUSIVE_LINKED_LIST(Class) \
-    Class * stl::intrusive_linked_list_node<Class>::m_root_intrusive = nullptr;
-#else
 #define DEFINE_INTRUSIVE_LINKED_LIST(Class) \
     template<>                              \
     Class * stl::intrusive_linked_list_node<Class>::m_root_intrusive = nullptr;
-#endif
 
 
 // Performs a less-than compare on a serial sequence space, such that earlier values compare less-than later values.

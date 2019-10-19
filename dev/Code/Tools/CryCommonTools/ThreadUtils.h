@@ -20,7 +20,7 @@
 #if defined(AZ_PLATFORM_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>   // CRITICAL_SECTION
-#elif defined(AZ_PLATFORM_APPLE)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE
 #include <QMutex>
 #endif
 
@@ -59,7 +59,7 @@ namespace ThreadUtils
 #if defined(AZ_DEBUG_BUILD)
         bool IsLocked()
         {
-            return m_cs.RecursionCount > 0 && (DWORD)m_cs.OwningThread == GetCurrentThreadId();
+            return m_cs.RecursionCount > 0 && m_cs.OwningThread == GetCurrentThread();
         }
 #endif
 
@@ -103,7 +103,7 @@ namespace ThreadUtils
 
         CONDITION_VARIABLE m_cv;
     };
-#elif defined(AZ_PLATFORM_APPLE)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE
     class CriticalSection
     {
     public:

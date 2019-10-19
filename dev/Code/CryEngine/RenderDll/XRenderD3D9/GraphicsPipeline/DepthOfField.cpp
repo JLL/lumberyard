@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -227,8 +227,8 @@ void DepthOfFieldPass::Execute()
 
     // For better blending later.
     // We skip this on mobile as to reduce memory bandwidth and fetch from the RT instead using GMEM
-    //This optimization is not supported on PLS yet.
-    if (!gcpRendD3D->FX_GetEnabledGmemPath(nullptr) || RenderCapabilities::SupportsPLSExtension())
+    bool sampleSceneFromRenderTarget = gcpRendD3D->FX_GetEnabledGmemPath(nullptr) && RenderCapabilities::GetFrameBufferFetchCapabilities().test(RenderCapabilities::FBF_COLOR0);
+    if (!sampleSceneFromRenderTarget)
     {
         GetUtils().StretchRect(CTexture::s_ptexHDRTarget, CTexture::s_ptexSceneTarget);
     }
@@ -305,7 +305,11 @@ void DepthOfFieldPass::Execute()
         // 1st gather pass
         {
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(DepthOfField_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DepthOfField_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DepthOfField_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -397,8 +401,7 @@ void DepthOfFieldPass::Execute()
             GetUtils().SetTexture(CTexture::s_ptexHDRDofLayers[1], 2, FILTER_LINEAR);
             GetUtils().SetTexture(CTextureManager::Instance()->GetNoTexture(), 3, FILTER_LINEAR);
 
-            //This optimization is not supported on PLS yet.
-            if (!gcpRendD3D->FX_GetEnabledGmemPath(nullptr) || RenderCapabilities::SupportsPLSExtension())
+            if (!sampleSceneFromRenderTarget)
             {
                 GetUtils().SetTexture(CTexture::s_ptexSceneTarget, 4, FILTER_POINT);
             }

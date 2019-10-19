@@ -12,30 +12,44 @@
 
 #pragma once
 
-#include <MCore/Source/StandardHeaders.h>
-#include <MCore/Source/Array.h>
-#include <EMotionFX/Source/AnimGraph.h>
-
-#include "../StandardPluginsConfig.h"
-#include "AttributesWindow.h"
+#include <AzToolsFramework/UI/PropertyEditor/ReflectedPropertyEditor.hxx>
+#include <EMotionFX/Source/AnimGraphBus.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/StandardPluginsConfig.h>
+#include <QDialog>
+#include <QPointer>
 #include <QWidget>
-#include <QGridLayout>
-#include <QVBoxLayout>
-#include <QPushButton>
-#include <QScrollArea>
-#include <QTreeWidget>
+#include <QLineEdit>
 
-#include <EMotionFX/CommandSystem/Source/AnimGraphConnectionCommands.h>
-#include <EMotionFX/CommandSystem/Source/AnimGraphCommands.h>
-#include <EMotionFX/CommandSystem/Source/AnimGraphParameterCommands.h>
-#include <EMotionFX/CommandSystem/Source/AnimGraphNodeCommands.h>
-#include <MysticQt/Source/SearchButton.h>
+QT_FORWARD_DECLARE_CLASS(QPushButton)
+QT_FORWARD_DECLARE_CLASS(QScrollArea)
+QT_FORWARD_DECLARE_CLASS(QTreeWidget)
+QT_FORWARD_DECLARE_CLASS(QTreeWidgetItem)
+QT_FORWARD_DECLARE_CLASS(QVBoxLayout)
 
+
+namespace EMotionFX
+{
+    class GroupParameter;
+    class ValueParameter;
+    class AnimGraph;
+    class Parameter;
+} // namespace EMotionFX
+
+namespace MCore
+{
+    class Attribute;
+} // namespace MCore
+
+namespace AzQtComponents
+{
+    class FilteredSearchWidget;
+} // namespace AzQtComponents
 
 namespace EMStudio
 {
     class AnimGraphPlugin;
-
+    class ValueParameterEditor;
+    
     class ParameterCreateRenameWindow
         : public QDialog
     {
@@ -44,7 +58,6 @@ namespace EMStudio
 
     public:
         ParameterCreateRenameWindow(const char* windowTitle, const char* topText, const char* defaultName, const char* oldName, const AZStd::vector<AZStd::string>& invalidNames, QWidget* parent);
-        virtual ~ParameterCreateRenameWindow();
 
         AZStd::string GetName() const
         {
@@ -64,29 +77,21 @@ namespace EMStudio
 
     class ParameterWindow
         : public QWidget
+        , private AzToolsFramework::IPropertyEditorNotify
+        , protected EMotionFX::AnimGraphNotificationBus::Handler
     {
         Q_OBJECT
         MCORE_MEMORYOBJECTCATEGORY(ParameterWindow, EMFX_DEFAULT_ALIGNMENT, MEMCATEGORY_STANDARDPLUGINS_ANIMGRAPH);
 
     public:
         ParameterWindow(AnimGraphPlugin* plugin);
-        ~ParameterWindow();
 
-        void Init();
+        void Reinit(bool forceReinit = false);
 
         // retrieve current selection
-        const char* GetSingleSelectedParameterName() const
-        {
-            if (mSelectedParameterNames.size() != 1 || !mSelectedParameterGroupNames.empty())
-            {
-                return "";
-            }
-            return mSelectedParameterNames[0].c_str();
-        }
-        uint32 GetSingleSelectedParameterIndex() const;
-        const char* GetSingleSelectedParameterGroupName() const;
-        bool GetIsDefaultParameterGroupSingleSelected();
-        bool GetIsParameterSelected(const char* parameterName)
+        const EMotionFX::Parameter* GetSingleSelectedParameter() const;
+
+        bool GetIsParameterSelected(const AZStd::string& parameterName)
         {
             if (AZStd::find(mSelectedParameterNames.begin(), mSelectedParameterNames.end(), parameterName) == mSelectedParameterNames.end())
             {
@@ -94,25 +99,21 @@ namespace EMStudio
             }
             return true;
         }
-        bool GetIsParameterGroupSelected(const char* groupName)
-        {
-            if (AZStd::find(mSelectedParameterGroupNames.begin(), mSelectedParameterGroupNames.end(), groupName) == mSelectedParameterGroupNames.end())
-            {
-                return false;
-            }
-            return true;
-        }
 
         // select manually
-        void SingleSelectParameter(const char* parameterName, bool ensureVisibility = false, bool updateInterface = false);
-        void SingleSelectParameterGroup(const char* groupName, bool ensureVisibility = false, bool updateInterface = false);
+        void SingleSelectGroupParameter(const char* groupName, bool ensureVisibility = false, bool updateInterface = false);
 
-        MysticQt::AttributeWidget* FindAttributeWidget(MCore::AttributeSettings* attributeSettings);
+        void UpdateParameterValue(const EMotionFX::Parameter* parameter);
 
         void UpdateParameterValues();
 
-        void ResetNameColumnWidth();
-        void ResizeNameColumnToContents();
+        void ClearParameters(bool showConfirmationDialog = true);
+
+        // AnimGraphNotificationBus
+        void OnParameterActionTriggered(const EMotionFX::ValueParameter* valueParameter) override;
+
+    public slots:
+        void OnRecorderStateChanged();
 
     private slots:
         void UpdateInterface();
@@ -120,75 +121,70 @@ namespace EMStudio
         void OnAddParameter();
         void OnEditButton();
         void OnRemoveButton();
-        void OnClearButton();
+        void OnClearButton() { ClearParameters(); }
 
         void OnGroupCollapsed(QTreeWidgetItem* item);
         void OnGroupExpanded(QTreeWidgetItem* item);
 
-        void OnRenameGroup();
-        void OnAddGroupButton();
-        void OnParameterGroupSelected();
+        void OnAddGroup();
+        void OnGroupParameterSelected();
 
         void OnMoveParameterUp();
         void OnMoveParameterDown();
-        void FilterStringChanged(const QString& text);
+        void OnTextFilterChanged(const QString& text);
         void OnSelectionChanged();
         void OnMakeDefaultValue();
 
         void OnGamepadControlToggle();
-        void OnRecorderStateChanged();
 
     private:
-        void contextMenuEvent(QContextMenuEvent* event);
+        void contextMenuEvent(QContextMenuEvent* event) override;
         void CanMove(bool* outMoveUpPossible, bool* outMoveDownPossible);
-        uint32 GetNeighborParameterIndex(EMotionFX::AnimGraph* animGraph, uint32 parameterIndex, bool upper);
 
         void UpdateSelectionArrays();
 
-        void keyPressEvent(QKeyEvent* event);
-        void keyReleaseEvent(QKeyEvent* event);
+        void keyPressEvent(QKeyEvent* event) override;
+        void keyReleaseEvent(QKeyEvent* event) override;
 
-        void AddParameterToInterface(EMotionFX::AnimGraph* animGraph, uint32 parameterIndex, QTreeWidgetItem* parameterGroupItem);
+        void AddParameterToInterface(EMotionFX::AnimGraph* animGraph, const EMotionFX::Parameter* parameter, QTreeWidgetItem* parentWidgetItem);
+
+        /**
+         * Update the attributes the parameter widgets modify when they are being changed in the interface.
+         * Iterate through the selected actor instances and check for the ones that are running the anim graph whose parameters
+         * we're showing. This will make sure that e.g. when changing a slider in the parameter window, the corresponding
+         * anim graph instances get informed about the changed values.
+         */
+        void UpdateAttributesForParameterWidgets();
+
+        /**
+         * Get the attributes for the given parameter that are influenced by any of the currently selected actor instances
+         * that are running the anim graph whose parameters we're showing.
+         * @param[in] parameterIndex The parameter index to get the influenced attributes for.
+         * @result The list of influenced attributes from the anim graph instances.
+         */
+        AZStd::vector<MCore::Attribute*> GetAttributesForParameter(size_t parameterIndex) const;
 
         /**
          * Check if the gamepad control mode is enabled for the given parameter and if its actually being controlled or not.
          */
-        void GetGamepadState(EMotionFX::AnimGraph* animGraph, MCore::AttributeSettings* attributeSettings, bool* outIsActuallyControlled, bool* outIsEnabled);
-        void SetGamepadState(EMotionFX::AnimGraph* animGraph, MCore::AttributeSettings* attributeSettings, bool isEnabled);
+        void GetGamepadState(EMotionFX::AnimGraph* animGraph, const EMotionFX::Parameter* parameter, bool* outIsActuallyControlled, bool* outIsEnabled);
+        void SetGamepadState(EMotionFX::AnimGraph* animGraph, const EMotionFX::Parameter* parameter, bool isEnabled);
         void SetGamepadButtonTooltip(QPushButton* button);
 
-        // command callbacks
-        MCORE_DEFINECOMMANDCALLBACK(CommandCreateBlendParameterCallback);
-        MCORE_DEFINECOMMANDCALLBACK(CommandRemoveBlendParameterCallback);
-        MCORE_DEFINECOMMANDCALLBACK(CommandAdjustBlendParameterCallback);
-        MCORE_DEFINECOMMANDCALLBACK(CommandAnimGraphAdjustParameterGroupCallback);
-        MCORE_DEFINECOMMANDCALLBACK(CommandAnimGraphAddParameterGroupCallback);
-        MCORE_DEFINECOMMANDCALLBACK(CommandAnimGraphRemoveParameterGroupCallback);
-        CommandCreateBlendParameterCallback*            mCreateCallback;
-        CommandRemoveBlendParameterCallback*            mRemoveCallback;
-        CommandAdjustBlendParameterCallback*            mAdjustCallback;
-        CommandAnimGraphAddParameterGroupCallback*     mAddGroupCallback;
-        CommandAnimGraphRemoveParameterGroupCallback*  mRemoveGroupCallback;
-        CommandAnimGraphAdjustParameterGroupCallback*  mAdjustGroupCallback;
+        // IPropertyEditorNotify
+        void BeforePropertyModified(AzToolsFramework::InstanceDataNode* pNode) override;
+        void AfterPropertyModified(AzToolsFramework::InstanceDataNode* pNode) override;
+        void SetPropertyEditingActive(AzToolsFramework::InstanceDataNode* pNode) override;
+        void SetPropertyEditingComplete(AzToolsFramework::InstanceDataNode* pNode) override;
+        void SealUndoStack() override;
+        void RequestPropertyContextMenu(AzToolsFramework::InstanceDataNode*, const QPoint&) override;
+        void PropertySelectionChanged(AzToolsFramework::InstanceDataNode *, bool) override;
 
-
-        struct WidgetLookup
-        {
-            MCORE_MEMORYOBJECTCATEGORY(ParameterWindow::WidgetLookup, EMFX_DEFAULT_ALIGNMENT, MEMCATEGORY_STANDARDPLUGINS_ANIMGRAPH);
-            QObject*    mWidget;
-            uint32      mGroupIndex;
-
-            WidgetLookup(QObject* widget, uint32 index)
-            {
-                mWidget     = widget;
-                mGroupIndex = index;
-            }
-        };
-
-        EMotionFX::AnimGraph*           mAnimGraph;
+        EMotionFX::AnimGraph*           m_animGraph;
 
         // toolbar buttons
         QPushButton*                    mAddButton;
+        static int                      m_contextMenuWidth;
         QPushButton*                    mRemoveButton;
         QPushButton*                    mClearButton;
 
@@ -197,18 +193,22 @@ namespace EMStudio
         QPushButton*                    mMoveDownButton;
 
         AZStd::vector<AZStd::string>    mSelectedParameterNames;
-        AZStd::vector<AZStd::string>    mSelectedParameterGroupNames;
         bool                            mEnsureVisibility;
         bool                            mLockSelection;
 
         AZStd::string                   mFilterString;
         AnimGraphPlugin*                mPlugin;
         QTreeWidget*                    mTreeWidget;
-        MysticQt::SearchButton*         mSearchButton;
+        AzQtComponents::FilteredSearchWidget* m_searchWidget;
         QVBoxLayout*                    mVerticalLayout;
         QScrollArea*                    mScrollArea;
         AZStd::string                   mNameString;
-        AZStd::vector<MysticQt::AttributeWidget*> mAttributeWidgets;
-        AZStd::vector<WidgetLookup>     mWidgetTable;
+        struct ParameterWidget
+        {
+            AZStd::unique_ptr<ValueParameterEditor> m_valueParameterEditor;
+            QPointer<AzToolsFramework::ReflectedPropertyEditor> m_propertyEditor;
+        };
+        typedef AZStd::unordered_map<const EMotionFX::Parameter*, ParameterWidget> ParameterWidgetByParameter;
+        ParameterWidgetByParameter m_parameterWidgets;
     };
 } // namespace EMStudio

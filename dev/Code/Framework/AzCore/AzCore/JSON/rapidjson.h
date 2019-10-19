@@ -20,9 +20,7 @@
 #define RAPIDJSON_ASSERT(x) AZ_Assert(x, "Assert[rapidjson]: " #x)
 #define RAPIDJSON_STATIC_ASSERT(x) AZ_STATIC_ASSERT(x, "Assert[rapidjson]: " #x)
 #define RAPIDJSON_HAS_CXX11_TYPETRAITS 1
-#ifdef AZ_HAS_RVALUE_REFS
-#   define RAPIDJSON_HAS_CXX11_RVALUE_REFS 1
-#endif
+#define RAPIDJSON_HAS_CXX11_RVALUE_REFS 1
 
 #define RAPIDJSON_NEW(x)  aznew x
 #define RAPIDJSON_DELETE(x) delete x
@@ -34,8 +32,17 @@
 // Set custom namespace for AzCore's rapidjson to avoid various collisions.
 #define RAPIDJSON_NAMESPACE rapidjson_ly
 
+#if AZ_TRAIT_JSON_CLANG_IGNORE_UNKNOWN_WARNING && defined(AZ_COMPILER_CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-warning-option"
+#endif
+
 // Make you have available rapidjson/include folder. Currently 3rdParty\rapidjson\rapidjson-1.0.2\include
 #include <rapidjson/rapidjson.h>
+
+#if AZ_TRAIT_JSON_CLANG_IGNORE_UNKNOWN_WARNING && defined(AZ_COMPILER_CLANG)
+#pragma clang diagnostic pop
+#endif
 
 // Allow our existing code to continue use "rapidjson::"
 #define rapidjson RAPIDJSON_NAMESPACE

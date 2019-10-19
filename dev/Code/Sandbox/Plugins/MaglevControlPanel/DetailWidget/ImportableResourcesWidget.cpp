@@ -468,7 +468,7 @@ void ImportableResourcesWidget::ImportResource()
 
 void ImportableResourcesWidget::OnImporterOutput(const QVariant& output, const char* outputType)
 {
-    if (m_selectedRowList.length() > 0 && output == m_importerModel->item(m_selectedRowList[0], IAWSImporterModel::NameColumn)->text() + " imported sucessfully")
+    if (m_selectedRowList.length() > 0 && output == m_importerModel->item(m_selectedRowList[0], IAWSImporterModel::NameColumn)->text() + " imported successfully")
     {
         //Reset the checkstate for those successfully imported resources
         m_importerModel->item(m_selectedRowList[0], IAWSImporterModel::CheckableResourceColumn)->setCheckState(Qt::Unchecked);
@@ -559,7 +559,7 @@ int ImportableResourcesWidget::GetHeight(QTableView* table)
 {
     //Get the height of the table
     int height = table->horizontalHeader()->width() +
-        table->frameWidth() * 2 +
+        table->sizeHint().height() +
         table->verticalHeader()->length();
     return height;
 }

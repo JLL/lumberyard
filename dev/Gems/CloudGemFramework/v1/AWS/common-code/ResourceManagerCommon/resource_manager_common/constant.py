@@ -15,6 +15,7 @@ PROJECT_DEPLOYMENT_TEMPLATE_FILENAME = "deployment-template.json"
 PROJECT_GEMS_DEFINITION_FILENAME = "gems.json"
 PROJECT_TEMPLATE_FILENAME = "project-template.json"
 PROJECT_TEMPLATE_EXTENSIONS_FILENAME = "project-template-extensions.json"
+COGNITO_POOLS_FILENAME = "cognito-pools.json"
 DEPLOYMENT_TEMPLATE_FILENAME = "deployment-template.json"
 DEPLOYMENT_TEMPLATE_EXTENSIONS_FILENAME = "deployment-template-extensions.json"
 DEPLOYMENT_ACCESS_TEMPLATE_FILENAME = "deployment-access-template.json"
@@ -38,9 +39,16 @@ MAPPING_FILE_SUFFIX = 'awsLogicalMappings.json'
 RESOURCE_DEFINITIONS_PATH = "resource-definitions"
 S3_DELIMETER = "/"
 
+## Deployment
+DEPLOYMENT_RESOURCE_GROUP_SETTINGS = "deployment-resource-group-settings.json"
+RESOURCE_SETTINGS_FOLDER = "resource-settings"
+GEM_SETTINGS_NAME = "GemSettings"
+DEPLOYMENT_TAGS = "DeploymentTags"
+
 ## Gem
 GEM_DEFINITION_FILENAME = "gem.json"
 RESOURCE_GROUP_TEMPLATE_FILENAME = "resource-template.json"
+RESOURCE_GROUP_TEMPLATE_EXTENSIONS_FILENAME = "resource-template-extensions.json"
 GEM_AWS_DIRECTORY_NAME = "AWS"
 GEM_CODE_DIRECTORY_NAME = "Code"
 GEM_CGP_DIRECTORY_NAME = "cgp-resource-code"
@@ -85,4 +93,6 @@ LAZY_MIGRATION = 'IsLazyMigration'
 PENDING_PROJECT_STACK_ID = 'PendingProjectStackId'
 PROJECT_STACK_ID = 'ProjectStackId'
 FRAMEWORK_VERSION_KEY = 'FrameworkVersion'
+
+CROSS_GEM_RESOLVER_KEY = 'CrossGemCommunicationInterfaceResolver'
 

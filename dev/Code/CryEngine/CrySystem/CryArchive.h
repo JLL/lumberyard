@@ -23,15 +23,15 @@ struct CryArchiveSortByName
 {
     bool operator () (const ICryArchive* left, const ICryArchive* right) const
     {
-        return _stricmp(left->GetFullPath(), right->GetFullPath()) < 0;
+        return azstricmp(left->GetFullPath(), right->GetFullPath()) < 0;
     }
     bool operator () (const char* left, const ICryArchive* right) const
     {
-        return _stricmp(left, right->GetFullPath()) < 0;
+        return azstricmp(left, right->GetFullPath()) < 0;
     }
     bool operator () (const ICryArchive* left, const char* right) const
     {
-        return _stricmp(left->GetFullPath(), right) < 0;
+        return azstricmp(left->GetFullPath(), right) < 0;
     }
 };
 
@@ -159,7 +159,7 @@ protected:
         if (szRelativePath[1] == ':' || (m_nFlags & FLAGS_ABSOLUTE_PATHS))
         {
             // make the normalized full path and try to match it against the binding root of this object
-            const char* szFullPath = m_pPak->AdjustFileName (szRelativePath, szFullPathBuf, ICryPak::FLAGS_PATH_REAL);
+            const char* szFullPath = m_pPak->AdjustFileName(szRelativePath, szFullPathBuf, CCryPak::g_nMaxPath, ICryPak::FLAGS_PATH_REAL);
             size_t nPathLen = strlen(szFullPath);
             if (nPathLen <= m_strBindRoot.length())
             {
@@ -171,7 +171,7 @@ protected:
             {
                 return NULL;
             }
-            if (memicmp(szFullPath, m_strBindRoot.c_str(), m_strBindRoot.length()))
+            if (azmemicmp(szFullPath, m_strBindRoot.c_str(), m_strBindRoot.length()))
             {
                 return NULL; // the roots don't match
             }
@@ -210,7 +210,7 @@ public:
     // Adds a new file to the zip or update an existing one
     // adds a directory (creates several nested directories if needed)
     // compression methods supported are 0 (store) and 8 (deflate) , compression level is 0..9 or -1 for default (like in zlib)
-    int UpdateFile (const char* szRelativePath, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod = 0, int nCompressionLevel = -1);
+    int UpdateFile (const char* szRelativePath, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod = 0, int nCompressionLevel = -1, CompressionCodec::Codec codec = CompressionCodec::Codec::ZLIB);
 
     //   Adds a new file to the zip or update an existing one if it is not compressed - just stored  - start a big file
     int StartContinuousFileUpdate(const char* szRelativePath, unsigned nSize);
@@ -264,7 +264,8 @@ public:
     // METHOD_DEFLATE == METHOD_COMPRESS == 8 (deflate) , compression
     // level is LEVEL_FASTEST == 0 till LEVEL_BEST == 9 or LEVEL_DEFAULT == -1
     // for default (like in zlib)
-    int UpdateFile (const char* szRelativePath, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod = 0, int nCompressionLevel = -1) {return ZipDir::ZD_ERROR_INVALID_CALL; }
+
+    int UpdateFile (const char* szRelativePath, void* pUncompressed, unsigned nSize, unsigned nCompressionMethod = 0, int nCompressionLevel = -1, CompressionCodec::Codec codec = CompressionCodec::Codec::ZLIB) {return ZipDir::ZD_ERROR_INVALID_CALL; }
 
     //   Adds a new file to the zip or update an existing one if it is not compressed - just stored  - start a big file
     int StartContinuousFileUpdate(const char* szRelativePath, unsigned nSize)  {return ZipDir::ZD_ERROR_INVALID_CALL; }

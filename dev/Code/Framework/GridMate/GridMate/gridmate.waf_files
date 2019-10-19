@@ -33,6 +33,7 @@
             "Carrier/DefaultTrafficControl.cpp",
             "Carrier/DefaultTrafficControl.h",
             "Carrier/Driver.h",
+            "Carrier/DriverEvents.h",
             "Carrier/Handshake.h",
             "Carrier/Simulator.h",
             "Carrier/SocketDriver.cpp",
@@ -40,7 +41,6 @@
             "Carrier/StreamSocketDriver.cpp",
             "Carrier/StreamSocketDriver.h",
             "Carrier/TrafficControl.h",
-            "Carrier/Utils.cpp",
             "Carrier/Utils.h"
         ],
         "Containers":
@@ -76,6 +76,7 @@
         "Replica":
         [
             "Replica/BasicHostChunkDescriptor.h",
+            "Replica/DeltaCompressedDataSet.h",
             "Replica/DataSet.cpp",
             "Replica/DataSet.h",
             "Replica/Interpolators.h",

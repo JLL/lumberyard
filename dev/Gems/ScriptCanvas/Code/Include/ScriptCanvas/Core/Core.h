@@ -22,6 +22,9 @@
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/std/hash.h>
 #include <AzCore/Component/EntityUtils.h>
+#include <AzCore/Component/NamedEntityId.h>
+
+#include <Core/NamedId.h>
 
 // #define EXPRESSION_TEMPLATES_ENABLED
 
@@ -33,8 +36,16 @@ namespace AZ
 
 namespace ScriptCanvas
 {
-    static const AZ::EntityId SelfReferenceId = AZ::EntityId(0xacedc0de);
-    static const AZ::EntityId InvalidUniqueRuntimeId = AZ::EntityId(0xfee1baad);
+    // A place holder identifier for the AZ::Entity that owns the graph.
+    // The actual value in each location initialized to GraphOwnerId is populated with the owning entity at editor-time, Asset Processor-time, or runtime, as soon as the owning entity is known.
+    using GraphOwnerIdType = AZ::EntityId;
+    static const GraphOwnerIdType GraphOwnerId = AZ::EntityId(0xacedc0de);
+    
+    // A place holder identifier for unique runtime graph on Entity that is running more than one instance of the same graph.
+    // This allows multiple instances of the same graph to be addressed individually on the same entity.
+    // The actual value in each location initialized to UniqueId is populated at run-time.
+    using RuntimeIdType = AZ::EntityId;
+    static const RuntimeIdType UniqueId = AZ::EntityId(0xfee1baad);
 
     class Node;
     class Edge;
@@ -44,6 +55,13 @@ namespace ScriptCanvas
     using NodePtrList = AZStd::vector<Node*>;
     using NodePtrConstList = AZStd::vector<const Node*>;
     
+    enum class ExecutionMode : AZ::u8
+    {
+        GraphTraversal,
+        Interpreted,
+        Native,
+    };
+
     struct SlotId
     {
         AZ_TYPE_INFO(SlotId, "{14C629F6-467B-46FE-8B63-48FDFCA42175}");
@@ -86,6 +104,14 @@ namespace ScriptCanvas
         }
 
     };
+
+    using NamedActiveEntityId = AZ::NamedEntityId;    
+    using NamedNodeId = NamedId<AZ::EntityId>;
+    using NamedSlotId = NamedId<SlotId>;
+
+    using NodeTypeIdentifier = AZStd::size_t;
+    using EBusEventId = AZ::Crc32;
+    using EBusBusId = AZ::Crc32;
 }
 
 namespace AZStd
@@ -104,19 +130,3 @@ namespace AZStd
 }
 
 #define SCRIPT_CANVAS_INFINITE_LOOP_DETECTION_COUNT (1000)
-
-#define SCRIPTCANVAS_HANDLE_ERROR(node)\
-    bool inErrorState = false;\
-    ScriptCanvas::ErrorReporterBus::EventResult(inErrorState, node.GetGraphId(), &ScriptCanvas::ErrorReporter::IsInErrorState);\
-    if (inErrorState)\
-    {\
-        ScriptCanvas::ErrorReporterBus::Event(node.GetGraphId(), &ScriptCanvas::ErrorReporter::HandleError, (node));\
-    }
-
-#define SCRIPTCANVAS_REPORT_ERROR(node, ...)\
-    ScriptCanvas::ErrorReporterBus::Event(node.GetGraphId(), &ScriptCanvas::ErrorReporter::ReportError, (node), __VA_ARGS__)
-
-#define SCRIPTCANVAS_RETURN_IF_ERROR_STATE(node)\
-    bool inErrorState = false;\
-    ScriptCanvas::ErrorReporterBus::EventResult(inErrorState, node.GetGraphId(), &ScriptCanvas::ErrorReporter::IsInErrorState);\
-    if (inErrorState) { return; }  

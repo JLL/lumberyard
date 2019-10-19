@@ -13,7 +13,6 @@
 #include <AzFramework/StringFunc/StringFunc.h>
 #include <AzToolsFramework/Thumbnails/SourceControlThumbnail.h>
 #include <AzToolsFramework/SourceControl/SourceControlAPI.h>
-#include <QtConcurrent/QtConcurrent>
 
 namespace AzToolsFramework
 {
@@ -34,7 +33,7 @@ namespace AzToolsFramework
         {
             return m_fileName;
         }
-        
+
         bool SourceControlThumbnailKey::UpdateThumbnail()
         {
             if (!IsReady() || !SourceControlThumbnail::ReadyForUpdate())
@@ -55,8 +54,8 @@ namespace AzToolsFramework
         //////////////////////////////////////////////////////////////////////////
         // SourceControlThumbnail
         //////////////////////////////////////////////////////////////////////////
-        const char* SourceControlThumbnail::CHECKEDOUT_ICON_PATH = "Editor/Icons/AssetBrowser/checkedOut.png";
-        const char* SourceControlThumbnail::READONLY_ICON_PATH = "Editor/Icons/AssetBrowser/notCheckedOut.png";
+        static const char* WRITABLE_ICON_PATH = "Editor/Icons/AssetBrowser/Writable_16.png";
+        static const char* NONWRITABLE_ICON_PATH = "Editor/Icons/AssetBrowser/NonWritable_16.png";
 
         bool SourceControlThumbnail::m_readyForUpdate = true;
 
@@ -104,13 +103,13 @@ namespace AzToolsFramework
         {
             if (succeeded)
             {
-                if (fileInfo.HasFlag(AzToolsFramework::SCF_OpenByUser))
+                if (fileInfo.HasFlag(AzToolsFramework::SCF_Writeable))
                 {
-                    m_pixmap = QPixmap(CHECKEDOUT_ICON_PATH);
+                    m_pixmap = QPixmap(WRITABLE_ICON_PATH);
                 }
                 else
                 {
-                    m_pixmap = QPixmap(READONLY_ICON_PATH);
+                    m_pixmap = QPixmap(NONWRITABLE_ICON_PATH);
                 }
             }
             else
@@ -147,5 +146,5 @@ namespace AzToolsFramework
         }
     } // namespace Thumbnailer
 } // namespace AzToolsFramework
-#include <Thumbnails/SourceControlThumbnail.moc>
 
+#include <Thumbnails/SourceControlThumbnail.moc>

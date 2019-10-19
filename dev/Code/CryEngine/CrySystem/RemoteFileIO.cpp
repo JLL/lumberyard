@@ -25,190 +25,107 @@
 #include <AzCore/std/algorithm.h> // for GetMin()
 #include <AzCore/std/parallel/lock.h>
 #include <AzCore/std/functional.h> // for function<> in the find files callback.
+#ifdef REMOTEFILEIO_CACHE_FILETREE
+#include <AzCore/std/string/wildcard.h>
+#endif
 
 namespace AZ
 {
     namespace IO
     {
         using namespace AzFramework::AssetSystem;
+        //////////////////////////////////////////////////////////////////////////
+        const char* const NetworkFileIOChannel = "NetworkFileIO";
+#ifndef REMOTEFILEIO_IS_NETWORKFILEIO
+        const char* const RemoteFileIOChannel = "RemoteFileIO";
+        const char* const RemoteFileCacheChannel = "RemoteFileCache";
+#endif
 
-        const int REFRESH_FILESIZE_TIME = 500;// ms
+        const size_t READ_CHUNK_SIZE = 1024 * 256;
 
-        RemoteFileIO::RemoteFileIO(FileIOBase* excludedFileIO)
+#ifdef NETWORKFILEIO_LOG
+        AZ::OSString s_IOLog;
+        AZ::u64 s_fileOperation = 0;
+
+        class LogCall
         {
-            m_excludedFileIO = excludedFileIO;
+        public:
+            LogCall(const char* name)
+                :m_name(name)
+            {
+                m_fileOperation = s_fileOperation++;
+                s_IOLog.append(AZStd::string::format("%u Start ", m_fileOperation));
+                s_IOLog.append(m_name);
+                s_IOLog.append("\r\n");
+            }
+            
+            void Append(const char* line)
+            {
+                s_IOLog.append(AZStd::string::format("%u ", m_fileOperation));
+                s_IOLog.append(line);
+                s_IOLog.append("\r\n");
+            }
+            
+            ~LogCall()
+            {
+                s_IOLog.append(AZStd::string::format("%u End ", m_fileOperation));
+                s_IOLog.append(m_name);
+                s_IOLog.append("\r\n");
+            }
+
+            AZStd::string m_name;
+            AZ::u64 m_fileOperation = 0;
+        };
+
+        #define REMOTEFILE_LOG_CALL(x) LogCall lc(x)
+        #define REMOTEFILE_LOG_APPEND(x) lc.Append(x)
+#else
+        #define REMOTEFILE_LOG_CALL(x) {}
+        #define REMOTEFILE_LOG_APPEND(x) {}
+
+#endif
+
+
+        NetworkFileIO::NetworkFileIO()
+        {
+            REMOTEFILE_LOG_CALL("NetworkFileIO()::NetworkFileIO()");
         }
 
-        RemoteFileIO::~RemoteFileIO()
+        NetworkFileIO::~NetworkFileIO()
         {
-            delete m_excludedFileIO; //for now delete it, when we change to always create local file io we wont
-
+            REMOTEFILE_LOG_CALL("NetworkFileIO()::~NetworkFileIO()");
             AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
             while (!m_remoteFiles.empty())
             {
                 HandleType fileHandle = m_remoteFiles.begin()->first;
                 Close(fileHandle);
             }
-
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            while (!m_excludedFiles.empty())
-            {
-                HandleType fileHandle = m_excludedFiles.begin()->first;
-                Close(fileHandle);
-            }
-    #endif
         }
 
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-        void RemoteFileIO::AddExclusion(const char* exclusion_regex)
+        Result NetworkFileIO::Open(const char* filePath, OpenMode openMode, HandleType& fileHandle)
         {
-            if (!exclusion_regex)
-            {
-                return;
-            }
-
-            m_excludes.push_back(std::regex(exclusion_regex, std::regex_constants::ECMAScript | std::regex_constants::icase));
-        }
-
-        bool RemoteFileIO::IsFileExcluded(const char* filePath)
-        {
-            if (!m_excludedFileIO)
-            {
-                return false;
-            }
-
-            if (!filePath)
-            {
-                return false;
-            }
-
-            for (auto excludedFileIter = m_excludes.begin(); excludedFileIter != m_excludes.end(); ++excludedFileIter)
-            {
-                if (std::regex_search(filePath, *excludedFileIter))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        bool RemoteFileIO::IsFileRemote(const char* filePath)
-        {
-            if (!m_excludedFileIO)
-            {
-                return true;
-            }
-            else
-            {
-                return !IsFileExcluded(filePath);
-            }
-        }
-    #endif
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-        void RemoteFileIO::RemapFile(const char* filePath, const char* remappedFilePath)
-        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Open(filepath=%s, openMode=%i, fileHandle=OUT)",filePath?filePath:"nullptr", openMode).c_str());
             //error checks
             if (!filePath)
             {
-                return;
-            }
-
-            if (!remappedFilePath)
-            {
-                return;
-            }
-
-            auto fileRemapIter = m_fileRemap.find(filePath);
-            if (fileRemapIter != m_fileRemap.end())
-            {
-                fileRemapIter->second = remappedFilePath;
-            }
-            else
-            {
-                m_fileRemap.insert(std::make_pair(filePath, remappedFilePath));
-            }
-        }
-
-        const char* RemoteFileIO::GetFileRemap(const char* filePath, bool returnInputIfNotRemapped) const
-        {
-            //error checks
-            if (!filePath)
-            {
-                return nullptr;
-            }
-
-            auto fileRemapIter = m_fileRemap.find(filePath);
-            if (fileRemapIter != m_fileRemap.end())
-            {
-                return fileRemapIter->second.c_str();
-            }
-
-            if (returnInputIfNotRemapped)
-            {
-                return filePath;
-            }
-
-            return nullptr;
-        }
-    #endif
-
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-        bool RemoteFileIO::IsFileExcluded(HandleType fileHandle)
-        {
-            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_excludedFileIOGuard);
-            return m_excludedFiles.find(fileHandle) != m_excludedFiles.end();
-        }
-
-        bool RemoteFileIO::IsFileRemote(HandleType fileHandle)
-        {
-            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
-            return m_remoteFiles.find(fileHandle) != m_remoteFiles.end();
-        }
-    #endif
-
-        Result RemoteFileIO::Open(const char* filePath, OpenMode openMode, HandleType& fileHandle)
-        {
-            //error checks
-            if (!filePath)
-            {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO()::Open(filePath=nullptr) return Error");
                 return ResultCode::Error;
             }
 
             if (openMode == OpenMode::Invalid)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::Open(filepath=%s, openMode=%i, fileHandle=OUT) openMode=InvalidMode return Error", filePath, openMode).c_str());
                 return ResultCode::Error;
             }
 
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            //if we have excluded io, see if this filePath is excluded, if so route this op to excluded io
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    Result returnValue = m_excludedFileIO->Open(filePath, openMode, fileHandle);
-                    //if we succeeded add this file handle to the excluded map
-                    if (returnValue == ResultCode::Success)
-                    {
-                        AZStd::lock_guard<AZStd::recursive_mutex> lock(m_excludedFileIOGuard);
-                        m_excludedFiles.insert(std::make_pair(fileHandle, filePath));
-                    }
-
-                    return returnValue;
-                }
-            }
-    #endif
             //build a request
             uint32_t mode = static_cast<uint32_t>(openMode);
             FileOpenRequest request(filePath, mode);
             FileOpenResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Open: unable to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO()::Open(filepath=%s, openMode=%i, fileHandle=OUT) unable to send request. return Error", filePath, openMode);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::Open(filepath=%s, openMode=%i, fileHandle=OUT) unable to send request. return Error", filePath, openMode).c_str());
                 return ResultCode::Error;
             }
 
@@ -216,447 +133,210 @@ namespace AZ
             if (returnValue == ResultCode::Success)
             {
                 fileHandle = response.m_fileHandle;
+
                 //track the open file handles
-            
                 AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
 
                 m_remoteFiles.insert(AZStd::make_pair(fileHandle, filePath));
-                m_remoteFileCache.insert(fileHandle); // initialize the file cache too
             }
 
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::Open(filepath=%s, openMode=%i, fileHandle=%u) return %s", filePath, openMode, fileHandle, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::Close(HandleType fileHandle)
+        Result NetworkFileIO::Close(HandleType fileHandle)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_excludedFileIOGuard);
-                auto excludedFileIter = m_excludedFiles.find(fileHandle);
-                if (excludedFileIter != m_excludedFiles.end())
-                {
-                    Result returnValue = m_excludedFileIO->Close(fileHandle);
-                    if (returnValue == ResultCode::Success)
-                    {
-                        m_excludedFiles.erase(excludedFileIter);
-                    }
-
-                    return returnValue;
-                }
-            }
-    #endif
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Close(fileHandle=%u)", fileHandle).c_str());
             //build a request
             FileCloseRequest request(fileHandle);
             if (!SendRequest(request))
             {
-                AZ_Error("RemoteFileIO", false, "Failed to send request, handle=%u", fileHandle);
+                AZ_Assert(false, "NetworkFileIO()::Close(fileHandle=%u) Failed to send request. return Error", fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::Close(fileHandle=%u) Failed to send request. return Error", fileHandle).c_str());
                 return ResultCode::Error;
             }
 
-            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
-            m_remoteFiles.erase(fileHandle);
-            m_remoteFileCache.erase(fileHandle);
+            //clean up the handle and cache
+            {
+                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
+                m_remoteFiles.erase(fileHandle);
+            }
 
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::Close(fileHandle=%u) return Success", fileHandle).c_str());
             return ResultCode::Success;
         }
 
-        Result RemoteFileIO::Tell(HandleType fileHandle, AZ::u64& offset)
+        Result NetworkFileIO::Tell(HandleType fileHandle, AZ::u64& offset)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Tell(fileHandle=%u, offset=OUT)", fileHandle).c_str());
+            FileTellRequest request(fileHandle);
+            FileTellResponse responce;
+            if(!SendRequest(request, responce))
             {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Tell(fileHandle, offset);
-                }
+                AZ_Assert(false, "NetworkFileIO::Tell(fileHandle=%u) Failed to send tell request. return Error", fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Tell(fileHandle=%u) Failed to send tell request. return Error", fileHandle).c_str());
+                return ResultCode::Error;
             }
-    #endif
-            // tell requests/responses are 100% cache predicted.
-            VFSCacheLine& myCacheLine = GetCacheLine(fileHandle);
 
-            offset = myCacheLine.m_position;
-            offset -= (myCacheLine.m_cacheLookaheadBuffer.size() - myCacheLine.m_cacheLookaheadPos);
-            return Result(ResultCode::Success);
+            ResultCode returnValue = static_cast<ResultCode>(responce.m_resultCode);
+            if (returnValue == ResultCode::Error)
+            {
+                AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::Tell(fileHandle=%u) tell request failed", fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Tell(fileHandle=%u) tell request failed", fileHandle).c_str());
+                return ResultCode::Error;
+            }
+
+            offset = responce.m_offset;
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Tell(fileHandle=%u) offset=%u return Success", fileHandle, offset).c_str());
+            return ResultCode::Success;
         }
 
-        Result RemoteFileIO::Seek(HandleType fileHandle, AZ::s64 offset, SeekType type)
+        Result NetworkFileIO::Seek(HandleType fileHandle, AZ::s64 offset, SeekType type)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Seek(fileHandle=%u, offset=%i, type=%s)", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+            FileSeekRequest request(fileHandle, static_cast<AZ::u32>(type), offset);
+            if(!SendRequest(request))
             {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Seek(fileHandle, offset, type);
-                }
+                AZ_Assert(false, "NetworkFileIO::Seek() Failed to send request, fileHandle=%u. return Error", fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Seek(fileHandle=%u) Failed to send request. return Error", fileHandle).c_str());
+                return ResultCode::Error;
             }
-    #endif
-            VFSCacheLine& myCacheLine = GetCacheLine(fileHandle);
-            if (type == AZ::IO::SeekType::SeekFromCurrent)
-            {
-                if (offset == 0)
-                {
-                    // no point in proceeding.
-                    return Result(ResultCode::Success);
-                }
-
-                AZ::u64 remainingBytesInCache = (myCacheLine.m_cacheLookaheadBuffer.size() - myCacheLine.m_cacheLookaheadPos);
-
-                if (offset < 0)
-                {
-                    // we want to seek backwards which might land us still within the cached area.
-                    if ((-offset) <= myCacheLine.m_cacheLookaheadPos)
-                    {
-                        // we want to seek backwards less than we have in the cache.
-                        // this does not change the physical location.
-                        myCacheLine.m_cacheLookaheadPos += offset;
-                            
-                        return Result(ResultCode::Success);
-                    }
-                }
-                else if (offset > 0)
-                {
-                    // we want to seek ahead, but we may yet land within the cached area.
-                    if (offset < remainingBytesInCache)
-                    {
-                        myCacheLine.m_cacheLookaheadPos += static_cast<AZ::u64>(offset);
-                        // this does not change the physical location.
-                        return Result(ResultCode::Success);
-                    }
-
-                }
-
-                if (remainingBytesInCache > 0)
-                {
-                    // the cache is ahead of the file by aheadBy bytes.
-                    offset -= static_cast<AZ::s64>(remainingBytesInCache);
-                }
-                // if we get here, its outside the actual bounds of seek and we are going to perform a physical seek.
-            }
-            else if (type == AZ::IO::SeekType::SeekFromStart)
-            {
-                // maybe we can still do this, assuming that the position actually lies within our buffer
-                AZ::u64 bufferStartPos = myCacheLine.m_position - myCacheLine.m_cacheLookaheadBuffer.size();
-                if ((offset < myCacheLine.m_position) && (offset >= bufferStartPos))
-                {
-                    // the offset we wish to seek to is actually still within the buffer.
-                    // so for example, our buffer starts at offset 1000 and has 2000 bytes in it (so it covers the range of 1000-2999)
-                    // if we seek to 1500 from the beginning of the file, we can just move the cache lookahead pos (which tracks how far it is into the buffer)
-                    // to 500
-                    myCacheLine.m_cacheLookaheadPos = offset - bufferStartPos;
-                    return Result(ResultCode::Success);
-                }
-
-                // there's also another thing that happens - the code sometimes calls to seek to 0 immediately after opening
-                // there's also no point in issuing any kind of invalidation or seek after that
-                if (offset == myCacheLine.m_position) // we are being asked to seek to the place the file is already at, physically
-                {
-                    myCacheLine.m_cacheLookaheadPos = myCacheLine.m_cacheLookaheadBuffer.size();
-                    return Result(ResultCode::Success);
-                }
-            }
-
-            InvalidateReadaheadCache(fileHandle);
-            return SeekInternal(fileHandle, myCacheLine, offset, type);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Seek(fileHandle=%u) return Success", fileHandle).c_str());
+            return ResultCode::Success;
         }
 
-        Result RemoteFileIO::Size(HandleType fileHandle, AZ::u64& size)
+        Result NetworkFileIO::Size(HandleType fileHandle, AZ::u64& size)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            {
-                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_excludedFileIOGuard);
-                auto excludedIter = m_excludedFiles.find(fileHandle);
-                if (excludedIter != m_excludedFiles.end())
-                {
-                    return Size(excludedIter->second.c_str(), size);
-                }
-            }
-    #endif
+            size = 0;
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Size(fileHandle=%u, size=OUT)", fileHandle).c_str());
+            AZStd::string fileName;
             {
                 AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
-                VFSCacheLine& myCacheLine = GetCacheLine(fileHandle);
-
-                // do we even have to check?
-                AZ::u64 msNow = AZStd::GetTimeUTCMilliSecond();
-                if (msNow - myCacheLine.m_fileSizeSnapshotTime > REFRESH_FILESIZE_TIME)
+                auto remoteIter = m_remoteFiles.find(fileHandle);
+                if (remoteIter != m_remoteFiles.end())
                 {
-                    auto remoteIter = m_remoteFiles.find(fileHandle);
-                    if (remoteIter != m_remoteFiles.end())
-                    {
-                        Result rc = Size(remoteIter->second.c_str(), size);
-                        myCacheLine.m_fileSizeSnapshotTime = msNow;
-                        myCacheLine.m_fileSizeSnapshot = size;
-                        return rc;
-                    }
-                }
-                else
-                {
-                    size = myCacheLine.m_fileSizeSnapshot;
-                    return ResultCode::Success;
+                    fileName = remoteIter->second.c_str();
                 }
             }
 
+            if (!fileName.empty())
+            {
+                return Size(fileName.c_str(), size);
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Size(fileHandle=%u) fileHandle not found! return Error", fileHandle).c_str());
             return ResultCode::Error;
         }
 
-        Result RemoteFileIO::Size(const char* filePath, AZ::u64& size)
+        Result NetworkFileIO::Size(const char* filePath, AZ::u64& size)
         {
+            size = 0;
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Size(filePath=%s, size=OUT)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Size(filePath=nullptr) return Error");
                 return ResultCode::Error;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Size(filePath=\"\") strlen(filePath)==0 return Error");
                 return ResultCode::Error;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->Size(filePath, size);
-                }
-            }
-    #endif
 
             FileSizeRequest request(filePath);
             FileSizeResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Size: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::Size(filePath=%s) failed to send request. return Error", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Size(filePath=%s) failed to send request. return Error", filePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
-            if (returnValue == ResultCode::Success)
+            if (returnValue == ResultCode::Error)
             {
-                size = response.m_size;
+                AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::Size(filePath=%s) size request failed. return Error", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Size(filePath=%s) size request failed. return Error", filePath).c_str());
+                return ResultCode::Error;
             }
-            return returnValue;
-        }
-
-        void RemoteFileIO::InvalidateReadaheadCache(HandleType handle)
-        {
-            VFSCacheLine& line = GetCacheLine(handle);
-            line.m_cacheLookaheadPos = 0;
-            line.m_cacheLookaheadBuffer.clear();
-        }
-
-        AZ::u64 RemoteFileIO::ReadFromCache(HandleType handle, void* buffer, AZ::u64 requestedSize)
-        {
-            auto found = m_remoteFileCache.find(handle);
-            if (found == m_remoteFileCache.end())
-            {
-                return 0;
-            }
-
-            VFSCacheLine& cacheLine = found->second;
-
-            AZ::u64 bytesRead = 0;
             
-            AZ::u64 remainingBytesInCache = cacheLine.m_cacheLookaheadBuffer.size() - cacheLine.m_cacheLookaheadPos;
-            AZ::u64 remainingBytesToRead = requestedSize;
-            if (remainingBytesInCache > 0)
-            {
-                AZ::u64 bytesToReadFromCache = AZStd::GetMin(remainingBytesInCache, remainingBytesToRead);
-                memcpy(buffer, cacheLine.m_cacheLookaheadBuffer.data() + cacheLine.m_cacheLookaheadPos, bytesToReadFromCache);
-                bytesRead = bytesToReadFromCache;
-                remainingBytesToRead -= bytesToReadFromCache;
-                cacheLine.m_cacheLookaheadPos += bytesToReadFromCache;
-            }
-            // note that readinf from the cache does not alter the physical position of the remote file, so we do not alter
-            // the m_position value. 
-            return bytesRead;
+            size = response.m_size;
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Size(filePath=%s) size=%u. return Success", filePath, size).c_str());
+            return ResultCode::Success;
         }
 
-        Result RemoteFileIO::SeekInternal(HandleType handle, VFSCacheLine& cacheLine, AZ::s64 offset, SeekType type)
+        Result NetworkFileIO::Read(HandleType fileHandle, void* buffer, AZ::u64 size, bool failOnFewerThanSizeBytesRead, AZ::u64* bytesRead)
         {
-            // note that seeking in a file does not need to invalidate its size.
-            FileSeekRequest request(handle, static_cast<AZ::u32>(type), offset);
-            // note, seeks are predicted, and do not ask for a response.
-            if (!SendRequest(request))
-            {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::SeekInternal: Failed to send request, handle=%u", handle);
-                return Result(ResultCode::Error);
-            }
-
-            if (type == AZ::IO::SeekType::SeekFromCurrent)
-            {
-                cacheLine.m_position += offset;
-            }
-            else if (type == AZ::IO::SeekType::SeekFromStart)
-            {
-                cacheLine.m_position = offset;
-            }
-            else if (type == AZ::IO::SeekType::SeekFromEnd)
-            {
-                AZ::u64 sizeValue = 0;
-                Size(handle, sizeValue);
-
-                if (offset >= 0)
-                {
-                    // seek beyond end is not allowed
-                    cacheLine.m_position = sizeValue;
-                }
-                else // (offset < 0)
-                {
-                    offset = -offset;
-                    if (offset >= sizeValue)
-                    {
-                        cacheLine.m_position = 0; // seek beyond start
-                    }
-                    else
-                    {
-                        cacheLine.m_position = sizeValue - offset; // seek some place after start.
-                    }
-                }
-            }
-
-            return Result(ResultCode::Success);
-        }
-
-        Result RemoteFileIO::Read(HandleType fileHandle, void* buffer, AZ::u64 size, bool failOnFewerThanSizeBytesRead, AZ::u64* bytesRead)
-        {
-#ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Read(fileHandle, buffer, size, failOnFewerThanSizeBytesRead, bytesRead);
-                }
-            }
-#endif
-          
-            VFSCacheLine& cacheLine = GetCacheLine(fileHandle);
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Read(filehandle=%i, buffer=OUT, size=%u, failOnFewerThanSizeBytesRead=%s, bytesRead=OUT)", fileHandle, size, failOnFewerThanSizeBytesRead ? "True" : "False").c_str());
             size_t remainingBytesToRead = size;
-            size_t bytesReadFromCache = ReadFromCache(fileHandle, buffer, size);
-            remainingBytesToRead -= bytesReadFromCache;
-
-            if (bytesRead)
+            AZ::u64 actualRead = 0;
+            while(remainingBytesToRead)
             {
-                *bytesRead = bytesReadFromCache;
-            }
-
-            if (remainingBytesToRead == 0)
-            {
-                return ResultCode::Success;
-            }
-
-            buffer = reinterpret_cast<char*>(buffer) + bytesReadFromCache;
-
-            // if we get here, our cache is dry and we still have data to read!
-
-            if (remainingBytesToRead >= CACHE_LOOKAHEAD_SIZE) // no point in caching big reads.
-            {
-                FileReadRequest request(fileHandle, remainingBytesToRead, failOnFewerThanSizeBytesRead);
+                AZ::u64 readSize = GetMin<AZ::u64>(remainingBytesToRead, READ_CHUNK_SIZE);
+                FileReadRequest request(fileHandle, readSize, false);
                 FileReadResponse response;
-                if (SendRequest(request, response))
+                if (!SendRequest(request, response))
                 {
-                    // regardless of the result, we still have to move our cached physical pointer.
-                    cacheLine.m_position += response.m_data.size();
-                    ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
-                    if (returnValue == ResultCode::Success)
-                    {
-                        if (bytesRead)
-                        {
-                            *bytesRead = (*bytesRead) + response.m_data.size();
-                        }
-                        AZ_Assert(remainingBytesToRead >= response.m_data.size(), "RemoteFileIO::Read: Response will overflow request buffer");
-                        memcpy(buffer, response.m_data.data(), AZStd::GetMin<AZ::u64>(response.m_data.size(), remainingBytesToRead));
-                    }
-                    return returnValue;
-                }
-            }
-            else
-            {
-                // if we get here, the cache is now empty.
-                // its quite possible for the cache to have been drained simply becuase there is no more data in the file!
-                if (!cacheLine.m_cacheLookaheadBuffer.empty())
-                {
-                    // we had data in the cache.  It wasn't enough to satisfy the request, so we've consumed all the data in our cache at this point
-                    // if we're at the end of the file there is no point in proceeding.
-                    if (Eof(fileHandle))
-                    {
-                        // there is no more data to be had.
-                        if ((failOnFewerThanSizeBytesRead) && (remainingBytesToRead > 0))
-                        {
-                            return ResultCode::Error;
-                        }
-                        return ResultCode::Success;
-                    }
-                }
-
-                FileReadRequest request(fileHandle, CACHE_LOOKAHEAD_SIZE, false);
-                FileReadResponse response;
-                if (SendRequest(request, response))
-                {
-                    ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
-                    
-                    // regardless of the result, we still have to move our cached physical pointer.
-                    cacheLine.m_position += response.m_data.size();
-
-                    if (returnValue == ResultCode::Success)
-                    {
-                        AZ_Assert(response.m_data.size() <= CACHE_LOOKAHEAD_SIZE, "RemoteFileIO::Read: Response will overflow request buffer (cache)");
-                        cacheLine.m_cacheLookaheadBuffer.resize(response.m_data.size());
-                        memcpy(cacheLine.m_cacheLookaheadBuffer.data(), response.m_data.data(), response.m_data.size());
-                        cacheLine.m_cacheLookaheadPos = 0;
-                        bytesReadFromCache = ReadFromCache(fileHandle, buffer, remainingBytesToRead);
-                        remainingBytesToRead -= bytesReadFromCache;
-                        if (bytesRead)
-                        {
-                            *bytesRead = (*bytesRead) + bytesReadFromCache;
-                        }
-
-                        if ((failOnFewerThanSizeBytesRead) && (remainingBytesToRead > 0))
-                        {
-                            return ResultCode::Error;
-                        }
-                    }
-                    return returnValue;
-                }
-            }
-
-            return ResultCode::Error;
-        }
-
-        Result RemoteFileIO::Write(HandleType fileHandle, const void* buffer, AZ::u64 size, AZ::u64* bytesWritten)
-        {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Write(fileHandle, buffer, size, bytesWritten);
-                }
-            }
-    #endif
-
-            // We need to seek back to where we should be in the file before we commit a write.
-            // This is unnecessary if the cache is empty, or we're at the end of the cache.
-            VFSCacheLine& cacheLine = GetCacheLine(fileHandle);
-            AZ::u64 remainingBytesInCache = (cacheLine.m_cacheLookaheadBuffer.size() - cacheLine.m_cacheLookaheadPos);
-
-            if (cacheLine.m_cacheLookaheadBuffer.size() && remainingBytesInCache)
-            {
-                // find out where we are 
-                AZ::u64 seekPosition = cacheLine.m_position - remainingBytesInCache;
-                Result seekResult = SeekInternal(fileHandle, cacheLine, seekPosition, AZ::IO::SeekType::SeekFromStart);
-                if (!seekResult)
-                {
-                    AZ_Error("RemoteFileIO", false, "RemoteFileIO::Write: failed to seek request, handle=%u", fileHandle);
+                    AZ_Assert(false, "NetworkFileIO::Read(filehandle=%i, size=%u) request failed. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(filehandle=%i, size=%u) request failed. return Error", fileHandle, size).c_str());
                     return ResultCode::Error;
                 }
+
+                //note the response could be ANY size, could be less so be careful
+                AZ::u64 responseDataSize = response.m_data.size();
+                if (responseDataSize <= remainingBytesToRead == false)
+                {
+                    AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::Read(filehandle=%i, size=%u) responseDataSize too large!!! responseDataSize=%u <= remainingBytesToRead=%u", fileHandle, size, responseDataSize, remainingBytesToRead);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(filehandle=%i, size=%u) responseDataSize too large!!! responseDataSize=%u <= remainingBytesToRead=%u", fileHandle, size, responseDataSize, remainingBytesToRead).c_str());
+                }
+
+                ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+
+                //only copy as much as we can
+                memcpy(buffer, response.m_data.data(), responseDataSize);
+                buffer = reinterpret_cast<char*>(buffer) + responseDataSize;
+
+                //only reduce by what should have come back
+                remainingBytesToRead -= responseDataSize;
+
+                //only record read bytes
+                actualRead += responseDataSize;
+                if(bytesRead)
+                {
+                    *bytesRead = actualRead;
+                }
+
+                //if we get an error, we only return an error if failOnFewerThanSizeBytesRead
+                if(returnValue == ResultCode::Error)
+                {
+                    AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::Read: request failed, fileHandle=%u", fileHandle);
+                    if(failOnFewerThanSizeBytesRead && remainingBytesToRead)
+                    {
+                        REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(fileHandle=%u, size=%u) actualRead=%u failed On Fewer Than Size Bytes Read. return Error", fileHandle, size, actualRead).c_str());
+                        return ResultCode::Error;
+                    }
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(fileHandle=%u, size=%u) actualRead=%u return Success", fileHandle, size, actualRead).c_str());
+                    return ResultCode::Success;
+                }
+                else if(!responseDataSize)
+                {
+                    break;
+                }
             }
 
-            InvalidateReadaheadCache(fileHandle);
-            cacheLine.m_fileSizeSnapshotTime = 0; // invalidate file size after write.
+            if(failOnFewerThanSizeBytesRead && remainingBytesToRead)
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(fileHandle=%u, size=%u) actualRead=%u failed On Fewer Than Size Bytes Read. return Error", fileHandle, size, actualRead).c_str());
+                return ResultCode::Error;
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Read(fileHandle=%u, size=%u) actualRead=%u return Success", fileHandle, size, actualRead).c_str());
+            return ResultCode::Success;
+        }
+
+        Result NetworkFileIO::Write(HandleType fileHandle, const void* buffer, AZ::u64 size, AZ::u64* bytesWritten)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Write(fileHandle=%u, buffer=OUT, size=%u, bytesWritten=OUT)", fileHandle, size).c_str());
             FileWriteRequest request(fileHandle, buffer, size);
             //always async and just return success unless bytesWritten is set then synchronous
             if (bytesWritten)
@@ -664,157 +344,124 @@ namespace AZ
                 FileWriteResponse response;
                 if (!SendRequest(request, response))
                 {
-                    //shouldn't get here... something went wrong...
-                    AZ_Error("RemoteFileIO", false, "RemoteFileIO::Write: failed to send request, handle=%u", fileHandle);
+                    AZ_Assert(false, "NetworkFileIO::Write(fileHandle=%u, size=%u) failed to send sync write request. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Write(fileHandle=%u, size=%u) failed to send sync write request. return Error", fileHandle, size).c_str());
                     return ResultCode::Error;
                 }
-                ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
-                if (returnValue == ResultCode::Success)
+
+                if (static_cast<ResultCode>(response.m_resultCode) == ResultCode::Error)
                 {
-                    *bytesWritten = response.m_bytesWritten;
-                    cacheLine.m_position += response.m_bytesWritten; // assume we moved on by that many bytes.
+                    AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::Write(fileHandle=%u, size=%u) sync write request failed. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Write(fileHandle=%u, size=%u) sync write request failed. return Error", fileHandle, size).c_str());
+                    return ResultCode::Error;
                 }
+
+                *bytesWritten = response.m_bytesWritten;
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Write(fileHandle=%u, size=%u) actualWrite=%u return Success", fileHandle, size, response.m_bytesWritten).c_str());
+                return ResultCode::Success;
             }
             else
             {
-                // just send the message
+                // just send the message and assume we wrote it all successfully.
                 if (!SendRequest(request))
                 {
-                    //shouldn't get here... something went wrong...
-                    AZ_Error("RemoteFileIO", false, "RemoteFileIO::Write: failed to send request, handle=%u", fileHandle);
+                    AZ_Assert(false, "NetworkFileIO::Write(fileHandle=%u, size=%u) failed to send async write request. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Write(fileHandle=%u, size=%u) failed to send async write request. return Error", fileHandle, size).c_str());
                     return ResultCode::Error;
                 }
-                cacheLine.m_position += size; // can only assume we wrote it all.
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Write(fileHandle=%u, size=%u) return Success", fileHandle).c_str());
+                return ResultCode::Success;
             }
-
-            return ResultCode::Success;
         }
 
-        Result RemoteFileIO::Flush(HandleType fileHandle)
+        Result NetworkFileIO::Flush(HandleType fileHandle)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Flush(fileHandle);
-                }
-            }
-    #endif
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Flush(fileHandle=%u)", fileHandle).c_str());
             // just send the message, no need to wait for flush response.
             FileFlushRequest request(fileHandle);
             if (!SendRequest(request))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Flush: failed to send request, handle=%u", fileHandle);
+                AZ_Assert(false, "NetworkFileIO::Flush(fileHandle=%u) failed to send request. return Error", fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Flush(fileHandle=%u) failed to send request. return Error", fileHandle).c_str());
                 return ResultCode::Error;
             }
 
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Flush(fileHandle=%u) return Success", fileHandle).c_str());
             return ResultCode::Success;
         }
 
-        bool RemoteFileIO::Eof(HandleType fileHandle)
+        bool NetworkFileIO::Eof(HandleType fileHandle)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(fileHandle))
-                {
-                    return m_excludedFileIO->Eof(fileHandle);
-                }
-            }
-    #endif
-            VFSCacheLine& cacheLine = GetCacheLine(fileHandle);
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Eof(fileHandle=%u)", fileHandle).c_str());
             AZ::u64 sizeValue = 0;
-            Size(fileHandle, sizeValue);
+            Result res = Size(fileHandle, sizeValue);
             AZ::u64 offset = 0;
-            Tell(fileHandle, offset);
+            res = Tell(fileHandle, offset);
+
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Eof(fileHandle=%u) return %s", fileHandle, offset >= sizeValue ? "True" : "False").c_str());
             return offset >= sizeValue;
         }
 
-        bool RemoteFileIO::Exists(const char* filePath)
+        bool NetworkFileIO::Exists(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Exists(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Exists(filePath=nullptr) return False");
                 return false;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Exists(filePath=\"\") strlen(filePath)==0. return False");
                 return false;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->Exists(filePath);
-                }
-            }
-    #endif
 
             FileExistsRequest request(filePath);
             FileExistsResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Exists: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::Exists(filePath=%s) failed to send request. return False", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Exists(filePath=%s) failed to send request. return False", filePath).c_str());
                 return false;
             }
+
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Exists(filePath=%s) return %s", filePath, response.m_exists ? "True" : "False").c_str());
             return response.m_exists;
         }
 
-        AZ::u64 RemoteFileIO::ModificationTime(const char* filePath)
+        AZ::u64 NetworkFileIO::ModificationTime(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::ModificationTime(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::ModificationTime(filePath=nullptr) return 0");
                 return 0;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::ModificationTime(filePath=\"\") strlen(filePath)==0. return 0");
                 return 0;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->ModificationTime(filePath);
-                }
-            }
-    #endif
 
             FileModTimeRequest request(filePath);
             FileModTimeResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::ModificationTime: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::ModificationTime(filePath=%s) failed to send request. return 0", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::ModificationTime(filePath=%s) failed to send request. return 0", filePath).c_str());
                 return 0;
             }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::ModificationTime(filePath=%s) return %i", filePath, response.m_modTime).c_str());
             return response.m_modTime;
         }
 
-        AZ::u64 RemoteFileIO::ModificationTime(HandleType fileHandle)
+        AZ::u64 NetworkFileIO::ModificationTime(HandleType fileHandle)
         {
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            {
-                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_excludedFileIOGuard);
-                auto excludedIter = m_excludedFiles.find(fileHandle);
-                if (excludedIter != m_excludedFiles.end())
-                {
-                    return ModificationTime(excludedIter->second.c_str());
-                }
-            }
-    #endif
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::ModificationTime(fileHandle=%u)", fileHandle).c_str());
             {
                 AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
                 auto remoteIter = m_remoteFiles.find(fileHandle);
@@ -823,362 +470,236 @@ namespace AZ
                     return ModificationTime(remoteIter->second.c_str());
                 }
             }
-
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::ModificationTime(fileHandle=%u) return 0!", fileHandle).c_str());
             return 0;
         }
 
-        bool RemoteFileIO::IsDirectory(const char* filePath)
+        bool NetworkFileIO::IsDirectory(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::IsDirectory(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::IsDirectory(filePath=nullptr) filePath=nullptr. return False");
                 return false;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::IsDirectory(filePath=\"\") strlen(filePath)=0. return False");
                 return false;
             }
 
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->IsDirectory(filePath);
-                }
-            }
-    #endif
             PathIsDirectoryRequest request(filePath);
             PathIsDirectoryResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::IsDirectory: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::IsDirectory(filePath=%s) failed to send request. return False", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::IsDirectory(filePath=%s) failed to send request. return False", filePath).c_str());
                 return false;
             }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::IsDirectory(filePath=%s) return %s", filePath, response.m_isDir ? "True": "False").c_str());
             return response.m_isDir;
         }
 
-        bool RemoteFileIO::IsReadOnly(const char* filePath)
+        bool NetworkFileIO::IsReadOnly(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::IsReadOnly(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::IsReadOnly(filePath=nullptr) return False");
                 return false;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::IsReadOnly(filePath=\"\") strlen(filePath)==0. return False");
                 return false;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->IsReadOnly(filePath);
-                }
-            }
-    #endif
 
             FileIsReadOnlyRequest request(filePath);
             FileIsReadOnlyResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::IsReadOnly: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::IsReadOnly(filePath=%s) failed to send request. return False", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::IsReadOnly(filePath=%s) failed to send request. return False", filePath).c_str());
                 return false;
             }
 
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::IsReadOnly(filePath=%s) return %s", filePath, response.m_isReadOnly ? "True" : "False").c_str());
             return response.m_isReadOnly;
         }
 
-        Result RemoteFileIO::CreatePath(const char* filePath)
+        Result NetworkFileIO::CreatePath(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::CreatePath(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::CreatePath(filePath=nullptr) filePath=nullptr. return Error");
                 return ResultCode::Error;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::CreatePath(filePath=\"\") strlen(filePath)==0. return Error");
                 return ResultCode::Error;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->CreatePath(filePath);
-                }
-            }
-    #endif
 
             PathCreateRequest request(filePath);
             PathCreateResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::CreatePath: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::CreatePath(filePath=%s) failed to send request. return Error", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::CreatePath(filePath=%s) failed to send request. return Error", filePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::CreatePath(filePath=%s) return %s", filePath, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::DestroyPath(const char* filePath)
+        Result NetworkFileIO::DestroyPath(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::DestroyPath(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::DestroyPath(filePath=nullptr) filePth=nullptr. return Error");
                 return ResultCode::Error;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::DestroyPath(filePath=\"\") strlen(filePath)==0. return Error");
                 return ResultCode::Error;
             }
 
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->DestroyPath(filePath);
-                }
-            }
-    #endif
             PathDestroyRequest request(filePath);
             PathDestroyResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::DestroyPath: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::DestroyPath(filePath=%s) failed to send request. return Error", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::DestroyPath(filePath=%s) failed to send request. return Error", filePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::DestroyPath(filePath=%s) return %s", filePath, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::Remove(const char* filePath)
+        Result NetworkFileIO::Remove(const char* filePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Remove(filePath=%s)", filePath?filePath:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Remove(filePath=nullptr) filePth=nullptr. return Error");
                 return ResultCode::Error;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND("NetworkFileIO::Remove(filePath=\"\") strlen(filePath)==0. return Error");
                 return ResultCode::Error;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->Remove(filePath);
-                }
-            }
-    #endif
 
             FileRemoveRequest request(filePath);
             FileRemoveResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Remove: failed to send request for %s", filePath);
+                AZ_Assert(false, "NetworkFileIO::Remove(filePath=%s) failed to send request. return Error", filePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Remove(filePath=%s) failed to send request. return Error", filePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Remove(filePath=%s) return %s", filePath, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::Copy(const char* sourceFilePath, const char* destinationFilePath)
+        Result NetworkFileIO::Copy(const char* sourceFilePath, const char* destinationFilePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Copy(sourceFilePath=%s, destinationFilePath=%s)", sourceFilePath?sourceFilePath:"nullptr", destinationFilePath?destinationFilePath:"nullptr").c_str());
             //error checks
             if (!sourceFilePath)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy(sourceFilePath=nullptr, destinationFilePath=%s) return Error", destinationFilePath?destinationFilePath:"nullptr").c_str());
                 return ResultCode::Error;
             }
 
             if (!destinationFilePath)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy(sourceFilePath=%s, destinationFilePath=nullptr) return Error", sourceFilePath?sourceFilePath:"nullptr").c_str());
                 return ResultCode::Error;
             }
 
             if (!strlen(sourceFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy(sourceFilePath=\"\", destinationFilePath=%s) strlen(sourceFilePath)==0. return Error", destinationFilePath?destinationFilePath:"nullptr").c_str());
                 return ResultCode::Error;
             }
 
             //fail if the source doesn't exist
             if (!Exists(sourceFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy(sourceFilePath=%s, destinationFilePath=%s) Exists(sourceFilePath=%s)==False. return Error", sourceFilePath, destinationFilePath, sourceFilePath).c_str());
                 return ResultCode::Error;
             }
 
             bool bSourceExcluded = false;
             bool bDestinationExcluded = false;
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            sourceFilePath = GetFileRemap(sourceFilePath);
-            destinationFilePath = GetFileRemap(destinationFilePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                bSourceExcluded = IsFileExcluded(sourceFilePath);
-                bDestinationExcluded = IsFileExcluded(destinationFilePath);
-            }
 
-            //if both are excluded then just issue the excluded copy
-            if (bSourceExcluded && bDestinationExcluded)
-            {
-                return m_excludedFileIO->Copy(sourceFilePath, destinationFilePath);
-            }
-            //else if the only the source or destination is excluded we have to implement the steps of copying ourselves
-            else if (bSourceExcluded || bDestinationExcluded)
-            {
-                //open the source and destination files
-                HandleType sourceHandle = InvalidHandle;
-                Result res = Open(sourceFilePath, OpenMode::ModeRead | OpenMode::ModeBinary, sourceHandle);
-                if (res != ResultCode::Success)
-                {
-                    return ResultCode::Error;
-                }
-                if (sourceHandle == InvalidHandle)
-                {
-                    return ResultCode::Error_HandleInvalid;
-                }
-
-                HandleType destHandle = InvalidHandle;
-                res = Open(destinationFilePath, OpenMode::ModeWrite | OpenMode::ModeBinary, destHandle);
-                if (res != ResultCode::Success)
-                {
-                    Close(sourceHandle);
-                    return ResultCode::Success;
-                }
-                if (destHandle == InvalidHandle)
-                {
-                    Close(sourceHandle);
-                    return ResultCode::Error_HandleInvalid;
-                }
-
-                //get the size of the source file
-                uint64_t sourceSize = 0;
-                res = Size(sourceHandle, sourceSize);
-                if (res != ResultCode::Success)
-                {
-                    Close(sourceHandle);
-                    Close(destHandle);
-                    return ResultCode::Error;
-                }
-
-                //shortcut 0 length files
-                if (sourceSize == 0)
-                {
-                    Close(sourceHandle);
-                    Close(destHandle);
-                    return ResultCode::Success;
-                }
-
-                const int bufferSize = 64 * 1024;
-                char buffer[bufferSize];
-                uint64_t totalBytesRead = 0;
-                uint64_t bytesRead = 0;
-                uint64_t totalBytesWritten = 0;
-                uint64_t bytesWritten = 0;
-                do
-                {
-                    Result res = Read(sourceHandle, buffer, bufferSize, false, &bytesRead);
-                    if (res != ResultCode::Success)
-                    {
-                        Close(sourceHandle);
-                        Close(destHandle);
-                        return ResultCode::Error_HandleInvalid;
-                    }
-                    totalBytesRead += bytesRead;
-
-                    uint64_t totalBytesWrittenThisPass = 0;
-                    do
-                    {
-                        res = Write(destHandle, buffer + totalBytesWrittenThisPass, bytesRead - totalBytesWrittenThisPass, &bytesWritten);
-                        if (res != ResultCode::Success)
-                        {
-                            Close(sourceHandle);
-                            Close(destHandle);
-                            return ResultCode::Error_HandleInvalid;
-                        }
-                        totalBytesWrittenThisPass += bytesWritten;
-                        totalBytesWritten += bytesWritten;
-                    } while (totalBytesWrittenThisPass < bytesRead);
-
-                    CRY_ASSERT(totalBytesWrittenThisPass == bytesRead);
-                } while (totalBytesRead < sourceSize);
-
-                CRY_ASSERT(totalBytesRead == sourceSize);
-                CRY_ASSERT(totalBytesWritten == sourceSize);
-
-                return ResultCode::Success;
-            }
-    #endif
             //else both are remote so just issue the remote copy command
             FileCopyRequest request(sourceFilePath, destinationFilePath);
             FileCopyResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Copy: failed to send request for %s -> %s", sourceFilePath, destinationFilePath);
+                AZ_Assert(false, "NetworkFileIO::Copy(sourceFilePath=%s, destinationFilePath=%s) failed to send request. return Error", sourceFilePath, destinationFilePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy() failed to send request for %s -> %s. return Error", sourceFilePath, destinationFilePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Copy(sourceFilePath=%s, destinationFilePath=%s) return %s", sourceFilePath, destinationFilePath, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::Rename(const char* sourceFilePath, const char* destinationFilePath)
+        Result NetworkFileIO::Rename(const char* sourceFilePath, const char* destinationFilePath)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::Rename(sourceFilePath=%s, destinationFilePath=%s)", sourceFilePath?sourceFilePath:"nullptr", destinationFilePath?destinationFilePath:"nullptr").c_str());
             //error checks
             if (!sourceFilePath)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=nullptr, destinationFilePath=%s) sourceFilePath=nullptr. return Error", destinationFilePath?destinationFilePath:"nullptr").c_str());
                 return ResultCode::Error;
             }
 
             if (!destinationFilePath)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=nullptr) destinationFilePath=nullptr. return Error", sourceFilePath).c_str());
                 return ResultCode::Error;
             }
 
             if (!strlen(sourceFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=\"\", destinationFilePath=%s) strlen(sourceFilePath)==0. return Error", destinationFilePath).c_str());
                 return ResultCode::Error;
             }
 
             //fail if the source doesn't exist
             if (!Exists(sourceFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) Exists(sourceFilePath)=False. return Error", sourceFilePath, destinationFilePath).c_str());
                 return ResultCode::Error;
             }
 
             if (!strlen(destinationFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=\"\") strlen(destinationFilePath)==0. return Error", sourceFilePath).c_str());
                 return ResultCode::Error;
             }
 
@@ -1186,99 +707,67 @@ namespace AZ
             bool bSourceExcluded = false;
             bool bDestinationExcluded = false;
 
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            sourceFilePath = GetFileRemap(sourceFilePath);
-            destinationFilePath = GetFileRemap(destinationFilePath);
-    #endif
             //if the source and destination are the same, shortcut
             if (!strcmp(sourceFilePath, destinationFilePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) sourceFilePath=destinationFilePath. return Error", sourceFilePath, destinationFilePath).c_str());
                 return ResultCode::Error;
             }
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                bSourceExcluded = IsFileExcluded(sourceFilePath);
-                bDestinationExcluded = IsFileExcluded(destinationFilePath);
-            }
-    #endif
+
             //if the destination exists
             if (Exists(destinationFilePath))
             {
                 //if its read only fail
                 if (IsReadOnly(destinationFilePath))
                 {
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) IsReadOnly(destinationFilePath)=True. return Error", sourceFilePath, destinationFilePath).c_str());
                     return ResultCode::Error;
                 }
             }
 
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            //if both are excluded then just issue the excluded command
-            if (bSourceExcluded && bDestinationExcluded)
-            {
-                return m_excludedFileIO->Rename(sourceFilePath, destinationFilePath);
-            }
-            //else if the only the source or destination is excluded we have to implement the steps ourselves
-            else if (bSourceExcluded || bDestinationExcluded)
-            {
-                Result res = Copy(sourceFilePath, destinationFilePath);
-                if (res == ResultCode::Success)
-                {
-                    return Remove(sourceFilePath);
-                }
-
-                return ResultCode::Error;
-            }
-    #endif
             //else both are remote so just issue the remote command
             FileRenameRequest request(sourceFilePath, destinationFilePath);
             FileRenameResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::Rename: failed to send request for %s -> %s", sourceFilePath, destinationFilePath);
+                AZ_Assert(false, "NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) failed to send request. return Error", sourceFilePath, destinationFilePath);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) failed to send request. return Error", sourceFilePath, destinationFilePath).c_str());
                 return ResultCode::Error;
             }
 
             ResultCode returnValue = static_cast<ResultCode>(response.m_resultCode);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::Rename(sourceFilePath=%s, destinationFilePath=%s) return %s", sourceFilePath, destinationFilePath, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
         }
 
-        Result RemoteFileIO::FindFiles(const char* filePath, const char* filter, FindFilesCallbackType callback)
+        Result NetworkFileIO::FindFiles(const char* filePath, const char* filter, FindFilesCallbackType callback)
         {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::FindFiles(filePath=%s, filter=%s, callback=OUT)", filePath?filePath:"nullptr", filter?filter:"nullptr").c_str());
             //error checks
             if (!filePath)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::FindFiles(filePath=nullptr, filter=%s) filePath=nullptr. return Error", filter?filter:"nulltpr").c_str());
                 return ResultCode::Error;
             }
 
             if (!filter)
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::FindFiles(filePath=%s, filter=nullptr) filter=nullptr. return Error", filePath).c_str());
                 return ResultCode::Error;
             }
 
             if (!strlen(filePath))
             {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::FindFiles(filePath=\"\", filter=%s) strlen(filePath)==0. return Error", filter).c_str());
                 return ResultCode::Error;
             }
-
-    #ifdef REMOTEFILEIO_USE_FILE_REMAPS
-            filePath = GetFileRemap(filePath);
-    #endif
-    #ifdef REMOTEFILEIO_USE_EXCLUDED_FILEIO
-            if (m_excludedFileIO)
-            {
-                if (IsFileExcluded(filePath))
-                {
-                    return m_excludedFileIO->FindFiles(filePath, filter, callback);
-                }
-            }
-    #endif
 
             FindFilesRequest request(filePath, filter);
             FindFilesResponse response;
             if (!SendRequest(request, response))
             {
-                AZ_Error("RemoteFileIO", false, "RemoteFileIO::FindFiles: could not send request for %s, %s", filePath, filter);
+                AZ_Assert(false, "NetworkFileIO::FindFiles(filePath=%s, filter=%s) could not send request. return Error", filePath, filter);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::FindFiles(filePath=%s, filter=%s) could not send request. return Error", filePath, filter).c_str());
                 return ResultCode::Error;
             }
 
@@ -1296,64 +785,852 @@ namespace AZ
                     }
                 }
             }
-
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::FindFiles(filePath=%s, filter=%s) return %s", filePath, filter, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
             return returnValue;
+        }
+
+        void NetworkFileIO::SetAlias(const char* alias, const char* path)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::SetAlias(alias=%s, path=%s)", alias?alias:"nullptr", path?path:"nullptr").c_str());
+        }
+
+        const char* NetworkFileIO::GetAlias(const char* alias)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::GetAlias(alias=%s)", alias?alias:"nullptr").c_str());
+            REMOTEFILE_LOG_APPEND("NetworkFileIO::GetAlias() return nullptr");
+            return nullptr;
+        }
+
+        void NetworkFileIO::ClearAlias(const char* alias)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::ClearAlias(alias=%s)", alias?alias:"nullptr").c_str());
+        }
+
+        AZ::u64 NetworkFileIO::ConvertToAlias(char* inOutBuffer, AZ::u64 bufferLength) const
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::ConvertToAlias(inOutBuffer=%s, bufferLength=%u)", inOutBuffer?inOutBuffer:"nullptr", bufferLength).c_str());
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::ConvertToAlias() return %u", strlen(inOutBuffer)).c_str());
+            return strlen(inOutBuffer);
+        }
+
+        bool NetworkFileIO::ResolvePath(const char* path, char* resolvedPath, AZ::u64 resolvedPathSize)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::ResolvePath(path=%s, resolvedPath=%s, resolvedPathsize=%u)", path?path:"nullptr", resolvedPath?resolvedPath:"nullptr", resolvedPathSize).c_str());
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::ResolvePath(path=%s, resolvedPath=%s, resolvedPathsize=%u) return False", path?path:"nullptr", resolvedPath?resolvedPath:"nullptr", resolvedPathSize).c_str());
+            return false;
+        }
+
+        bool NetworkFileIO::GetFilename(HandleType fileHandle, char* filename, AZ::u64 filenameSize) const
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("NetworkFileIO()::GetFilename(fileHandle=%u, filename=%s, filenamesize=%u)", fileHandle, filename?filename:"nullptr", filenameSize).c_str());
+            {
+                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
+                const auto fileIt = m_remoteFiles.find(fileHandle);
+                if (fileIt != m_remoteFiles.end())
+                {
+                    if (filenameSize >= fileIt->second.length())
+                    {
+                        azstrncpy(filename, filenameSize, fileIt->second.c_str(), fileIt->second.length());
+                        REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::GetFilename(fileHandle=%u, filename=%s, filenamesize=%u) return True", fileHandle, filename?filename:"nullptr", filenameSize).c_str());
+                        return true;
+                    }
+                    else
+                    {
+                        AZ_TracePrintf(NetworkFileIOChannel, "NetworkFileIO::GetFilename(fileHandle=%u, filename=%s, filenamesize=%u) Result buffer is too small %u", fileHandle, filename?filename:"nullptr", filenameSize, fileIt->second.length());
+                        REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO::GetFilename(fileHandle=%u, filename=%s, filenamesize=%u) Result buffer is too small %u", fileHandle, filename?filename:"nullptr", filenameSize, fileIt->second.length()).c_str());
+                    }
+                }
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("NetworkFileIO()::GetFilename(fileHandle=%u, filename=%s, filenamesize=%u) return False", fileHandle, filename?filename:"nullptr", filenameSize).c_str());
+            return false;
+        }
+
+        bool NetworkFileIO::IsRemoteIOEnabled()
+        {
+            REMOTEFILE_LOG_CALL("NetworkFileIO()::IsRemoteIOEnabled()");
+            REMOTEFILE_LOG_APPEND("NetworkFileIO()::IsRemoteIOEnabled() return True");
+            return true;
+        }
+
+#ifndef REMOTEFILEIO_IS_NETWORKFILEIO
+        //////////////////////////////////////////////////////////////////////////
+        const int REFRESH_FILESIZE_TIME = 500;// ms
+        const size_t CACHE_LOOKAHEAD_SIZE = 1024 * 256;
+
+        RemoteFileCache::RemoteFileCache(RemoteFileCache&& other)
+        {
+            REMOTEFILE_LOG_CALL("RemoteFileCache()::RemoteFileCache(other)");
+            *this = AZStd::move(other);
+        }
+
+        AZ::IO::RemoteFileCache& RemoteFileCache::operator=(RemoteFileCache&& other)
+        {
+            REMOTEFILE_LOG_CALL("RemoteFileCache()::operator=(other)");
+            if (this != &other)
+            {
+                m_cacheLookaheadBuffer = AZStd::move(other.m_cacheLookaheadBuffer);
+                m_cacheLookaheadPos = other.m_cacheLookaheadPos;
+                m_fileSize = other.m_fileSize;
+                m_fileSizeTime = other.m_fileSizeTime;
+                m_filePosition = other.m_filePosition;
+                m_fileHandle = other.m_fileHandle;
+                m_openMode = other.m_openMode;
+            }
+            return *this;
+        }
+
+        void RemoteFileCache::Invalidate()
+        {
+            m_cacheLookaheadPos = 0;
+            m_cacheLookaheadBuffer.clear();
+        }
+
+        AZ::u64 RemoteFileCache::RemainingBytes()
+        {
+            return m_cacheLookaheadBuffer.size() - m_cacheLookaheadPos;
+        }
+
+        AZ::u64 RemoteFileCache::CacheFilePosition()
+        {
+            return m_filePosition - RemainingBytes();
+        }
+
+        AZ::u64 RemoteFileCache::CacheStartFilePosition()
+        {
+            return m_filePosition - m_cacheLookaheadBuffer.size();
+        }
+
+        AZ::u64 RemoteFileCache::CacheEndFilePosition()
+        {
+            return m_filePosition;
+        }
+
+        bool RemoteFileCache::IsFilePositionInCache(AZ::u64 filePosition)
+        {
+            return filePosition >= CacheStartFilePosition() && filePosition < CacheEndFilePosition();
+        }
+
+        void RemoteFileCache::SetCachePositionFromFilePosition(AZ::u64 filePosition)
+        {
+            m_cacheLookaheadPos = filePosition - CacheStartFilePosition();
+        }
+        
+        void RemoteFileCache::SyncCheck()
+        {
+#ifdef REMOTEFILEIO_SYNC_CHECK
+            //don't sync check files open for write
+            //they can be written to asynchronously so tell may return a different position than is cached
+            //because we dont wait for the network request to finish before we immediately ask for tell
+            if (AnyFlag(m_openMode & OpenMode::ModeWrite) ||
+                AnyFlag(m_openMode & OpenMode::ModeAppend) ||
+                AnyFlag(m_openMode & OpenMode::ModeUpdate))
+            {
+                return;
+            }
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileCache()::SyncCheck(m_fileHandle=%u)", m_fileHandle).c_str());
+            FileTellRequest request(m_fileHandle);
+            FileTellResponse responce;
+            if (!SendRequest(request, responce))
+            {
+                AZ_Assert(false, "RemoteFileCache::SyncCheck(m_fileHandle=%u) Failed to send tell request.", m_fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileCache::SyncCheck(m_fileHandle=%u) Failed to send tell request.", m_fileHandle).c_str());
+            }
+
+            ResultCode returnValue = static_cast<ResultCode>(responce.m_resultCode);
+            if (returnValue == ResultCode::Error)
+            {
+                AZ_TracePrintf(RemoteFileCacheChannel, "RemoteFileCache::SyncCheck(m_fileHandle=%u) tell request failed.", m_fileHandle);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileCache::SyncCheck(m_fileHandle=%u) tell request failed.", m_fileHandle).c_str());
+            }
+            
+            if (responce.m_offset != m_filePosition)
+            {
+                AZ_TracePrintf(RemoteFileCacheChannel, "RemoteFileCache::SyncCheck(m_fileHandle=%u) failed!!! m_filePosition=%u tell=%u", m_fileHandle, m_filePosition, responce.m_offset);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileCache::SyncCheck(m_fileHandle=%u) failed!!! m_filePosition=%u tell=%u", m_fileHandle, m_filePosition, responce.m_offset).c_str());
+            }
+            else
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileCache::SyncCheck(m_fileHandle=%u) Success m_filePosition=%u tell=%u", m_fileHandle, m_filePosition, responce.m_offset).c_str());
+            }
+#endif
+        }
+
+
+        void RemoteFileCache::SetFilePosition(AZ::u64 filePosition)
+        {
+            m_filePosition = filePosition;
+            SyncCheck();
+        }
+
+        void RemoteFileCache::OffsetFilePosition(AZ::s64 offset)
+        {
+            m_filePosition += offset;
+            SyncCheck();
+        }
+
+        bool RemoteFileCache::Eof()
+        {
+            return CacheFilePosition() == m_fileSize;
+        }
+
+
+        //////////////////////////////////////////////////////////////////////////
+        RemoteFileIO::RemoteFileIO(FileIOBase* excludedFileIO)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::RemoteFileIO()").c_str());
+            m_excludedFileIO = excludedFileIO;
+#ifdef REMOTEFILEIO_CACHE_FILETREE
+            CacheFileTree();
+#endif
+        }
+
+        RemoteFileIO::~RemoteFileIO()
+        {
+            delete m_excludedFileIO; //for now delete it, when We change to always create local file io We won't
+#ifdef REMOTEFILEIO_CACHE_FILETREE
+            AzFramework::AssetSystemBus::Handler::BusDisconnect();
+#endif
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::RemoteFileIO()").c_str());
+        }
+
+        Result RemoteFileIO::Open(const char* filePath, OpenMode openMode, HandleType& fileHandle)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Open(filePath=%s, openMode=%i, fileHandle=OUT)", filePath?filePath:"nullptr", openMode).c_str());
+            Result returnValue = NetworkFileIO::Open(filePath, openMode, fileHandle);
+            if (returnValue == ResultCode::Success)
+            {
+                {
+                    AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+                    m_remoteFileCache.insert(fileHandle);
+                    RemoteFileCache& cache = GetCache(fileHandle);
+                    cache.m_fileHandle = fileHandle;
+                    cache.m_openMode = openMode;
+                }
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Open(filePath=%s, fileHandle=%u) return %s", filePath?filePath:"nullptr", fileHandle, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
+            return returnValue;
+        }
+
+        Result RemoteFileIO::Close(HandleType fileHandle)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Close(fileHandle=%u)", fileHandle).c_str());
+            Result returnValue = NetworkFileIO::Close(fileHandle);
+            
+            if (returnValue == ResultCode::Success)
+            {
+                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+                m_remoteFileCache.erase(fileHandle);
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Open(fileHandle=%u) return %s", fileHandle, returnValue == ResultCode::Success ? "Success" : "Error").c_str());
+            return returnValue;
+        }
+
+        Result RemoteFileIO::Tell(HandleType fileHandle, AZ::u64& offset)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Tell(fileHandle=%u, offset=OUT)", fileHandle).c_str());
+            {
+                AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+                RemoteFileCache& cache = GetCache(fileHandle);
+                offset = cache.CacheFilePosition();
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Tell(fileHandle=%u, offset=%i) return Success", fileHandle, offset).c_str());
+            return ResultCode::Success;
+        }
+
+        Result RemoteFileIO::Seek(HandleType fileHandle, AZ::s64 offset, SeekType type)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Seek(fileHandle=%u, offset=%i, type=%s)", fileHandle, offset, type==SeekType::SeekFromCurrent ? "SeekFromCurrent" : type==SeekType::SeekFromEnd ? "SeekFromEnd" : type==SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+            RemoteFileCache& cache = GetCache(fileHandle);
+
+            //if we land in the cache all we need to do is adjust the cache position and return
+            //calculate the new position in the file
+            AZ::s64 newFilePosition = 0;
+            if (type == AZ::IO::SeekType::SeekFromCurrent)
+            {
+                newFilePosition = cache.CacheFilePosition() + offset;
+            }
+            else if (type == AZ::IO::SeekType::SeekFromStart)
+            {
+                newFilePosition = offset;
+            }
+            else if (type == AZ::IO::SeekType::SeekFromEnd)
+            {
+                AZ::u64 fileSize = 0;
+                if(Size(fileHandle, fileSize)== ResultCode::Error)
+                {
+                    return ResultCode::Error;
+                }
+                newFilePosition = fileSize + offset;
+            }
+            else
+            {
+                AZ_Assert(false, "RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) unknown seektype. return Error", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown");
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) unknown seektype. return Error", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+                return ResultCode::Error;
+            }
+
+            //bound check
+            //note that seeking beyond end or before beginning is system dependent
+            //therefore we will define that on all platforms it is not allowed
+            if (newFilePosition < 0)
+            {
+                AZ_TracePrintf(RemoteFileIOChannel, "RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) seek to a position before the begining of a file!", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown");
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) seek to a position before the begining of a file!", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+                newFilePosition = 0;
+            }
+            else
+            {
+                AZ::u64 fileSize = 0;
+                Size(fileHandle, fileSize);
+
+                if (newFilePosition > fileSize)
+                {
+                    AZ_TracePrintf(RemoteFileIOChannel, "RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) seek to a position after the end of a file!", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown");
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) seek to a position after the end of a file!", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+                    newFilePosition = fileSize;
+                }
+            }
+
+            //see if the new calculated position is in the cache
+            if (cache.IsFilePositionInCache(newFilePosition))
+            {
+                //it is, so calculate what the cache position should be given the new file position and
+                //set it and return success
+                cache.SetCachePositionFromFilePosition(newFilePosition);
+                cache.SyncCheck();
+                return ResultCode::Success;
+            }
+            else if (newFilePosition == cache.m_filePosition)
+            {
+                cache.SyncCheck();
+                return ResultCode::Success;
+            }
+
+            //we didn't land in the cache
+            //perform the seek for real, invalidate and set new file position
+            //note when setting a new absolute position we always use SeekFromStart, not the passed in seek type
+            FileSeekRequest request(fileHandle, static_cast<AZ::u32>(AZ::IO::SeekType::SeekFromStart), newFilePosition);
+            if (!SendRequest(request))
+            {
+                AZ_Assert(false, "RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) Failed to send request. return Error", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown");
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) Failed to send request. return Error", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+                return ResultCode::Error;
+            }
+
+            cache.Invalidate();
+            cache.SetFilePosition(newFilePosition);
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Seek(fileHandle=%u, offset=%i, type=%s) return Success", fileHandle, offset, type == SeekType::SeekFromCurrent ? "SeekFromCurrent" : type == SeekType::SeekFromEnd ? "SeekFromEnd" : type == SeekType::SeekFromStart ? "SeekFromStart" : "Unknown").c_str());
+            return ResultCode::Success;
+        }
+
+        Result RemoteFileIO::Size(HandleType fileHandle, AZ::u64& size)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO::Size(fileHandle=%u, size=OUT)", fileHandle).c_str());
+            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+            RemoteFileCache& cache = GetCache(fileHandle);
+
+            // do we even have to check?
+            AZ::u64 msNow = AZStd::GetTimeUTCMilliSecond();
+            if (msNow - cache.m_fileSizeTime > REFRESH_FILESIZE_TIME)
+            {
+                if (NetworkFileIO::Size(fileHandle, cache.m_fileSize))
+                {
+                    cache.m_fileSizeTime = msNow;
+                    size = cache.m_fileSize;
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Size(fileHandle=%u) size=%u. return Success", fileHandle, size).c_str());
+                    return ResultCode::Success;
+                }
+            }
+            else
+            {
+                size = cache.m_fileSize;
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Size(fileHandle=%u) size=%u return Success", fileHandle, size).c_str());
+                return ResultCode::Success;
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Size(fileHandle=%u) return Error", fileHandle).c_str());
+            return ResultCode::Error;
+        }
+
+        Result RemoteFileIO::Read(HandleType fileHandle, void* buffer, AZ::u64 size, bool failOnFewerThanSizeBytesRead, AZ::u64* bytesRead)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Read(fileHandle=%u, buffer=OUT, size=%u, failOnFewerThanSizeBytesRead=%s, bytesRead=OUT)", fileHandle, size, failOnFewerThanSizeBytesRead ? "True" : "False").c_str());
+            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+            RemoteFileCache& cache = GetCache(fileHandle);
+            
+            AZ::u64 remainingBytesToRead = size;
+            AZ::u64 bytesReadFromCache = 0;
+            AZ::u64 remainingBytesInCache = cache.RemainingBytes();
+            if (remainingBytesInCache)
+            {
+                AZ::u64 bytesToReadFromCache = AZStd::GetMin<AZ::u64>(remainingBytesInCache, remainingBytesToRead);
+                memcpy(buffer, cache.m_cacheLookaheadBuffer.data() + cache.m_cacheLookaheadPos, bytesToReadFromCache);
+                bytesReadFromCache = bytesToReadFromCache;
+                remainingBytesToRead -= bytesToReadFromCache;
+                cache.m_cacheLookaheadPos += bytesToReadFromCache;
+            }
+
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u) bytesReadFromCache=%u remainingBytesToRead=%u", fileHandle, bytesReadFromCache, remainingBytesToRead).c_str());
+            AZ::u64 bytesThatHaveBeenRead = bytesReadFromCache;
+            if (bytesRead)
+            {
+                *bytesRead = bytesThatHaveBeenRead;
+            }
+
+            buffer = reinterpret_cast<char*>(buffer) + bytesReadFromCache;
+
+            if (remainingBytesToRead)
+            {
+                AZ::u64 actualRead = 0;
+                Result returnValue = NetworkFileIO::Read(fileHandle, buffer, remainingBytesToRead, true, &actualRead);
+
+                remainingBytesToRead -= actualRead;
+
+                if (actualRead)
+                {
+                    cache.OffsetFilePosition(actualRead);
+                }
+
+                bytesThatHaveBeenRead += actualRead;
+                if (bytesRead)
+                {
+                    *bytesRead = bytesThatHaveBeenRead;
+                }
+
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, size=%u) %s remainingBytesToRead=%u. actualRead=%u", fileHandle, remainingBytesToRead, returnValue==ResultCode::Success ? "Success" : "Fail", remainingBytesToRead, actualRead).c_str());
+                //if we get an error, we only return an error if failOnFewerThanSizeBytesRead
+                if (returnValue == ResultCode::Error)
+                {
+                    if (failOnFewerThanSizeBytesRead && remainingBytesToRead)
+                    {
+                        REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, bytesThatHaveBeenRead=%u) failOnFewerThanSizeBytesRead. return Error", fileHandle, bytesThatHaveBeenRead).c_str());
+                        return ResultCode::Error;
+                    }
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, bytesThatHaveBeenRead=%u) return Success", fileHandle, bytesThatHaveBeenRead).c_str());
+                    return ResultCode::Success;
+                }
+            }
+
+            //they could have asked for more bytes than there is in the file
+            if (failOnFewerThanSizeBytesRead && remainingBytesToRead && Eof(fileHandle))
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, bytesThatHaveBeenRead=%u) failOnFewerThanSizeBytesRead. return Error", fileHandle, bytesThatHaveBeenRead).c_str());
+                return ResultCode::Error;
+            }
+
+            //if we get here we have satisfied the read request.
+            //if the cache is empty try to refill it if not eof.
+            if (!cache.RemainingBytes() && !Eof(fileHandle))
+            {
+                //make sure the cache file size is up to date
+                AZ::u64 fsize = 0;
+                Size(fileHandle, fsize);
+
+                AZ::u64 remainingFileBytes = cache.m_fileSize - cache.m_filePosition;
+                AZ::u64 readSize = AZStd::GetMin<AZ::u64>(remainingFileBytes, CACHE_LOOKAHEAD_SIZE);
+
+                cache.m_cacheLookaheadBuffer.clear();
+                cache.m_cacheLookaheadBuffer.resize_no_construct(readSize);
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, size=%u) -=CACHE READ=-", fileHandle, readSize).c_str());
+                AZ::u64 actualRead = 0;
+                Result returnValue = NetworkFileIO::Read(fileHandle, cache.m_cacheLookaheadBuffer.data(), readSize, false, &actualRead);
+                if (actualRead)
+                {
+                    cache.m_cacheLookaheadBuffer.resize(actualRead);
+                    cache.OffsetFilePosition(actualRead);
+                    cache.m_cacheLookaheadPos = 0;
+                }
+
+                if (returnValue == ResultCode::Error)
+                {
+                    AZ_TracePrintf(RemoteFileIOChannel, "RemoteFileIO::Read(fileHandle=%u, size=%u) -=CACHE READ=- actualRead=%i Failed", fileHandle, readSize, actualRead);
+                }
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, size=%u) -=CACHE READ=- actualRead=%i %s", fileHandle, readSize, actualRead, returnValue == ResultCode::Success ? "Success" : "Fail").c_str());
+            }
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Read(fileHandle=%u, bytesThatHaveBeenRead=%u) return Success", fileHandle, bytesThatHaveBeenRead).c_str());
+            return ResultCode::Success;
+        }
+
+        Result RemoteFileIO::Write(HandleType fileHandle, const void* buffer, AZ::u64 size, AZ::u64* bytesWritten)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Write(fileHandle=%u, buffer=OUT, size=%u, bytesWritten=OUT)", fileHandle, size).c_str());
+            // We need to seek back to where we should be in the file before we commit a write.
+            // This is unnecessary if the cache is empty, or we're at the end of the cache.
+            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+            RemoteFileCache& cache = GetCache(fileHandle);
+            if (cache.m_cacheLookaheadBuffer.size() && cache.RemainingBytes())
+            {
+                // find out where we are 
+                AZ::u64 seekPosition = cache.CacheFilePosition();
+
+                // note, seeks are predicted, and do not ask for a response.
+                FileSeekRequest request(fileHandle, static_cast<AZ::u32>(AZ::IO::SeekType::SeekFromStart), seekPosition);
+                if (!SendRequest(request))
+                {
+                    AZ_Assert(false, "RemoteFileIO::Write(fileHandle=%u, size=%u) Seek Failed to send request. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Write(fileHandle=%u, size=%u) Seek Failed to send request. return Error", fileHandle, size).c_str());
+                    return ResultCode::Error;
+                }
+
+                cache.SetFilePosition(seekPosition);
+            }
+
+            cache.Invalidate();
+            REMOTEFILE_LOG_APPEND("RemoteFileIO::Write() cache.Invalidate()");
+            cache.m_fileSizeTime = 0; // invalidate file size after write.
+
+            FileWriteRequest request(fileHandle, buffer, size);
+            //always async and just return success unless bytesWritten is set then synchronous
+            if (bytesWritten)
+            {
+                FileWriteResponse response;
+                if (!SendRequest(request, response))
+                {
+                    AZ_Assert(false, "RemoteFileIO::Write(fileHandle=%u, size=%u) failed to send sync write request. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Write(fileHandle=%u, size=%u) failed to send sync write request. return Error", fileHandle, size).c_str());
+                    return ResultCode::Error;
+                }
+                ResultCode res = static_cast<ResultCode>(response.m_resultCode);
+                if (res == ResultCode::Error)
+                {
+                    AZ_TracePrintf(RemoteFileIOChannel, "RemoteFileIO::Write(fileHandle=%u, size=%u) sync write request failed", fileHandle, size);
+                }
+                *bytesWritten = response.m_bytesWritten;
+
+                cache.OffsetFilePosition(response.m_bytesWritten);
+            }
+            else
+            {
+                // just send the message and assume we wrote it all successfully.
+                if (!SendRequest(request))
+                {
+                    AZ_Assert(false, "RemoteFileIO::Write(fileHandle=%u, size=%u) failed to send async write request. return Error", fileHandle, size);
+                    REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Write(fileHandle=%u, size=%u) failed to send async write request. return Error", fileHandle, size).c_str());
+                    return ResultCode::Error;
+                }
+                cache.OffsetFilePosition(size);
+            }
+            REMOTEFILE_LOG_APPEND("RemoteFileIO::Write() Success");
+            return ResultCode::Success;
+        }
+
+        bool RemoteFileIO::Eof(HandleType fileHandle)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Eof(fileHandle=%u)", fileHandle).c_str());
+            //make sure the cache file size is up to date
+            AZ::u64 size = 0;
+            Size(fileHandle, size);
+
+            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+            RemoteFileCache& cache = GetCache(fileHandle);
+            bool isEof = cache.Eof();
+            REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Eof(fileHandle=%u) return %s", fileHandle, isEof ? "True" : "False").c_str());
+            return isEof;
+        }
+
+        //get cache should only be called while AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFileCacheGuard);
+        AZ::IO::RemoteFileCache& RemoteFileIO::GetCache(HandleType fileHandle)
+        {
+            auto found = m_remoteFileCache.find(fileHandle);
+            // check this because it is a serious error since it may be that you're in an unguarded access to a non-existent handle.
+            AZ_Assert(found != m_remoteFileCache.end(), "RemoteFileIO::GetCache(fileHandle=%u) Missing! Did something go wrong with open?", fileHandle);
+            return found->second;
         }
 
         void RemoteFileIO::SetAlias(const char* alias, const char* path)
         {
+            if (m_excludedFileIO)
+            {
+                m_excludedFileIO->SetAlias(alias, path);
+            }
         }
 
         const char* RemoteFileIO::GetAlias(const char* alias)
         {
-            return nullptr;
+            return m_excludedFileIO ? m_excludedFileIO->GetAlias(alias) : nullptr;
         }
 
         void RemoteFileIO::ClearAlias(const char* alias)
         {
+            if (m_excludedFileIO)
+            {
+                m_excludedFileIO->ClearAlias(alias);
+            }
         }
 
         AZ::u64 RemoteFileIO::ConvertToAlias(char* inOutBuffer, AZ::u64 bufferLength) const
         {
-            return strlen(inOutBuffer);
+            return m_excludedFileIO ? m_excludedFileIO->ConvertToAlias(inOutBuffer, bufferLength) : strlen(inOutBuffer);
         }
 
         bool RemoteFileIO::ResolvePath(const char* path, char* resolvedPath, AZ::u64 resolvedPathSize)
         {
-            return false;
+            return m_excludedFileIO ? m_excludedFileIO->ResolvePath(path, resolvedPath, resolvedPathSize) : false;
         }
 
-        bool RemoteFileIO::GetFilename(HandleType fileHandle, char* filename, AZ::u64 filenameSize) const
+#ifdef REMOTEFILEIO_CACHE_FILETREE
+        bool RemoteFileIO::Exists(const char* filePath)
         {
-            AZStd::lock_guard<AZStd::recursive_mutex> lock(m_remoteFilesGuard);
-            const auto fileIt = m_remoteFiles.find(fileHandle);
-            if (fileIt != m_remoteFiles.end())
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::Exists(filePath=%s)", filePath?filePath:"nullptr").c_str());
+            //error checks
+            if (!filePath)
             {
-                AZ_Assert(filenameSize >= fileIt->second.length(), "RemoteFileIO::GetFilename: Result buffer is too small to store filename: %u vs %s", filenameSize, fileIt->second.length());
-                if (filenameSize >= fileIt->second.length())
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::Exists(filePath=nullptr) filePath=nullptr. return False").c_str());
+                return false;
+            }
+
+            if (!strlen(filePath))
+            {
+                REMOTEFILE_LOG_APPEND("RemoteFileIO::Exists(filePath=\"\") strlen(filePath)==0. return False");
+                return false;
+            }
+
+            AZStd::string filePathName(filePath);
+            AZStd::replace(filePathName.begin(), filePathName.end(), '\\', '/');
+            AZStd::size_t lastNonSlash = filePathName.find_last_not_of('/');
+            AZStd::size_t lastSlash = filePathName.find_last_of('/');
+            if (lastSlash != AZStd::string::npos && lastSlash > lastNonSlash)
+            {
+                filePathName.erase(lastSlash);
+            }
+            filePath = filePathName.c_str();
+
+            const uint64_t numFiles = m_remoteFileTreeCache.size();
+            for (uint64_t fileIdx = 0; fileIdx < numFiles; ++fileIdx)
+            {
+                const char* fileName = m_remoteFileTreeCache[fileIdx].c_str();
+                if (!azstricmp(filePath, fileName))
                 {
-                    strncpy(filename, fileIt->second.c_str(), fileIt->second.length());
                     return true;
                 }
             }
-            return false;
-        }
 
-        // (assumes you're inside a remote files guard lock already for creation, which is true since we create one on open)
-        VFSCacheLine& RemoteFileIO::GetCacheLine(HandleType handle)
-        {
-            auto found = m_remoteFileCache.find(handle);
-            if (found != m_remoteFileCache.end())
+            const uint64_t numFolders = m_remoteFolderTreeCache.size();
+            for (uint64_t folderIdx = 0; folderIdx < numFolders; ++folderIdx)
             {
-                return found->second;
+                const char* folderName = m_remoteFolderTreeCache[folderIdx].c_str();
+                if (!azstricmp(filePath, folderName))
+                {
+                    return true;
+                }
             }
 
-            // this is a serious error since it may be that you're in an unguarded access to a non-existant handle.
-            AZ_ErrorOnce("FILEIO", false, "Attempt to Create or Get cache line missed, did something go wrong with open?");
+#ifdef REMOTEFILEIO_CACHE_FILETREE_FALLBACK
+            //fall back
+            bool bExists = NetworkFileIO::Exists(filePath);
+            if (bExists)
+            {
+                //it wasn't found before, but it is now, update the cache
+                if (NetworkFileIO::IsDirectory(filePath))
+                {
+                    m_remoteFolderTreeCache.push_back(filePath);
+                }
+                else
+                {
+                    m_remoteFileTreeCache.push_back(filePath);
+                }
+            }
 
-            auto pairIterBool = m_remoteFileCache.insert(handle);
-            return pairIterBool.first->second;
+            return bExists;
+#else
+            return false;
+#endif
         }
 
+        bool RemoteFileIO::IsDirectory(const char* filePath)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::IsDirectory(filePath=%s)", filePath?filepath:"nullptr").c_str());
+            //error checks
+            if (!filePath)
+            {
+                REMOTEFILE_LOG_APPEND("RemoteFileIO::IsDirectory(filePath=nullptr) filePath=nullptr. return False");
+                return false;
+            }
+
+            if (!strlen(filePath))
+            {
+                REMOTEFILE_LOG_APPEND("RemoteFileIO::IsDirectory(filePath=\"\") strlen(filePath)==0. return False");
+                return false;
+            }
+
+            AZStd::string filePathName(filePath);
+            AZStd::replace(filePathName.begin(), filePathName.end(), '\\', '/');
+            AZStd::size_t lastNonSlash = filePathName.find_last_not_of('/');
+            AZStd::size_t lastSlash = filePathName.find_last_of('/');
+            if (lastSlash != AZStd::string::npos && lastSlash > lastNonSlash)
+            {
+                filePathName.erase(lastSlash);
+            }
+            filePath = filePathName.c_str();
+
+            const uint64_t numFolders = m_remoteFolderTreeCache.size();
+            for (uint64_t folderIdx = 0; folderIdx < numFolders; ++folderIdx)
+            {
+                const char* folderName = m_remoteFolderTreeCache[folderIdx].c_str();
+                if (!azstricmp(filePath, folderName))
+                {
+                    return true;
+                }
+            }
+
+#ifdef REMOTEFILEIO_CACHE_FILETREE_FALLBACK
+            //fallback
+            bool bExists = NetworkFileIO::IsDirectory(filePath);
+            if (bExists)
+            {
+                //it wasn't found before, but it is now, update the cache
+                m_remoteFolderTreeCache.push_back(filePath);
+            }
+            return bExists;
+#else
+            return false;
+#endif
+        }
+
+        Result RemoteFileIO::FindFiles(const char* filePath, const char* filter, FindFilesCallbackType callback)
+        {
+            REMOTEFILE_LOG_CALL(AZStd::string::format("RemoteFileIO()::FindFiles(filePath=%s, filter=%s, callback=OUT)", filePath?filePath:"nullptr", filter?filter:"nullptr").c_str());
+            //error checks
+            if (!filePath)
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::FindFiles(filePath=nullptr, filter=%s) filePath=nullptr. return Error", filter?filter:"nullptr").c_str());
+                return ResultCode::Error;
+            }
+
+            if (!filter)
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::FindFiles(filePath=%s, filter=nullptr) filter=nullptr. return Error", filePath).c_str());
+                return ResultCode::Error;
+            }
+
+            if (!strlen(filePath))
+            {
+                REMOTEFILE_LOG_APPEND(AZStd::string::format("RemoteFileIO::FindFiles(filePath=\"\", filter=%s) strlen(filePath)==0. return Error", filter).c_str());
+                return ResultCode::Error;
+            }
+
+            AZStd::string filePathName(filePath);
+            AZStd::replace(filePathName.begin(), filePathName.end(), '\\', '/');
+            AZStd::size_t lastNonSlash = filePathName.find_last_not_of('/');
+            AZStd::size_t lastSlash = filePathName.find_last_of('/');
+            if (lastSlash != AZStd::string::npos && lastSlash > lastNonSlash)
+            {
+                filePathName.erase(lastSlash);
+            }
+            filePath = filePathName.c_str();
+            AZ::u64 filePathLen = filePathName.length();
+
+            // files callbacks
+            const uint64_t numFiles = m_remoteFileTreeCache.size();
+            for (uint64_t fileIdx = 0; fileIdx < numFiles; ++fileIdx)
+            {
+                const char* cachedFilePath = m_remoteFileTreeCache[fileIdx].c_str();
+                if (!azstrnicmp(filePath, cachedFilePath, filePathLen))
+                {
+                    if (strlen(cachedFilePath) > filePathLen)
+                    {
+                        const char* cachedFileName = cachedFilePath + filePathLen + 1;
+                        if (!strchr(cachedFileName, '/'))
+                        {
+                            //no slash was found so this file is in this folder
+                            if (AZStd::wildcard_match(filter, cachedFileName))
+                            {
+                                if (!callback(cachedFilePath))
+                                {
+                                    return ResultCode::Success;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // folders
+            const uint64_t numFolders = m_remoteFolderTreeCache.size();
+            for (uint64_t folderIdx = 0; folderIdx < numFolders; ++folderIdx)
+            {
+                const char* cachedFolderPath = m_remoteFolderTreeCache[folderIdx].c_str();
+                if (!azstrnicmp(filePath, cachedFolderPath, filePathLen))
+                {
+                    if (strlen(cachedFolderPath) > filePathLen)
+                    {
+                        const char* cachedFolderName = cachedFolderPath + filePathLen + 1;
+                        if (!strchr(cachedFolderName, '/'))
+                        {
+                            //no slash was found so this is not a sub folder
+                            if (AZStd::wildcard_match(filter, cachedFolderName))
+                            {
+                                if (!callback(cachedFolderPath))
+                                {
+                                    return ResultCode::Success;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return ResultCode::Success;
+        }
+
+        Result RemoteFileIO::CacheFileTree()
+        {
+            m_remoteFileTreeCache.clear();
+            m_remoteFolderTreeCache.clear();
+
+            REMOTEFILE_LOG_CALL("RemoteFileIO()::CacheFileTree()");
+            FileTreeRequest request;
+            FileTreeResponse response;
+            if (!SendRequest(request, response))
+            {
+                AZ_Assert(false, "RemoteFileIO::CacheFileTree() could not send request. return Error");
+                REMOTEFILE_LOG_APPEND("RemoteFileIO::CacheFileTree() could not send request. return Error");
+                return ResultCode::Error;
+            }
+
+            Result returnValue = static_cast<ResultCode>(response.m_resultCode);
+            if (returnValue == ResultCode::Success)
+            {
+                for (auto& it: response.m_fileList)
+                {
+                    AZStd::replace(it.begin(), it.end(), '\\', '/');
+                    m_remoteFileTreeCache.push_back(it);
+                }
+
+                for (auto& it: response.m_folderList)
+                {
+                    AZStd::replace(it.begin(), it.end(), '\\', '/');
+                    AZStd::size_t lastNonSlash = it.find_last_not_of('/');
+                    AZStd::size_t lastSlash = it.find_last_of('/');
+                    if (lastSlash != AZStd::string::npos && lastSlash > lastNonSlash)
+                    {
+                        it.erase(lastSlash);
+                    }
+                    m_remoteFolderTreeCache.push_back(it);
+                }
+            }
+
+            AzFramework::AssetSystemBus::Handler::BusConnect();
+
+            return returnValue;
+        }
+
+        //=========================================================================
+        // AssetSystemBus::AssetChanged
+        //=========================================================================
+        void RemoteFileIO::AssetChanged(AzFramework::AssetSystem::AssetNotificationMessage message)
+        {
+            CacheFileTree();
+        }
+
+        //=========================================================================
+        // AssetSystemBus::AssetRemoved
+        //=========================================================================
+        void RemoteFileIO::AssetRemoved(AzFramework::AssetSystem::AssetNotificationMessage message)
+        {
+            CacheFileTree();
+        }
+#endif //REMOTEFILEIO_CACHE_FILETREE
+#endif //REMOTEFILEIO_IS_NETWORKFILEIO
     } // namespace IO
 }//namespace AZ

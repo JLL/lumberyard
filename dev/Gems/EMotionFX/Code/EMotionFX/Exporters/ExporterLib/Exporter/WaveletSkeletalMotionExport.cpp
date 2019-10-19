@@ -18,7 +18,6 @@
 #include <MCore/Source/D4Wavelet.h>
 #include <MCore/Source/CDF97Wavelet.h>
 #include <MCore/Source/DiskFile.h>
-#include <MCore/Source/AttributeSet.h>
 #include <EMotionFX/Source/WaveletSkeletalMotion.h>
 #include <EMotionFX/Source/Importer/Importer.h>
 
@@ -36,6 +35,7 @@ namespace ExporterLib
 
         // the mapping chunk
         EMotionFX::FileFormat::Motion_WaveletMapping mappingChunk;
+        memset(&mappingChunk, 0, sizeof(EMotionFX::FileFormat::Motion_WaveletMapping));
 
         mappingChunk.mPosIndex      = mapping.mPosIndex;
         mappingChunk.mRotIndex      = mapping.mRotIndex;
@@ -312,6 +312,7 @@ namespace ExporterLib
     {
         // the wavelet skeletal info chunk
         EMotionFX::FileFormat::Motion_WaveletInfo waveletInfoChunk;
+        memset(&waveletInfoChunk, 0, sizeof(EMotionFX::FileFormat::Motion_WaveletInfo));
 
         waveletInfoChunk.mNumChunks                     = motion->GetNumChunks();
         waveletInfoChunk.mSamplesPerChunk               = motion->GetSamplesPerChunk();

@@ -29,10 +29,6 @@
 #include <AzFramework/IO/FileOperations.h>
 #include <HMDBus.h>
 
-#if defined(WIN32)
-#include <CryWindows.h>
-#endif
-
 //////////////////////////////////////////////////////////////////////////
 // Brush Export structures.
 //////////////////////////////////////////////////////////////////////////
@@ -556,8 +552,6 @@ CTimeDemoRecorder::CTimeDemoRecorder()
     REGISTER_CVAR2("demo_num_runs", &m_maxLoops, 1, 0, "Number of times to loop timedemo");
     REGISTER_CVAR2("demo_scroll_pause", &m_demo_scroll_pause, 1, 0, "ScrollLock pauses demo play/record");
     REGISTER_CVAR2("demo_quit", &m_demo_quit, 0, 0, "Quit game after demo runs finished");
-    REGISTER_CVAR2("demo_finish_memreplay_sizer", &m_finish_replaysizer, 0, 0, "Add a crysizer tree to memreplay when demo is finished");
-    REGISTER_CVAR2("demo_finish_memreplay_stop", &m_finish_replaystop, 0, 0, "Stop memreplay when demo is finished");
     REGISTER_CVAR2("demo_screenshot_frame", &m_demo_screenshot_frame, 0, 0, "Make screenshot on specified frame during demo playback, If Negative then do screen shoot every N frame");
     REGISTER_CVAR2("demo_max_frames", &m_demo_max_frames, 100000, 0, "Max number of frames to save");
     REGISTER_CVAR2("demo_savestats", &m_demo_savestats, 0, 0, "Save level stats at the end of the loop");
@@ -645,8 +639,6 @@ void CTimeDemoRecorder::Record(bool bEnable)
 
         // Start recording.
         {
-            ScopedSwitchToGlobalHeap globalHeap;
-
             m_records.clear();
             m_records.reserve(1000);
         }
@@ -1022,8 +1014,6 @@ void CTimeDemoRecorder::Save(const char* filename)
 //////////////////////////////////////////////////////////////////////////
 void CTimeDemoRecorder::AddFrameRecord(const FrameRecord& rec)
 {
-    ScopedSwitchToGlobalHeap globalHeap;
-
     m_records.push_back(rec);
 }
 
@@ -1072,8 +1062,6 @@ bool CTimeDemoRecorder::Load(const char* filename)
     m_totalDemoTime = m_recordedDemoTime;
 
     {
-        ScopedSwitchToGlobalHeap globalHeap;
-
         m_file = filename;
         m_records.reserve(hdr.numFrames);
     }
@@ -2027,8 +2015,6 @@ void CTimeDemoRecorder::StartSession()
     }
 
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
-
         if (!m_pTimeDemoInfo)
         {
             m_pTimeDemoInfo = new STimeDemoInfo();
@@ -2706,17 +2692,6 @@ void CTimeDemoRecorder::EndDemo()
         pGameFramework->EndGameContext(false);
     }
 
-#if CAPTURE_REPLAY_LOG
-    if (m_finish_replaysizer)
-    {
-        CryGetIMemReplay()->AddSizerTree("TimeDemoSizers");
-    }
-    if (m_finish_replaystop)
-    {
-        CryGetIMemReplay()->Stop();
-    }
-#endif
-
     CryLogAlways("Testing Successfully Finished, Quiting...");
 }
 
@@ -2732,16 +2707,18 @@ void CTimeDemoRecorder::QuitGame()
 //////////////////////////////////////////////////////////////////////////
 void CTimeDemoRecorder::ProcessKeysInput()
 {
-#ifdef WIN32
     if (!gEnv->IsDedicated() && gEnv->pSystem->IsDevMode())
     {
         // Check if special development keys where pressed.
-        bool bAlt = ((CryGetAsyncKeyState(VK_LMENU) & (1 << 15)) != 0) || (CryGetAsyncKeyState(VK_RMENU) & (1 << 15)) != 0;
-        bool bCtrl = (CryGetAsyncKeyState(VK_CONTROL) & (1 << 15)) != 0;
-        bool bShift = (CryGetAsyncKeyState(VK_SHIFT) & (1 << 15)) != 0;
+        // We're not referencing the VK_ constants directly here so the code will compile on non-Windows platforms.
+        // If it wasn't legacy functinoality that will be deleted then we would deal with it in a better way.
+        // See AzFramework\Input\Devices\Keyboard\InputDeviceKeyboardWindowsScanCodes.h for VK_ constant values.
+        bool bAlt = ((CryGetAsyncKeyState(/*VK_LMENU*/0xA4) & (1 << 15)) != 0) || (CryGetAsyncKeyState(/*VK_RMENU*/0xA5) & (1 << 15)) != 0;
+        bool bCtrl = (CryGetAsyncKeyState(/*VK_CONTROL*/0x11) & (1 << 15)) != 0;
+        bool bShift = (CryGetAsyncKeyState(/*VK_SHIFT*/0x10) & (1 << 15)) != 0;
 
-        bool bCancel = CryGetAsyncKeyState(VK_CANCEL) & 1;
-        bool bTimeDemoKey = CryGetAsyncKeyState(VK_SNAPSHOT) & 1;
+        bool bCancel = CryGetAsyncKeyState(/*VK_CANCEL*/0x03) & 1;
+        bool bTimeDemoKey = CryGetAsyncKeyState(/*VK_SNAPSHOT*/0x2C) & 1;
 
         if (bCancel)
         {
@@ -2780,7 +2757,6 @@ void CTimeDemoRecorder::ProcessKeysInput()
             }
         }
     }
-#endif
 
     bool bPaused = false;
     if (m_bRecording || m_bPlaying)

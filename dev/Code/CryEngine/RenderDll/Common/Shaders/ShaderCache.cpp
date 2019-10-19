@@ -89,7 +89,7 @@ SShaderGenComb* CShaderMan::mfGetShaderGenInfo(const char* nmFX)
     for (i = 0; i < m_SGC.size(); i++)
     {
         c = &m_SGC[i];
-        if (!_stricmp(c->Name.c_str(), nmFX))
+        if (!azstricmp(c->Name.c_str(), nmFX))
         {
             break;
         }
@@ -162,7 +162,7 @@ static uint64 sGetGL(char** s, CCryNameR& name, uint32& nHWFlags)
         for (i = 0; i < pG->m_BitMask.Num(); i++)
         {
             SShaderGenBit* pBit = pG->m_BitMask[i];
-            if (!_stricmp(pBit->m_ParamName.c_str(), nameExt))
+            if (!azstricmp(pBit->m_ParamName.c_str(), nameExt))
             {
                 nGL |= pBit->m_Mask;
                 break;
@@ -191,17 +191,16 @@ static uint64 sGetGL(char** s, CCryNameR& name, uint32& nHWFlags)
     return nGL;
 }
 
-static uint64 sGetRT(char** s)
+static uint64 sGetFlag(char** s, SShaderGen* shaderGenInfo)
 {
-    uint32 i;
-
-    SShaderGen* pG = gRenDev->m_cEF.m_pGlobalExt;
-    if (!pG)
+    if (!shaderGenInfo)
     {
         return 0;
     }
-    uint64 nRT = 0;
-    char nm[128] = {0};
+
+    uint32 i = 0;
+    uint64 mask = 0;
+    char name[128] = {0};
     while (true)
     {
         char theChar;
@@ -210,36 +209,37 @@ static uint64 sGetRT(char** s)
         {
             if (theChar == ')' || theChar == '|')
             {
-                nm[n] = 0;
+                name[n] = 0;
                 break;
             }
-            nm[n++] = theChar;
+            name[n++] = theChar;
             ++*s;
         }
-        if (!nm[0])
+        if (!name[0])
         {
             break;
         }
-        for (i = 0; i < pG->m_BitMask.Num(); i++)
+        for (i = 0; i < shaderGenInfo->m_BitMask.Num(); i++)
         {
-            SShaderGenBit* pBit = pG->m_BitMask[i];
-            if (!_stricmp(pBit->m_ParamName.c_str(), nm))
+            SShaderGenBit* pBit = shaderGenInfo->m_BitMask[i];
+            if (!azstricmp(pBit->m_ParamName.c_str(), name))
             {
-                nRT |= pBit->m_Mask;
+                mask |= pBit->m_Mask;
                 break;
             }
         }
-        if (i == pG->m_BitMask.Num())
+
+        if (i == shaderGenInfo->m_BitMask.Num())
         {
-            //assert(0);
-            //      iLog->Log("WARNING: Couldn't find runtime flag '%s' (skipped)", nm);
+            AZ_Warning("ShaderCache", false, "Couldn't find runtime flag '%s' (skipped)", name);
         }
+
         if (**s == '|')
         {
             ++*s;
         }
     }
-    return nRT;
+    return mask;
 }
 
 static int sEOF(bool bFromFile, char* pPtr, AZ::IO::HandleType fileHandle)
@@ -343,7 +343,7 @@ struct CompareCombItem
 {
     bool operator()(const SCacheCombination& p1, const SCacheCombination& p2) const
     {
-        int n = _stricmp(p1.Name.c_str(), p2.Name.c_str());
+        int n = azstricmp(p1.Name.c_str(), p2.Name.c_str());
         if (n)
         {
             return n < 0;
@@ -353,7 +353,7 @@ struct CompareCombItem
         {
             return n > 0;
         }
-        return (_stricmp(p1.CacheName.c_str(), p2.CacheName.c_str()) < 0);
+        return (azstricmp(p1.CacheName.c_str(), p2.CacheName.c_str()) < 0);
     }
 };
 
@@ -433,7 +433,9 @@ void CShaderMan::mfInitShadersCache(byte bForLevel, FXShaderCacheCombinations* C
         }
         if (fileHandle == AZ::IO::InvalidHandle)
         {
-            AZ::IO::HandleType statusdstFileHandle = gEnv->pFileIO->Open(nameComb.c_str(), AZ::IO::OpenMode::ModeRead | AZ::IO::OpenMode::ModeBinary, statusdstFileHandle);
+            AZ::IO::HandleType statusdstFileHandle = AZ::IO::InvalidHandle;
+            gEnv->pFileIO->Open(nameComb.c_str(), AZ::IO::OpenMode::ModeRead | AZ::IO::OpenMode::ModeBinary, statusdstFileHandle);
+
             if (statusdstFileHandle != AZ::IO::InvalidHandle)
             {
                 gEnv->pFileIO->Close(statusdstFileHandle);
@@ -584,7 +586,7 @@ void CShaderMan::mfInitShadersCache(byte bForLevel, FXShaderCacheCombinations* C
                 goto end;
             }
             s = ++ss;
-            cmb.Ident.m_RTMask = sGetRT(&s);
+            cmb.Ident.m_RTMask = sGetFlag(&s, gRenDev->m_cEF.m_pGlobalExt);
 
             ss = strchr(s, '(');
             if (!ss)
@@ -621,6 +623,15 @@ void CShaderMan::mfInitShadersCache(byte bForLevel, FXShaderCacheCombinations* C
             }
             s = ss + 1;
             cmb.Ident.m_pipelineState.opaque = shGetHex64(s);
+
+            ss = strchr(s, '(');
+            if (!ss)
+            {
+                sSkipLine(s);
+                goto end;
+            }
+            s = ss + 1;
+            cmb.Ident.m_STMask = sGetFlag(&s, gRenDev->m_cEF.m_staticExt);
 
             s = strchr(s, '(');
             if (s)
@@ -697,7 +708,7 @@ static void sResetDepend_r(SShaderGen* pGen, SShaderGenBit* pBit, SCacheCombinat
         for (j = 0; j < pGen->m_BitMask.Num(); j++)
         {
             SShaderGenBit* pBit1 = pGen->m_BitMask[j];
-            if (!_stricmp(pBit1->m_ParamName.c_str(), c))
+            if (!azstricmp(pBit1->m_ParamName.c_str(), c))
             {
                 cm.Ident.m_RTMask &= ~pBit1->m_Mask;
                 sResetDepend_r(pGen, pBit1, cm);
@@ -721,7 +732,7 @@ static void sSetDepend_r(SShaderGen* pGen, SShaderGenBit* pBit, SCacheCombinatio
         for (j = 0; j < pGen->m_BitMask.Num(); j++)
         {
             SShaderGenBit* pBit1 = pGen->m_BitMask[j];
-            if (!_stricmp(pBit1->m_ParamName.c_str(), c))
+            if (!azstricmp(pBit1->m_ParamName.c_str(), c))
             {
                 cm.Ident.m_RTMask |= pBit1->m_Mask;
                 sSetDepend_r(pGen, pBit1, cm);
@@ -922,7 +933,7 @@ void CShaderMan::mfAddLTCombination(SCacheCombination* cmb, FXShaderCacheCombina
     assert(len < sizeof(str));
     cry_strcpy(str, cmb->CacheName.c_str(), len);
     cry_strcat(str, "(");
-    sprintf(sLT, "%x", (uint32)dwL);
+    azsprintf(sLT, "%x", (uint32)dwL);
     cry_strcat(str, sLT);
     c = strchr(&c[2], ')');
     cry_strcat(str, c);
@@ -1083,11 +1094,11 @@ void CShaderMan::mfAddRTCombinations(FXShaderCacheCombinations& CmbsMapSrc, FXSh
         {
             continue;
         }
-        if (_stricmp(&c[1], str2))
+        if (azstricmp(&c[1], str2))
         {
             continue;
         }
-        /*if (!_stricmp(str2, "MetalReflVS"))
+        /*if (!azstricmp(str2, "MetalReflVS"))
         {
           if (cmb->nGL == 0x1093)
           {
@@ -1110,6 +1121,28 @@ void CShaderMan::mfAddRTCombinations(FXShaderCacheCombinations& CmbsMapSrc, FXSh
 }
 #endif // CONSOLE
 
+void GenerateMaskString(SShaderGen* shaderInfo, uint64 mask, stack_string& maskStr)
+{
+    if (!shaderInfo || !mask)
+    {
+        return;
+    }
+
+    for (unsigned i = 0; i < shaderInfo->m_BitMask.Num(); ++i)
+    {
+        SShaderGenBit* pBit = shaderInfo->m_BitMask[i];
+        if (pBit->m_Mask & mask)
+        {
+            if (!maskStr.empty())
+            {
+                maskStr += "|";
+            }
+            maskStr += pBit->m_ParamName.c_str();
+        }
+    }
+}
+
+
 void CShaderMan::mfInsertNewCombination(SShaderCombIdent& Ident, EHWShaderClass eCL, const char* name, int nID, string* Str, byte bStore)
 {
     char str[2048];
@@ -1120,6 +1153,7 @@ void CShaderMan::mfInsertNewCombination(SShaderCombIdent& Ident, EHWShaderClass 
 
     stack_string sGL;
     stack_string sRT;
+    stack_string staticMask;
     uint32 i, j;
     SShaderGenComb* c = NULL;
     if (Ident.m_GLMask)
@@ -1160,31 +1194,16 @@ void CShaderMan::mfInsertNewCombination(SShaderCombIdent& Ident, EHWShaderClass 
             }
         }
     }
-    if (Ident.m_RTMask)
-    {
-        SShaderGen* pG = m_pGlobalExt;
-        if (pG)
-        {
-            for (i = 0; i < pG->m_BitMask.Num(); i++)
-            {
-                SShaderGenBit* pBit = pG->m_BitMask[i];
-                if (pBit->m_Mask & Ident.m_RTMask)
-                {
-                    if (!sRT.empty())
-                    {
-                        sRT += "|";
-                    }
-                    sRT += pBit->m_ParamName.c_str();
-                }
-            }
-        }
-    }
+
+    GenerateMaskString(m_pGlobalExt, Ident.m_RTMask, sRT);
+    GenerateMaskString(m_staticExt, Ident.m_STMask, staticMask);
+
     uint32 nLT = Ident.m_LightMask;
     if (bStore == 1 && Ident.m_LightMask)
     {
         nLT = 1;
     }
-    sprintf(str, "<%d>%s(%s)(%s)(%x)(%x)(%x)(%llx)(%s)", SHADER_LIST_VER, name, sGL.c_str(), sRT.c_str(), nLT, Ident.m_MDMask, Ident.m_MDVMask, Ident.m_pipelineState.opaque, CHWShader::mfClassString(eCL));
+    azsprintf(str, "<%d>%s(%s)(%s)(%x)(%x)(%x)(%llx)(%s)(%s)", SHADER_LIST_VER, name, sGL.c_str(), sRT.c_str(), nLT, Ident.m_MDMask, Ident.m_MDVMask, Ident.m_pipelineState.opaque, staticMask.c_str(), CHWShader::mfClassString(eCL));
     if (!bStore)
     {
         if (Str)
@@ -1232,94 +1251,14 @@ void CShaderMan::mfInsertNewCombination(SShaderCombIdent& Ident, EHWShaderClass 
     }
 }
 
-string CShaderMan::mfGetShaderCompileFlags(EHWShaderClass eClass, UPipelineState pipelineState) const
-{
-    // NOTE: when updating remote compiler folders, please ensure folders path is matching
-    const char* pCompilerOrbis = "%s %s \"%s\" \"%s\""; // ACCEPTED_USE
-
-    const char* pCompilerDurango = "/nologo /E %s /T %s /Zpr /Gec /Gis /Fo \"%s\" \"%s\""; // ACCEPTED_USE
-
-    const char* pCompilerD3D11 = "/nologo /E %s /T %s /Zpr /Gec /Fo \"%s\" \"%s\"";
-#if defined(MAC)
-    const char* pCompilerGL4 = "-lang=410 -flags=102145 -fxc=\"%s /nologo /E %s /T %s /Zpr /Gec /Fo\" -out=\"%s\" -in=\"%s\"";
-#else
-    const char* pCompilerGL4 = "-lang=440 -flags=102145 -fxc=\"%s /nologo /E %s /T %s /Zpr /Gec /Fo\" -out=\"%s\" -in=\"%s\"";
-#endif
-    
-    const char* pCompilerGLES3 =  "";
-#if defined(OPENGL_ES)
-    uint32 glVersion = RenderCapabilities::GetDeviceGLVersion();
-    if (glVersion == DXGLES_VERSION_30)
-    {
-        pCompilerGLES3 = "-lang=es300 -flags=495361 -fxc=\"%s /nologo /E %s /T %s /Zpr /Gec /Fo\" -out=\"%s\" -in=\"%s\"";
-    }
-    else
-    {
-        pCompilerGLES3 = "-lang=es310 -flags=364289 -fxc=\"%s /nologo /E %s /T %s /Zpr /Gec /Fo\" -out=\"%s\" -in=\"%s\"";
-    }
-#endif
-    
-    //To enable half float support in the cross compiler set the flags value to (flags | 0x40000)
-    const char* pCompilerMETAL = "-lang=metal -flags=7937 -fxc=\"%s /nologo /E %s /T %s /Zpr /Gec /Fo\" -out=\"%s\" -in=\"%s\"";
-
-    if (CRenderer::CV_r_shadersdebug == 3)
-    {
-        // Set debug information
-        pCompilerD3D11 = "/nologo /E %s /T %s /Zpr /Gec /Zi /Od /Fo \"%s\" \"%s\"";
-        pCompilerDurango = "/nologo /E %s /T %s /Zpr /Gec /Gis /Zi /Od /Fo \"%s\" \"%s\""; // ACCEPTED_USE
-    }
-    else if (CRenderer::CV_r_shadersdebug == 4)
-    {
-        // Set debug information, optimized shaders
-        pCompilerD3D11 = "/nologo /E %s /T %s /Zpr /Gec /Zi /O3 /Fo \"%s\" \"%s\"";
-        pCompilerDurango = "/nologo /E %s /T %s /Zpr /Gec /Gis /Zi /O3 /Fo \"%s\" \"%s\""; // ACCEPTED_USE
-    }
-
-    if (CParserBin::m_nPlatform == SF_D3D11)
-    {
-        return pCompilerD3D11;
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_ORBIS) // ACCEPTED_USE
-    {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(ShaderCache_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-        return pCompilerOrbis; // ACCEPTED_USE
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_DURANGO) // ACCEPTED_USE
-    {
-        return pCompilerDurango; // ACCEPTED_USE
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_GL4)
-    {
-        return pCompilerGL4;
-    }
-    else if (CParserBin::m_nPlatform == SF_GLES3)
-    {
-        return pCompilerGLES3;
-    }
-    else if (CParserBin::m_nPlatform == SF_METAL)
-    {
-        return pCompilerMETAL;
-    }
-    else
-    {
-        CryFatalError("Compiling shaders for unsupported platform");
-        return "";
-    }
-}
-
 inline bool sCompareComb(const SCacheCombination& a, const SCacheCombination& b)
 {
     int32 dif;
 
     char shader1[128], shader2[128];
     char* tech1 = NULL, * tech2 = NULL;
-    strcpy(shader1, a.Name.c_str());
-    strcpy(shader2, b.Name.c_str());
+    azstrcpy(shader1, 128, a.Name.c_str());
+    azstrcpy(shader2, 128, b.Name.c_str());
     char* c = strchr(shader1, '@');
     if (!c)
     {
@@ -1343,7 +1282,7 @@ inline bool sCompareComb(const SCacheCombination& a, const SCacheCombination& b)
         tech2 = c + 1;
     }
 
-    dif = _stricmp(shader1, shader2);
+    dif = azstricmp(shader1, shader2);
     if (dif != 0)
     {
         return dif < 0;
@@ -1360,7 +1299,7 @@ inline bool sCompareComb(const SCacheCombination& a, const SCacheCombination& b)
 
     if (tech1 != NULL && tech2 != NULL)
     {
-        dif = _stricmp(tech1, tech2);
+        dif = azstricmp(tech1, tech2);
         if (dif != 0)
         {
             return dif < 0;
@@ -1370,6 +1309,11 @@ inline bool sCompareComb(const SCacheCombination& a, const SCacheCombination& b)
     if (a.Ident.m_GLMask != b.Ident.m_GLMask)
     {
         return a.Ident.m_GLMask < b.Ident.m_GLMask;
+    }
+
+    if (a.Ident.m_STMask != b.Ident.m_STMask)
+    {
+        return a.Ident.m_STMask < b.Ident.m_STMask;
     }
 
     if (a.Ident.m_RTMask != b.Ident.m_RTMask)
@@ -1449,12 +1393,12 @@ void CShaderMan::AddGLCombination(FXShaderCacheCombinations& CmbsMap, SCacheComb
     }
     else
     {
-        strcpy(name, st);
+        azstrcpy(name, 128, st);
     }
 #ifdef __GNUC__
     sprintf(str, "%s(%llx)(%x)(%x)", name, cmb.Ident.m_GLMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask);
 #else
-    sprintf(str, "%s(%I64x)(%x)(%x)", name, cmb.Ident.m_GLMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask);
+    azsprintf(str, "%s(%I64x)(%x)(%x)", name, cmb.Ident.m_GLMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask);
 #endif
     CCryNameR nm = CCryNameR(str);
     FXShaderCacheCombinationsItor it = CmbsMap.find(nm);
@@ -1469,11 +1413,7 @@ void CShaderMan::AddGLCombination(FXShaderCacheCombinations& CmbsMap, SCacheComb
 void CShaderMan::AddCombination(SCacheCombination& cmb,  FXShaderCacheCombinations& CmbsMap, CHWShader* pHWS)
 {
     char str[2048];
-#ifdef __GNUC__
-    sprintf(str, "%s(%llx)(%llx)(%d)(%d)(%d)(%llx)", cmb.Name.c_str(), cmb.Ident.m_GLMask, cmb.Ident.m_RTMask, cmb.Ident.m_LightMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask, cmb.Ident.m_pipelineState.opaque);
-#else
-    sprintf(str, "%s(%I64x)(%I64x)(%d)(%d)(%d)(%llx)", cmb.Name.c_str(), cmb.Ident.m_GLMask, cmb.Ident.m_RTMask, cmb.Ident.m_LightMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask, cmb.Ident.m_pipelineState.opaque);
-#endif
+    azsprintf(str, "%s(%llx)(%llx)(%d)(%d)(%d)(%llx)(%llx)", cmb.Name.c_str(), cmb.Ident.m_GLMask, cmb.Ident.m_RTMask, cmb.Ident.m_LightMask, cmb.Ident.m_MDMask, cmb.Ident.m_MDVMask, cmb.Ident.m_pipelineState.opaque, cmb.Ident.m_STMask);
     CCryNameR nm = CCryNameR(str);
     FXShaderCacheCombinationsItor it = CmbsMap.find(nm);
     if (it == CmbsMap.end())
@@ -1620,6 +1560,7 @@ void CShaderMan::AddRTCombinations(FXShaderCacheCombinations& CmbsMap, CHWShader
     cmb.Ident.m_MDMask = 0;
     cmb.Ident.m_MDVMask = 0;
     cmb.Ident.m_RTMask = 0;
+    cmb.Ident.m_STMask = 0;
 
     int nIterations = 1 << nBits;
     for (i = 0; i < nIterations; i++)
@@ -1710,7 +1651,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
         for (int i = 0; i < Cmbs.size(); i++)
         {
             SCacheCombination* cmb = &Cmbs[i];
-            strcpy(str1, cmb->Name.c_str());
+            azstrcpy(str1, 128, cmb->Name.c_str());
             char* c = strchr(str1, '@');
             if (!c)
             {
@@ -1735,6 +1676,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
             gRenDev->m_RP.m_FlagsShader_LT = 0;
             gRenDev->m_RP.m_FlagsShader_MD = 0;
             gRenDev->m_RP.m_FlagsShader_MDV = 0;
+            m_staticFlags = cmb->Ident.m_STMask;
             CShader* pSH = CShaderMan::mfForName(str1, 0, NULL, cmb->Ident.m_GLMask);
 
             gRenDev->m_RP.m_pShader = pSH;
@@ -1764,7 +1706,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
             for (; i < Cmbs.size(); i++)
             {
                 SCacheCombination* cmba = &Cmbs[i];
-                strcpy(str2, cmba->Name.c_str());
+                azstrcpy(str2, 128, cmba->Name.c_str());
                 c = strchr(str2, '@');
                 if (!c)
                 {
@@ -1775,7 +1717,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
                 {
                     *c = 0;
                 }
-                if (_stricmp(str1, str2) || cmb->Ident.m_GLMask != cmba->Ident.m_GLMask)
+                if (azstricmp(str1, str2) || cmb->Ident.m_GLMask != cmba->Ident.m_GLMask || cmb->Ident.m_STMask != cmba->Ident.m_STMask)
                 {
                     break;
                 }
@@ -1788,7 +1730,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
             for (FXShaderCacheCombinationsItor itor = CmbsMapRTSrc.begin(); itor != CmbsMapRTSrc.end(); itor++)
             {
                 SCacheCombination* cmb = &itor->second;
-                strcpy(str2, cmb->Name.c_str());
+                azstrcpy(str2, 128, cmb->Name.c_str());
                 FXShaderCacheCombinationsItor it = CmbsMapRTDst.find(cmb->CacheName);
                 if (it == CmbsMapRTDst.end())
                 {
@@ -1860,7 +1802,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
                         for (int i = 0; i < 2; i++)
                         {
                             CHWShader* shader = shaders[i];
-                            if (shader && (!m_szShaderPrecache || !_stricmp(m_szShaderPrecache, shader->m_EntryFunc.c_str()) != 0))
+                            if (shader && (!m_szShaderPrecache || !azstricmp(m_szShaderPrecache, shader->m_EntryFunc.c_str()) != 0))
                             {
                                 uint64 nFlagsOrigShader_RT = gRenDev->m_RP.m_FlagsShader_RT & shader->m_nMaskAnd_RT | shader->m_nMaskOr_RT;
                                 uint64 nFlagsOrigShader_GL = shader->m_nMaskGenShader;
@@ -1886,7 +1828,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
                             for (int i = 0; i < 4; i++)
                             {
                                 CHWShader* shader = d3d11Shaders[i];
-                                if (shader && (!m_szShaderPrecache || !_stricmp(m_szShaderPrecache, shader->m_EntryFunc.c_str()) != 0))
+                                if (shader && (!m_szShaderPrecache || !azstricmp(m_szShaderPrecache, shader->m_EntryFunc.c_str()) != 0))
                                 {
                                     shader->mfSetV(nFlags);
                                 }
@@ -1962,20 +1904,6 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
         c->Release();
     }
 
-    string sShaderPath(gRenDev->m_cEF.m_szCachePath);
-    sShaderPath += gRenDev->m_cEF.m_ShadersCache;
-
-    //CResFileLookupDataMan kLookupDataMan;
-    //kDirDataMan.LoadData(sShaderPath + "direntrydata.bin", CParserBin::m_bEndians);
-    //GenerateResFileDirData(sShaderPath, &kLookupDataMan);
-    //kLookupDataMan.SaveData(sShaderPath + "lookupdata.bin", CParserBin::m_bEndians);
-
-    /*FILE *FP = gEnv->pCryPak->FOpen("Shaders/Cache/ShaderListDone", "w");
-    if (FP)
-    {
-      gEnv->pCryPak->FPrintf(FP, "done: %d", m_nCombinationsProcess);
-      gEnv->pCryPak->FClose(FP);
-    }*/
     CHWShader::m_ShaderCacheList.clear();
 
     m_eCacheMode = eSC_Normal;
@@ -1998,7 +1926,7 @@ void CShaderMan::_PrecacheShaderList(bool bStatsOnly)
 
 #endif
 
-void CHWShader::mfGenName(uint64 GLMask, uint64 RTMask, uint32 LightMask, uint32 MDMask, uint32 MDVMask, uint64 PSS, EHWShaderClass eClass, char* dstname, int nSize, byte bType)
+void CHWShader::mfGenName(uint64 GLMask, uint64 RTMask, uint32 LightMask, uint32 MDMask, uint32 MDVMask, uint64 PSS, uint64 STMask, EHWShaderClass eClass, char* dstname, int nSize, byte bType)
 {
     assert(dstname);
     dstname[0] = 0;
@@ -2006,45 +1934,42 @@ void CHWShader::mfGenName(uint64 GLMask, uint64 RTMask, uint32 LightMask, uint32
     char str[32];
     if (bType != 0 && GLMask)
     {
-#if defined(__GNUC__)
-        sprintf(str, "(GL%llx)", GLMask);
-#else
-        sprintf(str, "(GL%I64x)", GLMask);
-#endif
+        azsprintf(str, "(GL%llx)", GLMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0)
     {
-#if defined(__GNUC__)
-        sprintf(str, "(RT%llx)", RTMask);
-#else
-        sprintf(str, "(RT%I64x)", RTMask);
-#endif
+        azsprintf(str, "(RT%llx)", RTMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0 && LightMask)
     {
-        sprintf(str, "(LT%x)", LightMask);
+        azsprintf(str, "(LT%x)", LightMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0 && MDMask)
     {
-        sprintf(str, "(MD%x)", MDMask);
+        azsprintf(str, "(MD%x)", MDMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0 && MDVMask)
     {
-        sprintf(str, "(MDV%x)", MDVMask);
+        azsprintf(str, "(MDV%x)", MDVMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0 && PSS)
     {
-        sprintf(str, "(PSS%llx)", PSS);
+        azsprintf(str, "(PSS%llx)", PSS);
+        cry_strcat(dstname, nSize, str);
+    }
+    if (bType != 0 && STMask)
+    {
+        azsprintf(str, "(ST%llx)", STMask);
         cry_strcat(dstname, nSize, str);
     }
     if (bType != 0)
     {
-        sprintf(str, "(%s)", mfClassString(eClass));
+        azsprintf(str, "(%s)", mfClassString(eClass));
         cry_strcat(dstname, nSize, str);
     }
 }
@@ -2053,6 +1978,7 @@ void CHWShader::mfGenName(uint64 GLMask, uint64 RTMask, uint32 LightMask, uint32
 
 void CShaderMan::mfPrecacheShaders(bool bStatsOnly)
 {
+    AZ_Assert(CRenderer::CV_r_shadersPlatform != AZ::PLATFORM_MAX, "You must set a shaders platform (r_shadersPlatform) before precaching the shaders");
     CHWShader::mfFlushPendedShadersWait(-1);
 
     if (CRenderer::CV_r_shadersorbis) // ACCEPTED_USE
@@ -2145,10 +2071,10 @@ void CShaderMan::mfPrecacheShaders(bool bStatsOnly)
         mfPreloadShaderExts();
         _PrecacheShaderList(bStatsOnly);
     }
-    // Confetti Begin: Nicholas Baldwin: adding metal shader language support
     else
     if (CRenderer::CV_r_shadersMETAL)
     {
+        AZ_Assert(CRenderer::CV_r_shadersPlatform == AZ::PLATFORM_APPLE_OSX || CRenderer::CV_r_shadersPlatform == AZ::PLATFORM_APPLE_IOS, "Invalid platform (%d) for metal shaders", CRenderer::CV_r_shadersPlatform);
         gRenDev->m_bDeviceSupportsFP16Filter = true;
         gRenDev->m_bDeviceSupportsFP16Separate = false;
         gRenDev->m_bDeviceSupportsTessellation = false;
@@ -2164,11 +2090,92 @@ void CShaderMan::mfPrecacheShaders(bool bStatsOnly)
         mfPreloadShaderExts();
         _PrecacheShaderList(bStatsOnly);
     }
-    // Confetti End: Nicholas Baldwin: adding metal shader language support
-
+    
+#if defined(AZ_PLATFORM_WINDOWS)
+    CRenderer::CV_r_shadersPlatform = AZ::PLATFORM_WINDOWS_64;
     CParserBin::SetupForD3D11();
+#elif defined(AZ_PLATFORM_MAC)
+    CRenderer::CV_r_shadersPlatform = AZ::PLATFORM_APPLE_OSX;
+    CParserBin::SetupForMETAL();
+#endif
 
     gRenDev->m_cEF.m_Bin.InvalidateCache();
+}
+
+void CShaderMan::mfGetShaderList()
+{
+    if (CRenderer::CV_r_shadersorbis) // ACCEPTED_USE
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForOrbis(); // ACCEPTED_USE
+        CryLogAlways("\nGet ShaderList_Provo.txt...");
+    }
+    else
+    if (CRenderer::CV_r_shadersdurango) // ACCEPTED_USE
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForDurango(); // ACCEPTED_USE
+        CryLogAlways("\nGet ShaderList_Xenia.txt...");
+    }
+    else
+    if (CRenderer::CV_r_shadersdx11)
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForD3D11();
+        CryLogAlways("\nGet shader list for D3D11...");
+    }
+    else
+    if (CRenderer::CV_r_shadersGL4)
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForGL4();
+        CryLogAlways("\nGet shader list for GLSL 4...");
+    }
+    else
+    if (CRenderer::CV_r_shadersGLES3)
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForGLES3();
+        CryLogAlways("\nGet shader list for GLSL-ES 3...");
+    }
+    else
+    if (CRenderer::CV_r_shadersMETAL)
+    {
+        CParserBin::m_bShaderCacheGen = true;
+        CParserBin::SetupForMETAL();
+        CryLogAlways("\nGet shader list for METAL...");
+    }
+
+    std::vector<uint8> Data;
+    if (NRemoteCompiler::ESOK == NRemoteCompiler::CShaderSrv::Instance().GetShaderList(Data))
+    {
+        CryLogAlways("\nGet shader list Succeeded...\nStart Writing shader list to @user@\\cache\\shaders\\shaderlist.txt ...");
+        mfCloseShadersCache(0);
+        mfCloseShadersCache(1);
+        AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen("@user@\\cache\\shaders\\shaderlist.txt", "w+b");
+        if (fileHandle != AZ::IO::InvalidHandle)
+        {
+            size_t writtenSoFar = 0;
+            size_t remaining = Data.size();
+            while (remaining)
+            {
+                writtenSoFar += gEnv->pCryPak->FWrite(Data.data() + writtenSoFar, 1, remaining, fileHandle);
+                remaining -= writtenSoFar;
+            }
+            gEnv->pCryPak->FClose(fileHandle);
+            CryLogAlways("\nFinished writing shader list to @user@\\cache\\shaders\\shaderlist.txt ...");
+        }
+        else
+        {
+            CryLogAlways("\nFailed writing shader list to @user@\\cache\\shaders\\shaderlist.txt ...");
+        }
+    }
+    else
+    {
+        CryLogAlways("\nGet shader list Failed...");
+    }
+    
+    CParserBin::SetupForD3D11();
 }
 
 static SResFileLookupData* sStoreLookupData(CResFileLookupDataMan& LevelLookup, CResFile* pRF, uint32 CRC, float fVersion)
@@ -2312,7 +2319,7 @@ void CShaderMan::_MergeShaders()
 
     std::vector<CCryNameR> NM;
     std::vector<SNameData> Names;
-    mfGatherFilesList(m_ShadersMergeCachePath, NM, 0, true);
+    mfGatherFilesList(m_ShadersMergeCachePath.c_str(), NM, 0, true);
     for (i = 0; i < NM.size(); i++)
     {
         SNameData dt;
@@ -2332,8 +2339,12 @@ void CShaderMan::_MergeShaders()
         const char* szNameA = Names[i].Name.c_str();
         iLog->Log(" Merging shader resource '%s'...", szNameA);
         char szDrv[16], szDir[256], szName[256], szExt[32], szName1[256], szName2[256];
+#ifdef AZ_COMPILER_MSVC
+        _splitpath_s(szNameA, szDrv, szDir, szName, szExt);
+#else
         _splitpath(szNameA, szDrv, szDir, szName, szExt);
-        sprintf(szName1, "%s%s", szName, szExt);
+#endif
+        azsprintf(szName1, "%s%s", szName, szExt);
         uint32 nLen = strlen(szName1);
         pCache = CHWShader::mfInitCache(szNameA, NULL, false, CRC32, false);
         SResFileLookupData* pData;
@@ -2361,9 +2372,13 @@ void CShaderMan::_MergeShaders()
                 continue;
             }
             const char* szNameB = Names[j].Name.c_str();
+#ifdef AZ_COMPILER_MSVC
+            _splitpath_s(szNameB, szDrv, szDir, szName, szExt);
+#else
             _splitpath(szNameB, szDrv, szDir, szName, szExt);
-            sprintf(szName2, "%s%s", szName, szExt);
-            if (!_stricmp(szName1, szName2))
+#endif
+            azsprintf(szName2, "%s%s", szName, szExt);
+            if (!azstricmp(szName1, szName2))
             {
                 Names[j].bProcessed = true;
                 SShaderCache* pCache1 = CHWShader::mfInitCache(szNameB, NULL, false, 0, false);
@@ -2378,7 +2393,7 @@ void CShaderMan::_MergeShaders()
             }
         }
         char szDest[256];
-        cry_strcpy(szDest, m_ShadersCache);
+        cry_strcpy(szDest, m_ShadersCache.c_str());
         const char* p = &szNameA[strlen(szNameA) - nLen - 2];
         while (*p != '/' && *p != '\\')
         {
@@ -2390,7 +2405,7 @@ void CShaderMan::_MergeShaders()
         pRes->mfClose();
         pRes->mfOpen(RA_CREATE, &gRenDev->m_cEF.m_ResLookupDataMan[CACHE_USER]);
 
-        SResFileLookupData* pLookup = pRes->GetLookupData(true, CRC32, (float)FX_CACHE_VER);
+        SResFileLookupData* pLookup = pRes->GetLookupData(true, CRC32, FX_CACHE_VER);
         pRes->mfFlush();
 
         int nDeviceShadersCounter = 0x10000000;
@@ -2429,7 +2444,7 @@ void CShaderMan::_MergeShaders()
         pCache->Release();
     }
 
-    mfOptimiseShaders(gRenDev->m_cEF.m_ShadersCache, true);
+    mfOptimiseShaders(gRenDev->m_cEF.m_ShadersCache.c_str(), true);
 
     float t1 = gEnv->pTimer->GetAsyncCurTime();
     CryLog("All shaders files merged in %.2f seconds", t1 - t0);
@@ -2540,12 +2555,12 @@ bool CShaderMan::mfPreloadBinaryShaders()
     iSystem->GetIPak()->LoadPakToMemory("Engine/Shaders.pak", ICryPak::eInMemoryPakLocale_CPU);
 #endif
 
-    string szPath = m_ShadersCache;
+    AZStd::string allFilesPath = m_ShadersCache + "/*.*";
 
     struct _finddata_t fileinfo;
     intptr_t handle;
 
-    handle = gEnv->pCryPak->FindFirst (szPath + "/*.*", &fileinfo);
+    handle = gEnv->pCryPak->FindFirst (allFilesPath.c_str(), &fileinfo);
     if (handle == -1)
     {
         return false;
@@ -2568,12 +2583,12 @@ bool CShaderMan::mfPreloadBinaryShaders()
             continue;
         }
         const char* szExt = fpGetExtension(fileinfo.name);
-        if (!_stricmp(szExt, ".cfib"))
+        if (!azstricmp(szExt, ".cfib"))
         {
             FilesCFI.push_back(fileinfo.name);
         }
         else
-        if (!_stricmp(szExt, ".cfxb"))
+        if (!azstricmp(szExt, ".cfxb"))
         {
             FilesCFX.push_back(fileinfo.name);
         }
@@ -2599,7 +2614,7 @@ bool CShaderMan::mfPreloadBinaryShaders()
             cry_strcpy(sName, file.c_str());
             fpStripExtension(sName, sName);
             SShaderBin* pBin = m_Bin.GetBinShader(sName, true, 0);
-            assert(pBin);
+            AZ_Error("Rendering", pBin, "Error pre-loading binary shader %s", file.c_str());
         }
     }
 
@@ -2616,7 +2631,7 @@ bool CShaderMan::mfPreloadBinaryShaders()
             cry_strcpy(sName, file.c_str());
             fpStripExtension(sName, sName);
             SShaderBin* pBin = m_Bin.GetBinShader(sName, false, 0);
-            assert(pBin);
+            AZ_Error("Rendering", pBin, "Error pre-loading binary shader %s", file.c_str());
         }
     }
 

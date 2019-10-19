@@ -159,7 +159,7 @@ void CMatInfo::ShutDown()
     bool haveReferenceToSubmaterialShaderResources = false;
     for (auto& subMaterial : m_subMtls)
     {
-        if (this->GetShaderItem().m_pShaderResources == subMaterial->GetShaderItem().m_pShaderResources)
+        if (subMaterial && this->GetShaderItem().m_pShaderResources == subMaterial->GetShaderItem().m_pShaderResources)
         {
             haveReferenceToSubmaterialShaderResources = true;
             break;
@@ -359,8 +359,21 @@ ISurfaceType* CMatInfo::GetSurfaceType()
 //////////////////////////////////////////////////////////////////////////
 void CMatInfo::SetSubMtlCount(int numSubMtl)
 {
-    AUTO_LOCK(GetSubMaterialResizeLock());
-    m_Flags |= MTL_FLAG_MULTI_SUBMTL;
+    AUTO_LOCK(GetSubMaterialResizeLock());    
+    if (numSubMtl > 0)
+    {
+        m_Flags |= MTL_FLAG_MULTI_SUBMTL;
+    }
+    else if(numSubMtl == 0)
+    {
+        m_Flags &= ~MTL_FLAG_MULTI_SUBMTL;
+    }
+    else
+    {
+        AZ_Assert(false, "SetSubMtlCount called with negative value for material %s.", m_sMaterialName.c_str());
+        return;
+    }
+
     m_subMtls.resize(numSubMtl);
 }
 
@@ -466,7 +479,16 @@ bool CMatInfo::AreTexturesStreamedIn(const int nMinPrecacheRoundIds[MAX_STREAM_P
 //////////////////////////////////////////////////////////////////////////
 void CMatInfo::SetSubMtl(int nSlot, _smart_ptr<IMaterial> pMtl)
 {
-    assert(nSlot >= 0 && nSlot < (int)m_subMtls.size());
+    if (nSlot < 0 || nSlot >= static_cast<int>(m_subMtls.size()))
+    {
+        AZ_Error("Rendering", false, "SetSubMtl inserting material '%s' outside the range of m_subMtls in '%s'. Call SetSubMtlCount first to increase the size of m_subMtls.", pMtl->GetName(), m_sMaterialName.c_str());
+        return;
+    }
+    if (pMtl && pMtl->IsMaterialGroup())
+    {
+        AZ_Error("Rendering", false, "SetSubMtl attempting to insert a material group '%s' as a sub-material of '%s'. Only individual materials can be sub-materials.", pMtl->GetName(), m_sMaterialName.c_str());
+        return;
+    }
     m_subMtls[nSlot] = (CMatInfo*)pMtl.get();
 }
 
@@ -746,7 +768,8 @@ bool CMatInfo::SetGetMaterialParamFloat(const char* sParamName, float& v, bool b
         return false;
     }
 
-    bool bEmissive = pRendShaderRes->IsEmissive();
+    const bool bEmissive = pRendShaderRes->IsEmissive();
+    const bool bTransparent = pRendShaderRes->IsTransparent();
     bool bOk = GetMaterialHelpers().SetGetMaterialParamFloat(*pRendShaderRes, sParamName, v, bGet);
 
     if (!bOk && allowShaderParam)
@@ -758,7 +781,7 @@ bool CMatInfo::SetGetMaterialParamFloat(const char* sParamName, float& v, bool b
             for (int i = 0; i < shaderParams.size(); ++i)
             {
                 SShaderParam& param = shaderParams[i];
-                if (_stricmp(param.m_Name, sParamName) == 0)
+                if (azstricmp(param.m_Name.c_str(), sParamName) == 0)
                 {
                     v = 0.0f;
 
@@ -804,7 +827,10 @@ bool CMatInfo::SetGetMaterialParamFloat(const char* sParamName, float& v, bool b
     if (bOk && m_shaderItem.m_pShader && !bGet)
     {
         // since "glow" is a post effect it needs to be updated here
-        if (bEmissive != pRendShaderRes->IsEmissive())
+        // If unit opacity changed, the transparency preprocess flag must be updated.  (This causes SShaderItem::Update() -> SShaderItem::PostLoad(),
+        // updating the transparency preprocess flag (SShaderItem::m_nPreprocessFlags, FB_TRANSPARENT) based on CShaderResources::IsTransparent())
+        if (bEmissive != pRendShaderRes->IsEmissive() ||
+            bTransparent != pRendShaderRes->IsTransparent())
         {
             GetRenderer()->ForceUpdateShaderItem(&m_shaderItem, this);
         }
@@ -891,7 +917,7 @@ bool CMatInfo::SetGetMaterialParamVec4(const char* sParamName, Vec4& v, bool bGe
             for (int i = 0; i < shaderParams.size(); ++i)
             {
                 SShaderParam& param = shaderParams[i];
-                if (_stricmp(param.m_Name, sParamName) == 0)
+                if (azstricmp(param.m_Name.c_str(), sParamName) == 0)
                 {
                     if (param.m_Type == eType_VECTOR)
                     {
@@ -944,7 +970,17 @@ bool CMatInfo::IsDirty() const
     {
         for (int i = 0 ; i <  m_subMtls.size(); i ++)
         {
-            isChildrenDirty |= m_subMtls[i]->IsDirty();
+            if (m_subMtls[i])
+            {
+                if (m_subMtls[i]->IsMaterialGroup())
+                {
+                    AZ_Assert(!m_subMtls[i]->IsMaterialGroup(), "Sub-material '%s' in material '%s' is a material group. Material groups cannot be sub-materials. This could lead to a cycle and infinite recursion in CMatInfo::IsDirty().", m_subMtls[i]->GetName(), m_sMaterialName.c_str());
+                    // Exit early to prevent a possible infinite recursion.
+                    // Return true to conservatively indicate that this material should be re-loaded
+                    return true;
+                }
+                isChildrenDirty |= m_subMtls[i]->IsDirty();
+            }
         }
     }
     return m_isDirty | isChildrenDirty;
@@ -1194,7 +1230,7 @@ void CMatInfo::DisableTextureStreaming()
                     }
 
                     // Calling load texture here will not actually re-create/re-load an existing texture. It will simply toggle streaming off
-                    ITexture*       texture = gEnv->pRenderer->EF_LoadTexture(pTextureRes->m_Name, textureFlags);
+                    ITexture*       texture = gEnv->pRenderer->EF_LoadTexture(pTextureRes->m_Name.c_str(), textureFlags);
                     // Call release to decrement the ref count, otherwise the texture will leak when switching between maps
                     if (texture)
                     {

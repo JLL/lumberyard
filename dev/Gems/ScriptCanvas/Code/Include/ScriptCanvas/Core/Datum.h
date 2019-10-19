@@ -50,7 +50,10 @@ namespace ScriptCanvas
         };
 
         // calls a function and converts the result to a ScriptCanvas type, if necessary
-        AZ_INLINE static AZ::Outcome<Datum, AZStd::string> CallBehaviorContextMethodResult(AZ::BehaviorMethod* method, const AZ::BehaviorParameter* resultType, AZ::BehaviorValueParameter* params, unsigned int numExpectedArgs);
+        static AZ::Outcome<Datum, AZStd::string> CallBehaviorContextMethodResult(const AZ::BehaviorMethod* method, const AZ::BehaviorParameter* resultType, AZ::BehaviorValueParameter* params, unsigned int numExpectedArgs);
+        static AZ::Outcome<void, AZStd::string> CallBehaviorContextMethod(const AZ::BehaviorMethod* method, AZ::BehaviorValueParameter* params, unsigned int numExpectedArgs);
+
+        static bool IsValidDatum(const Datum* datum);
 
         static void Reflect(AZ::ReflectContext* reflectContext);
 
@@ -63,12 +66,17 @@ namespace ScriptCanvas
         Datum(BehaviorContextResultTag, const AZ::BehaviorParameter& resultType);
         Datum(const AZStd::string& behaviorClassName, eOriginality originality);
         Datum(const AZ::BehaviorValueParameter& value);
+        
+        void ReconfigureDatumTo(Datum&& object);
+        void ReconfigureDatumTo(const Datum& object);
 
         /// If t_Value is a ScriptCanvas value type, regardless of pointer/reference, this will create datum with a copy of that
         /// value. That is, Datum<AZ::Vector3>(source), Datum<AZ::Vector3&>(source), Datum<AZ::Vector3*>(&source), will all produce
         /// a copy of source. If t_Value is a ScriptCanvas reference type, passing in a pointer or reference will created a datum
         /// that REFERS to the source, and passing in a value will create a datum with a new, Script-owned, copy from the source.
-        template<typename t_Value>
+        //
+        // Also needs to bypass when it conflicts with the other constructors available.
+        template<typename t_Value, typename = AZStd::enable_if_t<!AZStd::is_same<AZStd::decay_t<t_Value>, Datum>::value && !AZStd::is_same<AZStd::decay_t<t_Value>, AZ::BehaviorValueParameter>::value> >
         explicit Datum(t_Value&& value);
 
         AZ_INLINE bool Empty() const;
@@ -84,6 +92,13 @@ namespace ScriptCanvas
         AZ_INLINE const void* GetAsDanger() const;
 
         const Data::Type& GetType() const { return m_type; }
+        void SetType(const Data::Type& dataType);
+
+        template<typename T>
+        void SetAZType()
+        {
+            SetType(ScriptCanvas::Data::FromAZType(azrtti_typeid<T>()));
+        }
 
         // checks this datum can be converted to the specified type, including checking for required storage
         AZ_INLINE bool IsConvertibleFrom(const AZ::Uuid& typeID) const;
@@ -126,7 +141,7 @@ namespace ScriptCanvas
         template<typename t_Value>
         AZ_INLINE bool Set(const t_Value& value);
 
-        void SetDefaultValue();
+        void SetToDefaultValueOfType();
 
         void SetNotificationsTarget(AZ::EntityId notificationId);
 
@@ -151,6 +166,15 @@ namespace ScriptCanvas
         // Remaps references to the SelfReference Entity Id to the Entity Id of the ScriptCanvas Graph component owner
         // This should be called at ScriptCanvas compile time when the runtime entity is available
         void ResolveSelfEntityReferences(const AZ::EntityId& graphOwnerId);
+
+        // creates an AZ::BehaviorValueParameter with a void* that points to this datum, depending on what the parameter needs
+        // this is called when the AZ::BehaviorValueParameter needs this value as output from another function
+        // so it is NOT appropriate for the value output to be nullptr, if the description is for a pointer to an object
+        // there needs to be valid memory to write that pointer
+        AZ::Outcome<AZ::BehaviorValueParameter, AZStd::string> ToBehaviorValueParameterResult(const AZ::BehaviorParameter& description);
+
+        // This is used as the destination for a Behavior Context function call; after the call the result must be converted.
+        void ConvertBehaviorContextMethodResult(const AZ::BehaviorParameter& resultType);
 
     private:
 
@@ -221,6 +245,9 @@ namespace ScriptCanvas
 
         // is this storage for nodes that are overloaded, e.g. Log, which takes in any data type
         const bool m_isOverloadedStorage = false;
+
+        bool m_isDefaultConstructed = false;
+
         // eOriginality records the graph source of the object
         eOriginality m_originality = eOriginality::Copy;
         // storage for the datum, regardless of ScriptCanvas::Data::Type
@@ -242,9 +269,6 @@ namespace ScriptCanvas
 
         // Destroys the datum, and the type information
         void Clear();
-
-        // This is used as the destination for a Behavior Context function call; after the call the result must be converted.
-        void ConvertBehaviorContextMethodResult(const AZ::BehaviorParameter& resultType);
 
         bool FromBehaviorContext(const void* source);
 
@@ -273,6 +297,8 @@ namespace ScriptCanvas
         bool InitializeCRC(const void* source);
 
         bool InitializeEntityID(const void* source);
+        
+        bool InitializeNamedEntityID(const void* source);
 
         bool InitializeMatrix3x3(const void* source);
 
@@ -316,12 +342,6 @@ namespace ScriptCanvas
 
         AZ::Outcome<AZ::BehaviorValueParameter, AZStd::string> ToBehaviorValueParameterString(const AZ::BehaviorParameter& description);
 
-        // creates an AZ::BehaviorValueParameter with a void* that points to this datum, depending on what the parameter needs
-        // this is called when the AZ::BehaviorValueParameter needs this value as output from another function
-        // so it is NOT appropriate for the value output to be nullptr, if the description is for a pointer to an object
-        // there needs to be valid memory to write that pointer
-        AZ::Outcome<AZ::BehaviorValueParameter, AZStd::string> ToBehaviorValueParameterResult(const AZ::BehaviorParameter& description);
-
         AZStd::string ToStringAABB(const Data::AABBType& source) const;
 
         AZStd::string ToStringColor(const Data::ColorType& source) const;
@@ -349,39 +369,10 @@ namespace ScriptCanvas
         AZStd::string ToStringVector4(const AZ::Vector4& source) const;
     }; // class Datum
 
-    template<typename t_Value>
+    template<typename t_Value, typename>
     Datum::Datum(t_Value&& value)
     {
         InitializerHelper<AZStd::remove_reference_t<t_Value>, AZStd::is_reference<t_Value>::value>::Help(value, *this);
-    }
-
-    AZ::Outcome<Datum, AZStd::string> Datum::CallBehaviorContextMethodResult(AZ::BehaviorMethod* method, const AZ::BehaviorParameter* resultType, AZ::BehaviorValueParameter* params, unsigned int numExpectedArgs)
-    {
-        AZ_Assert(resultType, "const AZ::BehaviorParameter* resultType == nullptr in Datum");
-        AZ_Assert(method, "AZ::BehaviorMethod* method == nullptr in Datum");
-        // create storage for the destination of the results in the function call...
-        Datum resultDatum(s_behaviorContextResultTag, *resultType);
-        //...and initialize a AZ::BehaviorValueParameter to wrap the storage...
-        AZ::Outcome<AZ::BehaviorValueParameter, AZStd::string> parameter = resultDatum.ToBehaviorValueParameterResult(*resultType);
-        if (parameter.IsSuccess())
-        {
-            // ...the result of Call here will write back to it...
-            if (method->Call(params, numExpectedArgs, &parameter.GetValue()))
-            {
-                // ...convert the storage, in case the function call result was one of many AZ:::RTTI types mapped to one SC::Type
-                resultDatum.ConvertBehaviorContextMethodResult(*resultType);
-                return AZ::Success(resultDatum);
-            }
-            else
-            {
-                return AZ::Failure(AZStd::string::format("Script Canvas call of %s failed", method->m_name.c_str()));
-            }
-        }
-        else
-        {
-            // parameter conversion failed
-            return AZ::Failure(parameter.GetError());
-        }
     }
 
     bool Datum::Empty() const

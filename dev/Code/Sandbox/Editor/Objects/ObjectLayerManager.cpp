@@ -645,6 +645,7 @@ bool CObjectLayerManager::SaveExternalLayer(CObjectArchive* pArchive, CObjectLay
 {
     // Form file name from layer name.
     QString path = Path::AddPathSlash(GetIEditor()->GetGameEngine()->GetLevelPath()) + m_layersPath;
+    path = Path::GamePathToFullPath(path); 
     QString file = pLayer->GetExternalLayerPath();
 
     if (CFileUtil::OverwriteFile(file))
@@ -721,7 +722,12 @@ void CObjectLayerManager::LoadExternalLayer(CObjectArchive& ar, CObjectLayer* pL
         m_bOverwriteDuplicates = false;
         ar.node = prevRoot;
 
-        uint32 attr = CFileUtil::GetAttributes(file.toUtf8().data());
+        // set false here - do not use source control for the original load.
+        // this is becuase this list box enqueues additional background requests to refresh the status in the background
+        // so there is no need to immediately block the main thread here during the initial load.  So we check whether
+        // it is read only locally on disk rather than going all the way to source control.  (These states should match up
+        // anyway, it will only not match up if the user has specifically made it writable locally)
+        uint32 attr = CFileUtil::GetAttributes(file.toUtf8().data(), false); 
         if (gSettings.freezeReadOnly && (attr & SCC_FILE_ATTRIBUTE_READONLY))
         {
             pLayer->SetFrozen(true);
@@ -1166,7 +1172,10 @@ void CObjectLayerManager::SetupLayerSwitches(bool isOnlyClear, bool isOnlyRender
 
         if (!isOnlyRenderNodes)
         {
-            gEnv->pEntitySystem->AddLayer(pLayer->GetName().toUtf8().data(), pLayer->GetParent() ? pLayer->GetParent()->GetName().toUtf8().data() : "", pLayer->GetLayerID(), pLayer->IsPhysics(), pLayer->GetSpecs(), pLayer->IsDefaultLoaded());
+            if (gEnv->pEntitySystem)
+            {
+                gEnv->pEntitySystem->AddLayer(pLayer->GetName().toUtf8().data(), pLayer->GetParent() ? pLayer->GetParent()->GetName().toUtf8().data() : "", pLayer->GetLayerID(), pLayer->IsPhysics(), pLayer->GetSpecs(), pLayer->IsDefaultLoaded());
+            }
 
             for (int k = 0; k < objects.size(); k++)
             {
@@ -1180,14 +1189,20 @@ void CObjectLayerManager::SetupLayerSwitches(bool isOnlyClear, bool isOnlyRender
                             node->SetLayerId(pLayer->GetLayerID());
                         }
 
-                        gEnv->pEntitySystem->AddEntityToLayer(pLayer->GetName().toUtf8().data(), ((CEntityObject*)pObj)->GetEntityId());
+                        if (gEnv->pEntitySystem)
+                        {
+                            gEnv->pEntitySystem->AddEntityToLayer(pLayer->GetName().toUtf8().data(), ((CEntityObject*)pObj)->GetEntityId());
+                        }
                     }
                 }
             }
         }
     }
     // make sure parent - child relation is valid in editor
-    gEnv->pEntitySystem->LinkLayerChildren();
+    if (gEnv->pEntitySystem)
+    {
+        gEnv->pEntitySystem->LinkLayerChildren();
+    }
 
     // Hide brashes when Game mode is started
     if (!isOnlyRenderNodes)

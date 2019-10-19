@@ -12,6 +12,7 @@
         "Qt5Designer",
         "Qt5Gui",
         "Qt5Help",
+        "Qt5MacExtras",
         "Qt5MultimediaQuick_p",
         "Qt5Multimedia",
         "Qt5MultimediaWidgets",
@@ -138,7 +139,8 @@
                 "Qt5Concurrentd.pdb"
             ],
             "Qt5Core/defines": [
-                "QT_CORE_LIB"
+                "QT_CORE_LIB",
+                "QT_NO_EXCEPTIONS"
             ],
             "Qt5Core/includes": [
                 "msvc2013_64/include",
@@ -246,7 +248,8 @@
             "Qt5Gui/includes": [
                 "msvc2013_64/include",
                 "msvc2013_64/include/QtGui",
-                "msvc2013_64/include/QtGui/5.6.2"
+                "msvc2013_64/include/QtGui/5.6.2",
+                "msvc2013_64/include/QtGui/5.6.2/QtGui"
             ],
             "Qt5Gui/import_release": [
                 "Qt5Gui.lib"
@@ -906,7 +909,8 @@
                 "Qt5Concurrentd.pdb"
             ],
             "Qt5Core/defines": [
-                "QT_CORE_LIB"
+                "QT_CORE_LIB",
+                "QT_NO_EXCEPTIONS"
             ],
             "Qt5Core/includes": [
                 "msvc2015_64/include",
@@ -1014,7 +1018,8 @@
             "Qt5Gui/includes": [
                 "msvc2015_64/include",
                 "msvc2015_64/include/QtGui",
-                "msvc2015_64/include/QtGui/5.6.2"
+                "msvc2015_64/include/QtGui/5.6.2",
+                "msvc2015_64/include/QtGui/5.6.2/QtGui"
             ],
             "Qt5Gui/import_release": [
                 "Qt5Gui.lib"
@@ -1614,7 +1619,8 @@
                 "QtConcurrent"
             ],
             "Qt5Core/defines": [
-                "QT_CORE_LIB"
+                "QT_CORE_LIB",
+                "QT_NO_EXCEPTIONS"
             ],
             "Qt5Core/includes": [
                 "clang_64/lib/QtCore.framework/Headers",
@@ -1679,6 +1685,15 @@
             ],
             "Qt5Help/framework": [
                 "QtHelp"
+            ],
+	    "Qt5MacExtras/defines": [
+                "QT_MACEXTRAS_LIB"
+            ],
+            "Qt5MacExtras/includes": [
+                "clang_64/lib/QtMacExtras.framework/Headers"
+            ],
+            "Qt5MacExtras/framework": [
+                "QtMacExtras"
             ],
             "Qt5Multimedia/defines": [
                 "QT_MULTIMEDIA_LIB"
@@ -1926,7 +1941,8 @@
             ],
 
             "Qt5Core/defines": [
-                "QT_CORE_LIB"
+                "QT_CORE_LIB",
+                "QT_NO_EXCEPTIONS"
             ],
             "Qt5Core/includes": [
                 "gcc_64/include",
@@ -1980,7 +1996,8 @@
             "Qt5Gui/includes": [
                 "gcc_64/include",
                 "gcc_64/include/QtGui",
-                "gcc_64/include/QtGui/5.6.2"
+                "gcc_64/include/QtGui/5.6.2",
+                "gcc_64/include/QtGui/5.6.2/QtGui"
             ],
             "Qt5Gui/shared": [
                 "libQt5Gui.so"

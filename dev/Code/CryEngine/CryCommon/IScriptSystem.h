@@ -531,7 +531,7 @@ struct IScriptSystem
     //      m_ScriptSystem->PushParam(pObj);
     //      m_ScriptSystem->PushParam(nTime);
     //      m_ScriptSystem->EndCall();
-    virtual int BeginCall(HSCRIPTFUNCTION hFunc) = 0;                        // Márcio: changed the return type .
+    virtual int BeginCall(HSCRIPTFUNCTION hFunc) = 0;                        // Marcio: changed the return type .
     // Summary:
     //   Calls a named method inside specified table.
     virtual int BeginCall(const char* sFuncName) = 0;                        // From void to int for error checking.
@@ -711,6 +711,26 @@ struct IScriptSystem
         return GetGlobalAny(sKey, any) && any.CopyTo(value);
     }
 };
+
+class CryLegacyScriptSystemRequests
+    : public AZ::EBusTraits
+{
+public:
+    //////////////////////////////////////////////////////////////////////////
+    // EBusTraits overrides
+    static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+    static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
+    //////////////////////////////////////////////////////////////////////////
+
+    //////////////////////////////////////////////////////////////////////////
+    // Creates and initializes a legacy IScriptSystem instance
+    virtual IScriptSystem* InitScriptSystem() = 0;
+
+    //////////////////////////////////////////////////////////////////////////
+    // Shuts down and destroys a legacy IScriptSystem instance
+    virtual void ShutdownScriptSystem(IScriptSystem* scriptSystem) = 0;
+};
+using CryLegacyScriptSystemRequestBus = AZ::EBus<CryLegacyScriptSystemRequests>;
 
 class CCheckScriptStack
 {

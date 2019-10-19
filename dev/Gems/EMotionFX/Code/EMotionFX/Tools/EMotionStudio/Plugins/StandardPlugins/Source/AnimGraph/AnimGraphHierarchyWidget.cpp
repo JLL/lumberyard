@@ -10,208 +10,159 @@
 *
 */
 
-#include "AnimGraphHierarchyWidget.h"
-#include "../../../../EMStudioSDK/Source/EMStudioManager.h"
-#include <MCore/Source/LogManager.h>
-#include <EMotionFX/Source/AnimGraphManager.h>
-#include "NavigateWidget.h"
-#include <QLabel>
-#include <QSizePolicy>
-#include <QTreeWidget>
-#include <QPixmap>
-#include <QPushButton>
-#include <QVBoxLayout>
-#include <QIcon>
-#include <QLineEdit>
+#include <AzQtComponents/Components/FilteredSearchWidget.h>
+#include <EMotionFX/CommandSystem/Source/CommandManager.h>
+#include <EMotionFX/Source/AnimGraphNode.h>
+#include <EMotionFX/Source/AnimGraph.h>
+#include <EMotionFX/Source/AnimGraphStateMachine.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphHierarchyWidget.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphItemDelegate.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphModel.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphPlugin.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphSortFilterProxyModel.h>
+#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QTreeView>
+#include <QVBoxLayout>
 
 
 namespace EMStudio
 {
-    AnimGraphHierarchyWidget::AnimGraphHierarchyWidget(QWidget* parent, bool useSingleSelection, CommandSystem::SelectionList* selectionList, uint32 visibilityFilterNodeID, bool showStatesOnly)
+    AnimGraphHierarchyWidget::AnimGraphHierarchyWidget(QWidget* parent)
         : QWidget(parent)
     {
-        mCurrentSelectionList = selectionList;
-        if (!selectionList)
-        {
-            mCurrentSelectionList = &(GetCommandManager()->GetCurrentSelection());
-        }
-
-        mShowStatesOnly = showStatesOnly;
-        mFilterNodeID = visibilityFilterNodeID;
-
         QVBoxLayout* layout = new QVBoxLayout();
         layout->setMargin(0);
 
         // Create the display button group.
         QHBoxLayout* displayLayout = new QHBoxLayout();
 
-        displayLayout->addWidget(new QLabel("Find:"), 0, Qt::AlignRight);
-        mFindWidget = new MysticQt::SearchButton(this, MysticQt::GetMysticQt()->FindIcon("Images/Icons/SearchClearButton.png"));
-        displayLayout->addWidget(mFindWidget);
-        connect(mFindWidget->GetSearchEdit(), SIGNAL(textChanged(const QString&)), this, SLOT(TextChanged(const QString&)));
+        m_searchWidget = new AzQtComponents::FilteredSearchWidget(this);
+        displayLayout->addWidget(m_searchWidget);
+        connect(m_searchWidget, &AzQtComponents::FilteredSearchWidget::TextFilterChanged, this, &AnimGraphHierarchyWidget::OnTextFilterChanged);
 
         // Create the tree widget.
-        mHierarchy = new QTreeWidget();
+        m_treeView = new QTreeView();
 
-        mHierarchy->setColumnCount(2);
-        QStringList headerList;
-        headerList.append("Name");
-        headerList.append("Type");
-        mHierarchy->setHeaderLabels(headerList);
+        m_filterProxyModel = new AnimGraphSortFilterProxyModel(m_treeView);
+        m_filterProxyModel->setDisableSelectionForFilteredButShowedElements(true);
+        EMStudioPlugin* animGraphPlugin = EMStudio::GetPluginManager()->FindActivePlugin(AnimGraphPlugin::CLASS_ID);
+        AZ_Assert(animGraphPlugin, "Could not find anim graph plugin!");
+        m_filterProxyModel->setSourceModel(&static_cast<AnimGraphPlugin*>(animGraphPlugin)->GetAnimGraphModel());
+        m_filterProxyModel->setFilterKeyColumn(-1);
+        m_filterProxyModel->setFilterCaseSensitivity(Qt::CaseSensitivity::CaseInsensitive);
+        m_treeView->setModel(m_filterProxyModel);
+        m_treeView->setSelectionBehavior(QAbstractItemView::SelectionBehavior::SelectRows);
+        {
+            // hide all sections and just enable the ones we are interested about
+            const int sectionCount = m_treeView->header()->count();
+            for (int i = 0; i < sectionCount; ++i)
+            {
+                m_treeView->header()->hideSection(i);
+            }
 
-        mHierarchy->setColumnWidth(0, 400);
-        mHierarchy->setColumnWidth(1, 100);
-        mHierarchy->setSortingEnabled(false);
-        mHierarchy->setMinimumWidth(500);
-        mHierarchy->setMinimumHeight(500);
-        mHierarchy->setAlternatingRowColors(true);
-        mHierarchy->setAnimated(true);
+            m_treeView->header()->showSection(AnimGraphModel::COLUMN_NAME);
+            m_treeView->header()->setSectionResizeMode(AnimGraphModel::COLUMN_NAME, QHeaderView::ResizeMode::ResizeToContents);
 
-        // Disable moving to have a fixed ordering.
-        mHierarchy->header()->setSectionsMovable(false);
+            m_treeView->header()->showSection(AnimGraphModel::COLUMN_PALETTE_NAME);
+            m_treeView->header()->setSectionResizeMode(AnimGraphModel::COLUMN_PALETTE_NAME, QHeaderView::ResizeMode::ResizeToContents);
+        }
+        // Set the custom delegate
+        m_treeView->setStyleSheet("font-size: 11px; color: #e9e9e9;");
+        m_treeView->setItemDelegate(new AnimGraphItemDelegate(m_treeView));
+
+        // m_treeView->setAlternatingRowColors(true); TODO: do we want this?
+        m_treeView->setContextMenuPolicy(Qt::DefaultContextMenu);
+        m_treeView->setExpandsOnDoubleClick(false);
+        m_treeView->expandAll();
 
         layout->addLayout(displayLayout);
-        layout->addWidget(mHierarchy);
+        layout->addWidget(m_treeView);
         setLayout(layout);
 
-        connect(mHierarchy, SIGNAL(itemSelectionChanged()), this, SLOT(UpdateSelection()));
-        connect(mHierarchy, SIGNAL(itemDoubleClicked(QTreeWidgetItem*, int)), this, SLOT(ItemDoubleClicked(QTreeWidgetItem*, int)));
-
-        SetSelectionMode(useSingleSelection);
+        connect(m_treeView, &QTreeView::doubleClicked, this, &AnimGraphHierarchyWidget::OnItemDoubleClicked);
+        connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &AnimGraphHierarchyWidget::OnSelectionChanged);
     }
 
-
-    AnimGraphHierarchyWidget::~AnimGraphHierarchyWidget()
+    void AnimGraphHierarchyWidget::SetSingleSelectionMode(bool useSingleSelection)
     {
+        m_treeView->setSelectionMode(useSingleSelection ? QAbstractItemView::SingleSelection : QAbstractItemView::ExtendedSelection);
     }
 
-
-    void AnimGraphHierarchyWidget::Update(uint32 animGraphID, CommandSystem::SelectionList* selectionList)
+    void AnimGraphHierarchyWidget::SetFilterNodeType(const AZ::TypeId& filterNodeType)
     {
-        mAnimGraphID            = animGraphID;
-        mCurrentSelectionList   = selectionList;
-
-        if (!selectionList)
+        if (!filterNodeType.IsNull())
         {
-            mCurrentSelectionList = &(GetCommandManager()->GetCurrentSelection());
-        }
-
-        Update();
-    }
-
-
-    void AnimGraphHierarchyWidget::Update()
-    {
-        mHierarchy->clear();
-
-        mHierarchy->blockSignals(true);
-        if (mAnimGraphID != MCORE_INVALIDINDEX32)
-        {
-            EMotionFX::AnimGraph* animGraph = EMotionFX::GetAnimGraphManager().FindAnimGraphByID(mAnimGraphID);
-            if (animGraph)
-            {
-                if (mFindString.empty())
-                {
-                    NavigateWidget::UpdateTreeWidget(mHierarchy, animGraph, mFilterNodeID, mShowStatesOnly);
-                }
-                else
-                {
-                    NavigateWidget::UpdateTreeWidget(mHierarchy, animGraph, mFilterNodeID, mShowStatesOnly, mFindString.c_str());
-                }
-            }
-        }
-        mHierarchy->blockSignals(false);
-
-        UpdateSelection();
-    }
-
-
-    void AnimGraphHierarchyWidget::UpdateSelection()
-    {
-        // Reset the old selection.
-        mSelectedNodes.clear();
-
-        const EMotionFX::AnimGraph* animGraph = EMotionFX::GetAnimGraphManager().FindAnimGraphByID(mAnimGraphID);
-        if (!animGraph)
-        {
-            return;
-        }
-
-        // Get the selected items and the number of them.
-        QList<QTreeWidgetItem*> selectedItems = mHierarchy->selectedItems();
-        const int numSelectedItems = selectedItems.count();
-        mSelectedNodes.reserve(numSelectedItems);
-
-        // Iterate through all selected items in the tree widget.
-        AZStd::string itemName;
-        for (int i = 0; i < numSelectedItems; ++i)
-        {
-            const QTreeWidgetItem* item = selectedItems[i];
-            itemName = item->text(0).toUtf8().data();
-
-            // Is the item referring to a valid node?
-            if (animGraph->RecursiveFindNode(itemName.c_str()))
-            {
-                AnimGraphSelectionItem selectionItem;
-                selectionItem.mAnimGraphID = mAnimGraphID;
-                selectionItem.mNodeName    = itemName;
-
-                mSelectedNodes.push_back(selectionItem);
-            }
+            m_filterProxyModel->setFilterNodeTypes({ filterNodeType });
         }
     }
 
-
-    void AnimGraphHierarchyWidget::SetSelectionMode(bool useSingleSelection)
+    void AnimGraphHierarchyWidget::SetFilterStatesOnly(bool showStatesOnly)
     {
-        if (useSingleSelection)
+        m_filterProxyModel->setFilterStatesOnly(showStatesOnly);
+    }
+
+    void AnimGraphHierarchyWidget::SetRootIndex(const QModelIndex& index)
+    {
+        m_filterProxyModel->setNonFilterableIndex(index);
+        QModelIndex proxyIndex = m_filterProxyModel->mapFromSource(index);
+        m_treeView->setRootIndex(proxyIndex);
+    }
+
+    void AnimGraphHierarchyWidget::SetRootAnimGraph(const EMotionFX::AnimGraph* graph)
+    {
+        if (graph)
         {
-            mHierarchy->setSelectionMode(QAbstractItemView::SingleSelection);
+            EMotionFX::AnimGraphStateMachine* graphRoot = graph->GetRootStateMachine();
+            EMStudioPlugin* animGraphPlugin = EMStudio::GetPluginManager()->FindActivePlugin(AnimGraphPlugin::CLASS_ID);
+            AZ_Assert(animGraphPlugin, "Could not find anim graph plugin!");
+            QModelIndex rootIndex = static_cast<AnimGraphPlugin*>(animGraphPlugin)->GetAnimGraphModel().FindFirstModelIndex(graphRoot);
+            SetRootIndex(rootIndex);
         }
         else
         {
-            mHierarchy->setSelectionMode(QAbstractItemView::ExtendedSelection);
+            SetRootIndex(QModelIndex());
         }
-
-        mUseSingleSelection = useSingleSelection;
     }
 
-
-    void AnimGraphHierarchyWidget::ItemDoubleClicked(QTreeWidgetItem* item, int column)
+    void AnimGraphHierarchyWidget::OnItemDoubleClicked(const QModelIndex& index)
     {
-        MCORE_UNUSED(item);
-        MCORE_UNUSED(column);
-
-        if (!mUseSingleSelection)
+        if (m_treeView->selectionMode() == QAbstractItemView::SingleSelection)
         {
-            return;
+            AZStd::vector<AnimGraphSelectionItem> selectedNodes;
+            
+            EMotionFX::AnimGraphNode* node = m_treeView->model()->data(index, AnimGraphModel::ROLE_NODE_POINTER).value<EMotionFX::AnimGraphNode*>();         
+            selectedNodes.emplace_back(node->GetAnimGraph()->GetID(), node->GetNameString());
+
+            emit OnSelectionDone(selectedNodes);
+        }
+    }
+
+
+    void AnimGraphHierarchyWidget::OnTextFilterChanged(const QString& text)
+    {
+        m_filterProxyModel->setFilterWildcard(text);
+    }
+
+    AZStd::vector<AnimGraphSelectionItem> AnimGraphHierarchyWidget::GetSelectedItems() const
+    {
+        const QModelIndexList modelIndexes = m_treeView->selectionModel()->selectedRows();
+
+        AZStd::vector<AnimGraphSelectionItem> selectedNodes;
+        for (const QModelIndex& modelIndex : modelIndexes)
+        {
+            EMotionFX::AnimGraphNode* node = m_treeView->model()->data(modelIndex, AnimGraphModel::ROLE_NODE_POINTER).value<EMotionFX::AnimGraphNode*>();
+            selectedNodes.emplace_back(node->GetAnimGraph()->GetID(), node->GetNameString());
         }
 
-        UpdateSelection();
-        FireSelectionDoneSignal();
+        return selectedNodes;
     }
 
-
-    void AnimGraphHierarchyWidget::TextChanged(const QString& text)
+    bool AnimGraphHierarchyWidget::HasSelectedItems() const
     {
-        FromQtString(text, &mFindString);
-        AZStd::to_lower(mFindString.begin(), mFindString.end());
-        Update();
+        return !m_treeView->selectionModel()->selectedRows().empty();
     }
 
-
-    void AnimGraphHierarchyWidget::FireSelectionDoneSignal()
-    {
-        emit OnSelectionDone(mSelectedNodes);
-    }
-
-
-    AZStd::vector<AnimGraphSelectionItem>& AnimGraphHierarchyWidget::GetSelectedItems()
-    {
-        UpdateSelection();
-        return mSelectedNodes;
-    }
 } // namespace EMStudio
 
 #include <EMotionFX/Tools/EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphHierarchyWidget.moc>

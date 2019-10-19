@@ -38,11 +38,11 @@ namespace LmbrCentral
                 editContext->Class<EditorNavigationSeedComponent>("Navigation Seed", "Determines reachable navigation nodes")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
-                        ->Attribute(AZ::Edit::Attributes::HelpPageURL, "http://docs.aws.amazon.com/console/lumberyard/userguide/nav-seed-component")
                         ->Attribute(AZ::Edit::Attributes::Category, "AI")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NavigationSeed.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NavigationSeed.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/NavigationSeed.png")
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
+                        ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-nav-seed.html")
                     ->DataElement(AZ::Edit::UIHandlers::ComboBox, &EditorNavigationSeedComponent::m_agentType, "Agent Type", "Describes the type of the Entity for navigation purposes.")
                         ->Attribute(AZ::Edit::Attributes::StringList, &PopulateAgentTypeList)
                         ->Attribute("ChangeNotify", &EditorNavigationSeedComponent::OnAgentTypeChanged);
@@ -53,7 +53,10 @@ namespace LmbrCentral
     void EditorNavigationSeedComponent::TriggerReachaibilityRecalculation() const
     {
         // We have to call the legacy method to account for Legacy seeds that might be out there
-        gEnv->pAISystem->GetNavigationSystem()->CalculateAccessibility();
+        if (gEnv->pAISystem)
+        {
+            gEnv->pAISystem->GetNavigationSystem()->CalculateAccessibility();
+        }
     }
 
     AZ::u32 EditorNavigationSeedComponent::OnAgentTypeChanged() const
@@ -67,9 +70,12 @@ namespace LmbrCentral
         AZ::Vector3 translation = AZ::Vector3::CreateZero();
         AZ::TransformBus::EventResult(translation, m_entity->GetId(), &AZ::TransformInterface::GetWorldTranslation);
 
-        auto navigationSystem = gEnv->pAISystem->GetNavigationSystem();
-        auto agentType = navigationSystem->GetAgentTypeID(m_agentType.c_str());
-        navigationSystem->ComputeAccessibility(AZVec3ToLYVec3(translation), agentType);
+        if (gEnv->pAISystem)
+        {
+            auto navigationSystem = gEnv->pAISystem->GetNavigationSystem();
+            auto agentType = navigationSystem->GetAgentTypeID(m_agentType.c_str());
+            navigationSystem->ComputeAccessibility(AZVec3ToLYVec3(translation), agentType);
+        }
     }
 
     void EditorNavigationSeedComponent::OnTransformChanged(const AZ::Transform&, const AZ::Transform&)

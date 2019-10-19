@@ -13,20 +13,21 @@
 // include required headers
 #include "Attachment.h"
 #include "ActorInstance.h"
-
+#include <EMotionFX/Source/Allocators.h>
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(Attachment, AttachmentAllocator, 0)
+
     // constructor
     Attachment::Attachment(ActorInstance* attachToActorInstance, ActorInstance* attachment)
         : BaseObject()
     {
-        mAttachment     = attachment;
-        mActorInstance  = attachToActorInstance;
-        mFastUpdateMode = false;
-        if (mAttachment)
+        m_attachment     = attachment;
+        m_actorInstance  = attachToActorInstance;
+        if (m_attachment)
         {
-            mAttachment->SetSelfAttachment(this);
+            m_attachment->SetSelfAttachment(this);
         }
     }
 
@@ -39,24 +40,12 @@ namespace EMotionFX
 
     ActorInstance* Attachment::GetAttachmentActorInstance() const
     {
-        return mAttachment;
+        return m_attachment;
     }
 
 
     ActorInstance* Attachment::GetAttachToActorInstance() const
     {
-        return mActorInstance;
-    }
-
-
-    void Attachment::SetAllowFastUpdates(bool allowFastUpdates)
-    {
-        mFastUpdateMode = allowFastUpdates;
-    }
-
-
-    bool Attachment::GetAllowFastUpdates() const
-    {
-        return mFastUpdateMode;
+        return m_actorInstance;
     }
 }   // namespace

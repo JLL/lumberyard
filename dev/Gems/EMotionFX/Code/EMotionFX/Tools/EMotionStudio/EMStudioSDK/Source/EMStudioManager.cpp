@@ -11,23 +11,23 @@
 */
 
 #include "EMStudioManager.h"
+#include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/IO/FileIO.h>
+#include <AzCore/Serialization/SerializeContext.h>
 #include "RecoverFilesWindow.h"
 #include "MotionEventPresetManager.h"
 #include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/Commands.h>
-
-#ifdef MCORE_PLATFORM_WINDOWS
-    #include <shlobj.h>
-#else
-    #include <sys/stat.h>
-#endif
+#include <EMotionStudio/EMStudioSDK/Source/Allocators.h>
 
 // include MCore related
 #include <MCore/Source/LogManager.h>
 #include <MCore/Source/CommandManager.h>
 #include <MCore/Source/FileSystem.h>
 #include <EMotionFX/Source/AnimGraphManager.h>
+#include <EMotionFX/Source/EMotionFXManager.h>
 #include <EMotionFX/Source/MotionManager.h>
+
+#include <Source/Editor/SkeletonModel.h>
 
 // include Qt related things
 #include <QApplication>
@@ -40,10 +40,10 @@
 #include <QMessageBox>
 #include <QLabel>
 #include <QStandardPaths>
+#include <QPushButton>
 
 // include AzCore required headers
 #include <AzFramework/API/ApplicationAPI.h>
-
 
 namespace EMStudio
 {
@@ -60,12 +60,33 @@ namespace EMStudio
     // constructor
     EMStudioManager::EMStudioManager(QApplication* app, int& argc, char* argv[])
     {
+        // Flag that we have an editor around
+        EMotionFX::GetEMotionFX().SetIsInEditorMode(true);
+
         mHTMLLinkString.reserve(32768);
         mEventProcessingCallback = nullptr;
         mAutoLoadLastWorkspace = false;
         mAvoidRendering = false;
 
         mApp = app;
+
+        {
+            UIAllocator::Descriptor uiAllocatorDescriptor;
+            uiAllocatorDescriptor.m_custom = &AZ::AllocatorInstance<AZ::SystemAllocator>::Get();
+            AZ::AllocatorInstance<UIAllocator>::Create();
+        }
+
+        AZ::SerializeContext* serializeContext = nullptr;
+        AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+        if (!serializeContext)
+        {
+            AZ_Error("EMotionFX", false, "Can't get serialize context from component application.");
+        }
+        else
+        {
+            MainWindow::Reflect(serializeContext);
+        }
+
 
         // create and setup a log file
         MCore::GetLogManager().CreateLogFile(AZStd::string(GetAppDataFolder() + "EMStudioLog.txt").c_str());
@@ -84,9 +105,10 @@ namespace EMStudio
         mEventPresetManager         = new MotionEventPresetManager();
         mPluginManager              = new PluginManager();
         mLayoutManager              = new LayoutManager();
-        mOutlinerManager            = new OutlinerManager();
         mNotificationWindowManager  = new NotificationWindowManager();
         mCompileDate = AZStd::string::format("%s", MCORE_DATE);
+
+        EMotionFX::SkeletonOutlinerNotificationBus::Handler::BusConnect();
 
         // log some information
         LogInfo();
@@ -96,6 +118,8 @@ namespace EMStudio
     // destructor
     EMStudioManager::~EMStudioManager()
     {
+        EMotionFX::SkeletonOutlinerNotificationBus::Handler::BusDisconnect();
+
         if (mEventProcessingCallback)
         {
             EMStudio::GetCommandManager()->RemoveCallback(mEventProcessingCallback, false);
@@ -109,21 +133,20 @@ namespace EMStudio
         delete mPluginManager;
         delete mLayoutManager;
         delete mNotificationWindowManager;
-        delete mOutlinerManager;
         delete mMainWindow;
         delete mCommandManager;
+
+        AZ::AllocatorInstance<UIAllocator>::Destroy();
     }
 
-    MainWindow* EMStudioManager::GetMainWindow() 
+    MainWindow* EMStudioManager::GetMainWindow()
     {
         if (mMainWindow.isNull())
         {
             mMainWindow = new MainWindow();
-            mEventPresetManager->LoadFromSettings();
-            mEventPresetManager->Load();
             mMainWindow->Init();
         }
-        return mMainWindow; 
+        return mMainWindow;
     }
 
 
@@ -160,9 +183,26 @@ namespace EMStudio
         mPluginManager->LoadPluginsFromDirectory(pluginDir.c_str());
 #endif // EMFX_EMSTUDIOLYEMBEDDED
 
-        // Register dirty workspace files callback.
-        mMainWindow->RegisterDirtyWorkspaceCallback();
-
+        // Give a chance to every plugin to reflect data
+        const uint32 numPlugins = mPluginManager->GetNumPlugins();
+        if (numPlugins)
+        {
+            AZ::SerializeContext* serializeContext = nullptr;
+            AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+            if (!serializeContext)
+            {
+                AZ_Error("EMotionFX", false, "Can't get serialize context from component application.");
+            }
+            else
+            {
+                for (uint32 i = 0; i < numPlugins; ++i)
+                {
+                    EMStudioPlugin* plugin = mPluginManager->GetPlugin(i);
+                    plugin->Reflect(serializeContext);
+                }
+            }
+        }
+        
         // Register the command event processing callback.
         mEventProcessingCallback = new EventProcessingCallback();
         EMStudio::GetCommandManager()->RegisterCallback(mEventProcessingCallback);
@@ -249,6 +289,24 @@ namespace EMStudio
     }
 
 
+    void EMStudioManager::MakeTransparentMenuButton(QPushButton* button, const char* iconFileName, const char* toolTipText, uint32 width, uint32 height)
+    {
+        button->setToolTip(toolTipText);
+        button->setMinimumSize(width, height);
+        button->setMaximumSize(width, height);
+        button->setIcon(MysticQt::GetMysticQt()->FindIcon(iconFileName));
+
+        button->setObjectName("EMFXMenuButton");
+        button->setStyleSheet("QPushButton#EMFXMenuButton::menu-indicator \
+                               { \
+                                   subcontrol-position: right bottom; \
+                                   subcontrol-origin: padding; \
+                                   left: 0px; \
+                                   top: -2px; \
+                               }");
+    }
+
+
     QLabel* EMStudioManager::MakeSeperatorLabel(uint32 width, uint32 height)
     {
         QLabel* seperatorLabel = new QLabel("");
@@ -260,36 +318,38 @@ namespace EMStudio
     }
 
 
-    MCore::Array<uint32>& EMStudioManager::GetVisibleNodeIndices()
+    void EMStudioManager::SetVisibleJointIndices(const AZStd::unordered_set<AZ::u32>& visibleJointIndices)
     {
-        return mVisibleNodeIndices;
-        /*if (mNodeFilterString.GetIsEmpty())
-            return nullptr;
-
-        return mNodeFilterString.AsChar();*/
+        m_visibleJointIndices = visibleJointIndices;
     }
 
-
-    void EMStudioManager::SetVisibleNodeIndices(const MCore::Array<uint32>& visibleNodeIndices)
+    void EMStudioManager::SetSelectedJointIndices(const AZStd::unordered_set<AZ::u32>& selectedJointIndices)
     {
-        mVisibleNodeIndices = visibleNodeIndices;
-        /*if (filterString == nullptr)
-            mNodeFilterString.Clear(false);
-        else
-            mNodeFilterString = filterString;*/
+        m_selectedJointIndices = selectedJointIndices;
+    }
 
-        /*  mFilteredNodes.Clear(false);
+    void EMStudioManager::JointSelectionChanged()
+    {
+        AZ::Outcome<const QModelIndexList&> selectedRowIndicesOutcome;
+        EMotionFX::SkeletonOutlinerRequestBus::BroadcastResult(selectedRowIndicesOutcome, &EMotionFX::SkeletonOutlinerRequests::GetSelectedRowIndices);
+        if (!selectedRowIndicesOutcome.IsSuccess())
+        {
+            return;
+        }
 
-            Actor* actor = actorInstance->GetActor();
-            const uint32 numNodes = actor->GetNumNodes();
-            for (uint32 i=0; i<numNodes; ++i)
-            {
-                Node*   node        = actor->GetNode(i);
-                String  nodeName    = node->GetNameString().Lowered();
+        m_selectedJointIndices.clear();
 
-                if (mNodeFilterString.GetIsEmpty() || nodeName.Contains(mNodeFilterString.AsChar()))
-                    mFilteredNodes.Add(node);
-            }*/
+        const QModelIndexList& selectedRowIndices = selectedRowIndicesOutcome.GetValue();
+        if (selectedRowIndices.empty())
+        {
+            return;
+        }
+
+        for (const QModelIndex& selectedIndex : selectedRowIndices)
+        {
+            EMotionFX::Node* joint = selectedIndex.data(EMotionFX::SkeletonModel::ROLE_POINTER).value<EMotionFX::Node*>();
+            m_selectedJointIndices.emplace(joint->GetNodeIndex());
+        }
     }
 
 
@@ -335,7 +395,7 @@ namespace EMStudio
     AZStd::string EMStudioManager::GetRecoverFolder() const
     {
         // Set the recover path
-        const AZStd::string recoverPath = GetAppDataFolder() + "Recover" + MCore::FileSystem::mFolderSeparatorChar;
+        const AZStd::string recoverPath = GetAppDataFolder() + "Recover" + AZ_CORRECT_FILESYSTEM_SEPARATOR;
 
         // create all folders needed
         QDir dir;
@@ -349,7 +409,7 @@ namespace EMStudio
     AZStd::string EMStudioManager::GetAutosavesFolder() const
     {
         // Set the autosaves path
-        const AZStd::string autosavesPath = GetAppDataFolder() + "Autosaves" + MCore::FileSystem::mFolderSeparatorChar;
+        const AZStd::string autosavesPath = GetAppDataFolder() + "Autosaves" + AZ_CORRECT_FILESYSTEM_SEPARATOR;
 
         // create all folders needed
         QDir dir;
@@ -456,5 +516,3 @@ namespace EMStudio
         gEMStudioMgr = nullptr;
     }
 } // namespace EMStudio
-
-#include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/EMStudioManager.moc>

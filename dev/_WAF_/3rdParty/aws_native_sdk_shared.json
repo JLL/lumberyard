@@ -111,9 +111,6 @@
         "ios_framework": [
             "security"
         ], 
-        "appletv_framework": [
-            "security"
-        ], 
         "linux_rpath": [
             "$ORIGIN"
         ]
@@ -425,6 +422,7 @@
             ]
         }, 
         "win_x64_vs2017": "@win_x64_vs2015", 
+        "win_x64_clang": "@win_x64_vs2015", 
         "darwin_x64": {
             "sharedlibpath_debug": [
                 "lib/mac/Debug"
@@ -474,10 +472,10 @@
         }, 
         "linux_x64": {
             "sharedlibpath_debug": [
-                "lib/linux/intel64/Debug"
+                "bin/linux/intel64/Debug"
             ], 
             "sharedlibpath_release": [
-                "lib/linux/intel64/Release"
+                "bin/linux/intel64/Release"
             ], 
             "aws_cpp_sdk_all_shared/shared": [
                 "lib${aws_cpp_sdk_all}.so"
@@ -522,22 +520,25 @@
         }, 
         "android_armv7_clang": {
             "sharedlibpath_debug": [
-                "lib/android/ndk_r12/android-19/armeabi-v7a/clang-3.8/Debug"
+                "bin/android/ndk_r12/android-19/armeabi-v7a/clang-3.8/Debug"
             ], 
             "sharedlibpath_release": [
-                "lib/android/ndk_r12/android-19/armeabi-v7a/clang-3.8/Release"
+                "bin/android/ndk_r12/android-19/armeabi-v7a/clang-3.8/Release"
             ], 
             "sharedlibpath_debug/android-21": [
-                "lib/android/ndk_r12/android-21/armeabi-v7a/clang-3.8/Debug"
+                "bin/android/ndk_r12/android-21/armeabi-v7a/clang-3.8/Debug"
             ], 
             "sharedlibpath_release/android-21": [
-                "lib/android/ndk_r12/android-21/armeabi-v7a/clang-3.8/Release"
+                "bin/android/ndk_r12/android-21/armeabi-v7a/clang-3.8/Release"
             ], 
             "aws_cpp_sdk_all_shared/shared": [
                 "lib${aws_cpp_sdk_all}.so"
             ], 
             "aws_cpp_sdk_core_shared/shared": [
                 "lib${aws_cpp_sdk_core}.so"
+            ], 
+            "aws_cpp_sdk_gamelift_shared/defines": [
+                "BUILD_GAMELIFT_CLIENT"
             ], 
             "aws_cpp_sdk_gamelift_shared/shared": [
                 "lib${aws_cpp_sdk_gamelift}.so"
@@ -575,16 +576,19 @@
         }, 
         "android_armv8_clang": {
             "sharedlibpath_debug": [
-                "lib/android/ndk_r12/android-21/arm64-v8a/clang-3.8/Debug"
+                "bin/android/ndk_r12/android-21/arm64-v8a/clang-3.8/Debug"
             ], 
             "sharedlibpath_release": [
-                "lib/android/ndk_r12/android-21/arm64-v8a/clang-3.8/Release"
+                "bin/android/ndk_r12/android-21/arm64-v8a/clang-3.8/Release"
             ], 
             "aws_cpp_sdk_all_shared/shared": [
                 "lib${aws_cpp_sdk_all}.so"
             ], 
             "aws_cpp_sdk_core_shared/shared": [
                 "lib${aws_cpp_sdk_core}.so"
+            ], 
+            "aws_cpp_sdk_gamelift_shared/defines": [
+                "BUILD_GAMELIFT_CLIENT"
             ], 
             "aws_cpp_sdk_gamelift_shared/shared": [
                 "lib${aws_cpp_sdk_gamelift}.so"
@@ -622,10 +626,10 @@
         }, 
         "durango_vs2015": {
             "importlibpath_debug": [
-                "bin/durango/170300/Debug"
+                "bin/durango/180702/Debug"
             ], 
             "importlibpath_release": [
-                "bin/durango/170300/Release"
+                "bin/durango/180702/Release"
             ], 
             "aws_cpp_sdk_all_shared/import": [
                 "${aws_cpp_sdk_all}.lib"
@@ -667,10 +671,10 @@
                 "${aws_cpp_sdk_identity_metrics}.lib"
             ], 
             "sharedlibpath_debug": [
-                "bin/durango/170300/Debug"
+                "bin/durango/180702/Debug"
             ], 
             "sharedlibpath_release": [
-                "bin/durango/170300/Release"
+                "bin/durango/180702/Release"
             ], 
             "aws_cpp_sdk_all_shared/shared": [
                 "${aws_cpp_sdk_all}.dll"

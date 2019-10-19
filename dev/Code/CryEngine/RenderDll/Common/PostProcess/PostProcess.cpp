@@ -324,7 +324,7 @@ int CPostEffectsMgr::Init()
         "Example: r_setposteffectparamf HUD3D_FOV 35.0	 (Doesn't force value)\n"
         "Example: r_setposteffectparamf HUD3D_FOV 35.0 1 (Forces value)\n");
 
-    REGISTER_COMMAND("r_getposteffectparamf", GetPostEffectParamF, VF_CHEAT, "Outputs post effect param value (float) to log"
+     REGISTER_COMMAND("r_getposteffectparamf", GetPostEffectParamF, VF_CHEAT, "Outputs post effect param value (float) to log"
         "Usage: r_setposteffectparamf [posteffectparamname]\n"
         "Example: r_getposteffectparamf HUD3D_FOV\n");
 #endif
@@ -583,7 +583,7 @@ int CPostEffectsMgr::SortEffectsByID(const CPostEffect* p1, const CPostEffect* p
 
 int CParamTexture::Create(const char* pszFileName)
 {
-    if (!pszFileName)
+    if (!pszFileName || pszFileName[0] == '\0')
     {
         return 0;
     }
@@ -594,7 +594,7 @@ int CParamTexture::Create(const char* pszFileName)
     if (pThreadSafeData->pTexParam)
     {
         // check if texture is same
-        if (!strcmpi(pThreadSafeData->pTexParam->GetName(), pszFileName))
+        if (!azstricmp(pThreadSafeData->pTexParam->GetName(), pszFileName))
         {
             return 0;
         }

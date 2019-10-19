@@ -33,7 +33,7 @@ namespace AzQtComponents
 
         static void drawFrame(QPainter& p, QRect rect, bool drawTop = true);
         void createCustomTitleBar();
-        TitleBar* customTitleBar();
+        TitleBar* customTitleBar() const;
         bool isSingleFloatingChild();
 
         /**
@@ -47,6 +47,7 @@ namespace AzQtComponents
 
     Q_SIGNALS:
         void undock();
+        void aboutToClose();
 
     protected:
         void closeEvent(QCloseEvent* event) override;
@@ -61,7 +62,6 @@ namespace AzQtComponents
         void onFloatingChanged(bool floating);
         void init();
 
-        bool m_dropShadowsEnabled = false;
         bool m_skipTitleBarOverdraw = false;
     };
 } // namespace AzQtComponents

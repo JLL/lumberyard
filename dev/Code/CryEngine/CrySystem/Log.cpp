@@ -55,10 +55,12 @@
 #if defined(IOS) || defined(APPLETV)
 #include "SystemUtilsApple.h"
 #endif
+
 //////////////////////////////////////////////////////////////////////
 namespace LogCVars
 {
     float s_log_tick = 0;
+    int max_backup_directory_size_mb = 200; //200MB default
 };
 
 #ifndef _RELEASE
@@ -97,6 +99,9 @@ CLog::CLog(ISystem* pSystem)
 
     m_iLastHistoryItem = 0;
     memset(m_history, 0, sizeof(m_history));
+
+    CheckAndPruneBackupLogs();
+
 }
 
 void CLog::RegisterConsoleVariables()
@@ -156,6 +161,8 @@ void CLog::RegisterConsoleVariables()
         m_pLogModule = REGISTER_STRING("log_Module", "", VF_NULL, "Only show warnings from specified module");
 
         REGISTER_CVAR2("log_tick", &LogCVars::s_log_tick, LogCVars::s_log_tick, 0, "When not 0, writes tick log entry into the log file, every N seconds");
+
+        REGISTER_CVAR2("max_log_backup_mb", &LogCVars::max_backup_directory_size_mb, LogCVars::max_backup_directory_size_mb, 0, "Maximum size of backup logs to keep on disk (in MB)");
 
 #if defined(KEEP_LOG_FILE_OPEN)
         REGISTER_COMMAND("log_flush", &LogFlushFile, 0, "Flush the log file");
@@ -238,6 +245,13 @@ AZ::IO::HandleType CLog::OpenLogFile(const char* filename, const char* mode)
     CDebugAllowFileAccess ignoreInvalidFileAccess;
     using namespace AZ::IO;
 
+    AZ_Assert(m_logFileHandle == AZ::IO::InvalidHandle, "Attempt to open log file when one is already open.  This would lead to a handle leak.");
+    
+    if ((!filename) || (filename[0] == 0))
+    {
+        return m_logFileHandle;
+    }
+
     // it is assumed that @log@ points at the appropriate place (so for apple, to the user profile dir)
     AZ::IO::FileIOBase::GetDirectInstance()->Open(filename, AZ::IO::GetOpenModeFromStringMode(mode), m_logFileHandle);
 
@@ -266,10 +280,32 @@ void CLog::SetVerbosity(int verbosity)
     }
 }
 
+bool CLog::CheckLogFormatter(const char* formatter)
+{
+    if (!formatter)
+    {
+        AZ_Assert(false, "code problem - A message was sent to the log system with nullptr as the formatting string.");
+        return false;
+    }
+
+    if (formatter[0] == 0)
+    {
+        // if there's nothing to log, we don't log anything.  Blank lines at least contain a carriage return or something.
+        return false;
+    }
+    return true;
+}
+
+
 //////////////////////////////////////////////////////////////////////////
 #if !defined(EXCLUDE_NORMAL_LOG)
 void CLog::LogWarning(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     va_list ArgList;
     char        szBuffer[MAX_WARNING_LENGTH];
     va_start(ArgList, szFormat);
@@ -285,6 +321,11 @@ void CLog::LogWarning(const char* szFormat, ...)
 //////////////////////////////////////////////////////////////////////////
 void CLog::LogError(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     va_list ArgList;
     char        szBuffer[MAX_WARNING_LENGTH];
     va_start(ArgList, szFormat);
@@ -300,6 +341,11 @@ void CLog::LogError(const char* szFormat, ...)
 //////////////////////////////////////////////////////////////////////////
 void CLog::Log(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     va_list arg;
     va_start(arg, szFormat);
     LogV (eMessage, szFormat, arg);
@@ -309,6 +355,11 @@ void CLog::Log(const char* szFormat, ...)
 //////////////////////////////////////////////////////////////////////////
 void CLog::LogAlways(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+   
     va_list arg;
     va_start(arg, szFormat);
     LogV (eAlways, szFormat, arg);
@@ -365,13 +416,23 @@ break2:
 //////////////////////////////////////////////////////////////////////
 void CLog::LogV(const ELogType type, const char* szFormat, va_list args)
 {
+    // this is here in case someone called LogV directly, with an invalid formatter.
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     LogV(type, 0, szFormat, args);
 }
 
 void CLog::LogV(const ELogType type, int flags, const char* szFormat, va_list args)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
+    // this is here in case someone called LogV directly, with an invalid formatter.
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
 
+    }
     if (!szFormat)
     {
         return;
@@ -465,7 +526,11 @@ void CLog::LogV(const ELogType type, int flags, const char* szFormat, va_list ar
     if (bufferlen > 0)
     {
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(Log_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Log_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Log_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -573,6 +638,11 @@ void CLog::LogV(const ELogType type, int flags, const char* szFormat, va_list ar
 #if !defined(EXCLUDE_NORMAL_LOG)
 void CLog::LogPlus(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     if (m_pLogVerbosity && m_pLogVerbosity->GetIVal() < 0)
     {
         return;
@@ -680,6 +750,11 @@ void CLog::LogStringToConsole(const char* szString, ELogType logType, bool bAdd)
 //////////////////////////////////////////////////////////////////////
 void CLog::LogToConsole(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     if (m_pLogVerbosity && m_pLogVerbosity->GetIVal() < 0)
     {
         return;
@@ -711,6 +786,11 @@ void CLog::LogToConsole(const char* szFormat, ...)
 //////////////////////////////////////////////////////////////////////
 void CLog::LogToConsolePlus(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     if (m_pLogVerbosity && m_pLogVerbosity->GetIVal() < 0)
     {
         return;
@@ -927,8 +1007,14 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
             char sTime[128];
             time_t ltime;
             time(&ltime);
-            struct tm* today = localtime(&ltime);
+#ifdef AZ_COMPILER_MSVC
+            struct tm today;
+            localtime_s(&today, &ltime);
+            strftime(sTime, 20, "<%H:%M:%S> ", &today);
+#else
+            auto today = localtime(&ltime);
             strftime(sTime, 20, "<%H:%M:%S> ", today);
+#endif
 
             timeStr.clear();
             timeStr.assign(sTime);
@@ -952,8 +1038,15 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
             char sTime[128];
             time_t ltime;
             time(&ltime);
-            struct tm* today = localtime(&ltime);
+
+#ifdef AZ_COMPILER_MSVC
+            struct tm today;
+            localtime_s(&today, &ltime);
+            strftime(sTime, 20, "<%H:%M:%S> ", &today);
+#else
+            auto today = localtime(&ltime);
             strftime(sTime, 20, "<%H:%M:%S> ", today);
+#endif
             tempString = LogStringType(sTime) + tempString;
 
             static CTimeValue lasttime;
@@ -991,7 +1084,7 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
         }
         else if (dwCVarState == 5)             // Log_IncludeTime
         {
-            if ((gEnv) && (gEnv->pGame))
+            if ((gEnv) && (gEnv->pGame) && (gEnv->pGame->GetIGameFramework()))
             {
                 CTimeValue serverTime = gEnv->pGame->GetIGameFramework()->GetServerTime();
                 timeStr.clear();
@@ -1002,8 +1095,15 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
             char sTime[128];
             time_t ltime;
             time(&ltime);
-            struct tm* today = localtime(&ltime);
+
+#ifdef AZ_COMPILER_MSVC
+            struct tm today;
+            localtime_s(&today, &ltime);
+            strftime(sTime, 20, "<%H:%M:%S> ", &today);
+#else
+            auto today = localtime(&ltime);
             strftime(sTime, 20, "<%H:%M:%S> ", today);
+#endif
             tempString = LogStringType(sTime) + tempString;
         }
         else if (dwCVarState == 6)              // Log_IncludeTime
@@ -1011,8 +1111,14 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
             char sTime[128];
             time_t ltime;
             time(&ltime);
-            struct tm* today = localtime(&ltime);
+#ifdef AZ_COMPILER_MSVC
+            struct tm today;
+            localtime_s(&today, &ltime);
+            strftime(sTime, 40, "<%Y-%m-%d %H:%M:%S> ", &today);
+#else
+            auto today = localtime(&ltime);
             strftime(sTime, 40, "<%Y-%m-%d %H:%M:%S> ", today);
+#endif
             tempString = LogStringType(sTime) + tempString;
         }
     }
@@ -1022,6 +1128,7 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
         tempString += '\n';
     }
 
+    // do not OutputDebugString in release.
 #if !defined(_RELEASE)
     if (queueState == MessageQueueState::NotQueued)
     {
@@ -1029,16 +1136,22 @@ void CLog::LogStringToFile(const char* szString, ELogType logType, bool bAdd, Me
         // Here we replace non-ASCII characters with '?', which is the same as OutputDebugStringW will do for non-ANSI.
         // Thus, we discard slightly more characters (ie, those inside the current ANSI code-page, but outside ASCII).
         // In exchange, we save double-converting that would have happened otherwise (UTF-8 -> UTF-16 -> ANSI).
-        string asciiString;
-        Unicode::Convert<Unicode::eEncoding_ASCII, Unicode::eEncoding_UTF8>(asciiString, tempString);
+        LogStringType asciiString;
+        Unicode::ConvertSafe<Unicode::EErrorRecovery::eErrorRecovery_FallbackLatin1ThenDiscard, Unicode::eEncoding_ASCII, Unicode::eEncoding_UTF8>(asciiString, tempString);
+#if !defined(AZ_TESTS_ENABLED)
+        // in TEST mode, we allow the above calls to be covered, but not the below system call to OutputDebugString.
+        // it is not necessary to "test" the system function OutputDebugString, and it tends to spam the console
+        // obscuring actual test results and issues.
         OutputDebugString(asciiString.c_str());
+#endif // !defined(AZ_TESTS_ENABLED)
     }
 
     if (!bIsMainThread)
     {
         return;
     }
-#endif
+#endif // !defined(_RELEASE)
+
 
     //////////////////////////////////////////////////////////////////////////
     // Call callback function.
@@ -1105,6 +1218,11 @@ void CLog::LogString(const char* szString, ELogType logType)
 //////////////////////////////////////////////////////////////////////
 void CLog::LogToFilePlus(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     if (m_pLogVerbosity && m_pLogVerbosity->GetIVal() < 0)
     {
         return;
@@ -1136,6 +1254,11 @@ void CLog::LogToFilePlus(const char* szFormat, ...)
 //////////////////////////////////////////////////////////////////////
 void CLog::LogToFile(const char* szFormat, ...)
 {
+    if (!CheckLogFormatter(szFormat))
+    {
+        return;
+    }
+
     if (m_pLogVerbosity && m_pLogVerbosity->GetIVal() < 0)
     {
         return;
@@ -1248,9 +1371,62 @@ void CLog::CreateBackupFile() const
     string bakdest = PathUtil::Make(LOG_BACKUP_PATH, sFileWithoutExt + sBackupNameAttachment + "." + sExt);
     fileSystem->CreatePath(LOG_BACKUP_PATH);
     cry_strcpy(m_sBackupFilename, bakdest.c_str());
+    // Remove any existing backup file with the same name first since the copy will fail otherwise.
+    fileSystem->Remove(m_sBackupFilename);
     fileSystem->Copy(m_szFilename, bakdest);
-
 #endif // AZ_LEGACY_CRYSYSTEM_TRAIT_ALLOW_CREATE_BACKUP_LOG_FILE
+}
+
+void CLog::CheckAndPruneBackupLogs() const
+{
+    AZ::IO::FileIOBase* fileSystem = AZ::IO::FileIOBase::GetDirectInstance();
+
+    AZ::u64 totalBackupDirectorySize = 0;
+
+    struct fileInfo
+    {
+        time_t modTime;
+        AZStd::string filename;
+        AZ::u64 filesize;
+
+        fileInfo(time_t _modTime, const char* _name, AZ::u64 _size)
+        {
+            modTime = _modTime;
+            filename = _name;
+            filesize = _size;
+        }
+    };
+
+    AZStd::list<fileInfo> fileInfoList;
+
+    // Now that we've copied the new log over, lets check the size of the backup folder and trim it as necessary to keep it within appropriate limits
+    AZ::IO::Result res = fileSystem->FindFiles(LOG_BACKUP_PATH, "*.*",
+        [&totalBackupDirectorySize, &fileSystem, &fileInfoList](const char* fileName)
+    {
+        AZ::u64 size;
+        fileSystem->Size(fileName, size);
+        AZ::u64 modTime = fileSystem->ModificationTime(fileName);
+        fileInfoList.push_back(fileInfo(modTime, fileName, size));
+
+        totalBackupDirectorySize += size;
+        return true;
+    });
+
+    AZ::u64 max_size = LogCVars::max_backup_directory_size_mb;
+    max_size = max_size << 20;  // Convert from MB to bytes
+
+    if (totalBackupDirectorySize > max_size)
+    {
+        // Sort the list from lowest to highest modtime (oldest to newest logs)
+        fileInfoList.sort([](const fileInfo &a, const fileInfo&b) { return a.modTime < b.modTime; });
+
+        while (totalBackupDirectorySize > max_size && fileInfoList.size() > 0)
+        {
+            fileSystem->Remove(fileInfoList.front().filename.c_str());
+            totalBackupDirectorySize -= fileInfoList.front().filesize;
+            fileInfoList.pop_front();
+        }
+    }
 }
 
 //set the file used to log to disk
@@ -1262,7 +1438,7 @@ bool CLog::SetFileName(const char* fileNameOrAbsolutePath, bool backupLogs)
     {
         return false;
     }
-    strncpy(m_szFilename, fileNameOrAbsolutePath, sizeof(m_szFilename));
+    azstrncpy(m_szFilename, AZ_ARRAY_SIZE(m_szFilename), fileNameOrAbsolutePath, sizeof(m_szFilename));
 
     CreateBackupFile();
 
@@ -1286,6 +1462,7 @@ void CLog::UpdateLoadingScreen(const char* szFormat, ...)
 #if !defined(EXCLUDE_NORMAL_LOG)
     if (szFormat)
     {
+        // This function is OK to call with nullptr, but then it does not log anything.
         va_list args;
         va_start(args, szFormat);
 
@@ -1410,8 +1587,14 @@ void CLog::Update()
                 char sTime[128];
                 time_t ltime;
                 time(&ltime);
-                struct tm* today = localtime(&ltime);
+#ifdef AZ_COMPILER_MSVC
+                struct tm today;
+                localtime_s(&today, &ltime);
+                strftime(sTime, sizeof(sTime) - 1, "<%H:%M:%S> ", &today);
+#else
+                auto today = localtime(&ltime);
                 strftime(sTime, sizeof(sTime) - 1, "<%H:%M:%S> ", today);
+#endif
                 LogAlways("<tick> %s", sTime);
             }
         }

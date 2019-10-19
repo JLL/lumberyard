@@ -238,14 +238,13 @@ namespace CloudGemPlayerAccount
 
     void CloudGemPlayerAccountSystemComponent::Init()
     {
+        m_anonymousCredentialsProvider = std::make_shared<Aws::Auth::AnonymousAWSCredentialsProvider>();
     }
 
     void CloudGemPlayerAccountSystemComponent::Activate()
     {
         CloudGemPlayerAccountRequestBus::Handler::BusConnect();
         CloudGemFramework::CloudCanvasPlayerIdentityNotificationBus::Handler::BusConnect();
-        m_anonymousCredentialsProvider = std::make_shared<Aws::Auth::AnonymousAWSCredentialsProvider>();
-        m_clientConfig = AZStd::make_shared <CloudGemFramework::AwsApiClientJobConfig<Aws::CognitoIdentityProvider::CognitoIdentityProviderClient>>();
     }
 
     void CloudGemPlayerAccountSystemComponent::Deactivate()
@@ -259,7 +258,7 @@ namespace CloudGemPlayerAccount
     void CloudGemPlayerAccountSystemComponent::OnBeforeIdentityUpdate()
     {
         if (m_userPoolLogicalName.empty()) {
-            gEnv->pLog->LogWarning("CloudGemPlayerAccountSystemComponent: The user pool logical name has not been set.");
+            AZ_Warning("PlayerAccount", false, "CloudGemPlayerAccountSystemComponent: The user pool logical name has not been set.");
             return;
         }
 
@@ -267,7 +266,7 @@ namespace CloudGemPlayerAccount
         const auto regionSize = poolId.find('_');
         if (regionSize == AZStd::string::npos)
         {
-            gEnv->pLog->LogWarning("CloudGemPlayerAccountSystemComponent: Unable to register token retrieval strategy, missing region.");
+            AZ_Warning("PlayerAccount", false, "CloudGemPlayerAccountSystemComponent: Unable to register token retrieval strategy, missing region.");
             return;
         }
 
@@ -338,7 +337,8 @@ namespace CloudGemPlayerAccount
         {
             if (!basicResult.wasSuccessful)
             {
-                EBUS_EVENT(CloudGemPlayerAccountNotificationBus, OnGetCurrentUserComplete, basicResult);
+                BasicResultInfo resultInfo FAILED_RESULT_INITIALIZER(requestId, "", basicResult.errorTypeName, basicResult.errorMessage);
+                EBUS_EVENT(CloudGemPlayerAccountNotificationBus, OnGetCurrentUserComplete, resultInfo);
                 return;
             }
 
@@ -976,8 +976,8 @@ namespace CloudGemPlayerAccount
         refreshRequest.SetAuthFlow(Model::AuthFlowType::REFRESH_TOKEN_AUTH);
         refreshRequest.AddAuthParameters("REFRESH_TOKEN", tokens.longTermToken);
 
-        auto identityClient = m_clientConfig->GetClient();
-        Model::InitiateAuthOutcome refreshOutcome = identityClient->InitiateAuth(refreshRequest);
+        Aws::CognitoIdentityProvider::CognitoIdentityProviderClient identityClient( m_anonymousCredentialsProvider->GetAWSCredentials(), CloudGemFramework::AwsApiJob::GetDefaultConfig()->GetClientConfiguration() );
+        Model::InitiateAuthOutcome refreshOutcome = identityClient.InitiateAuth(refreshRequest);
 
         Aws::Auth::LoginAccessTokens tokenGroup;
         if (!refreshOutcome.IsSuccess())
@@ -1022,7 +1022,7 @@ namespace CloudGemPlayerAccount
         Model::GetUserRequest getUserRequest;
         getUserRequest.SetAccessToken(authenticationResult.GetAccessToken());
 
-        Model::GetUserOutcome getUserOutcome = identityClient->GetUser(getUserRequest);
+        Model::GetUserOutcome getUserOutcome = identityClient.GetUser(getUserRequest);
 
         if (!getUserOutcome.IsSuccess())
         {
@@ -1060,7 +1060,7 @@ namespace CloudGemPlayerAccount
             }
             else
             {
-                gEnv->pLog->LogError("Unable to refresh auth tokens for user %s: %s %s", username.c_str(), job->error.GetExceptionName().c_str(), job->error.GetMessage().c_str());
+                AZ_Warning("PlayerAccount", false, "Unable to refresh auth tokens for user %s: %s %s", username.c_str(), job->error.GetExceptionName().c_str(), job->error.GetMessage().c_str());
                 handler(existingTokens);
             }
             SignOutIfTokenIsInvalid(job, username);
@@ -1082,16 +1082,7 @@ namespace CloudGemPlayerAccount
         char buffer[TIME_BUFFER_SIZE];
 
         time(&rawtime);
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(CloudGemPlayerAccountSystemComponent_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_PLATFORM_WINDOWS)
-        gmtime_s(&timeinfo, &rawtime);
-#else
-        gmtime_r(&rawtime, &timeinfo);
-#endif
+        AZ_TRAIT_CTIME_GMTIME(&timeinfo, &rawtime);
 
         // Matches SimpleDateFormat("EEE MMM d HH:mm:ss z yyyy") in Java. 
         // First, the month and day ("Mon Day ") section
@@ -1328,7 +1319,7 @@ namespace CloudGemPlayerAccount
         const auto regionSize = poolId.find('_');
         if (regionSize == AZStd::string::npos)
         {
-            gEnv->pLog->LogWarning("CloudGemPlayerAccountSystemComponent: Invalid user pool id, it does not contain a region prefix.");
+            AZ_Warning("PlayerAccount", false, "CloudGemPlayerAccountSystemComponent: Invalid user pool id, it does not contain a region prefix.");
             return AZStd::string();
         }
 

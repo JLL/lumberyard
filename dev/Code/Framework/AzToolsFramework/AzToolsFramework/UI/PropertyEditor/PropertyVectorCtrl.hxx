@@ -85,6 +85,7 @@ namespace AzToolsFramework
 
     Q_SIGNALS:
         void valueChanged(double);
+        void editingFinished();
 
     public Q_SLOTS:
         void onValueChanged(double newValue);
@@ -207,6 +208,7 @@ namespace AzToolsFramework
 Q_SIGNALS:
         void valueChanged(double);
         void valueAtIndexChanged(int elementIndex, double newValue);
+        void editingFinished();
 
     public Q_SLOTS:
         QWidget* GetFirstInTabOrder();
@@ -342,7 +344,7 @@ Q_SIGNALS:
             {
                 if (elements[idx]->WasValueEditedByUser())
                 {
-                    actualValue.SetElement(idx, elements[idx]->GetValue());
+                    actualValue.SetElement(idx, static_cast<float>(elements[idx]->GetValue()));
                 }
             }
             instance = actualValue;

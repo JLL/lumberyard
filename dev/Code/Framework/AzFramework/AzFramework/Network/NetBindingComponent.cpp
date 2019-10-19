@@ -34,7 +34,7 @@ namespace AzFramework
         if (serializeContext)
         {
             serializeContext->Class<NetBindingComponent, AZ::Component>()
-                ->SerializerForEmptyClass();
+                ;
 
             AZ::EditContext* editContext = serializeContext->GetEditContext();
 
@@ -44,7 +44,7 @@ namespace AzFramework
                     "Network Binding", "The Network Binding component marks an entity as able to be replicated across the network")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Networking")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NetBinding.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NetBinding.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/NetBinding.png")
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-network-binding.html")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c));
@@ -58,7 +58,7 @@ namespace AzFramework
             behaviorContext->EBus<NetBindingHandlerBus>("NetBindingHandlerBus")
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::Preview)
                 ->Event("IsEntityBoundToNetwork", &NetBindingHandlerBus::Events::IsEntityBoundToNetwork)
-                ->Event("IsEntityAuthoritative", &NetBindingHandlerBus::Events::IsEntityBoundToNetwork)
+                ->Event("IsEntityAuthoritative", &NetBindingHandlerBus::Events::IsEntityAuthoritative)
 
                 // Desired, but currently unsupported events.
                 // Seems to be an unsupported type(AZ::u16)

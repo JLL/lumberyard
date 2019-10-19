@@ -18,6 +18,7 @@
 #include <AzCore/std/parallel/binary_semaphore.h>
 #include <AzFramework/Network/SocketConnection.h>
 #include <AzToolsFramework/Application/ToolsApplication.h>
+#include <AzToolsFramework/API/AssetDatabaseBus.h>
 #include "AssetBuilderInfo.h"
 
 //! This bus is used to signal to the AssetBuilderComponent to start up and execute while providing a return code
@@ -43,7 +44,8 @@ class AssetBuilderComponent
     : public AZ::Component,
     public BuilderBus::Handler,
     public AssetBuilderSDK::AssetBuilderBus::Handler,
-    public AzFramework::EngineConnectionEvents::Bus::Handler
+    public AzFramework::EngineConnectionEvents::Bus::Handler,
+    public AzToolsFramework::AssetDatabase::AssetDatabaseRequestsBus::Handler
 {
 public:
     AZ_COMPONENT(AssetBuilderComponent, "{04332899-5d73-4d41-86b7-b1017d349673}")
@@ -69,6 +71,8 @@ public:
     void Disconnected(AzFramework::SocketConnection* connection) override;
 
     static bool IsInDebugMode(const AzFramework::CommandLine& commandLine);
+    //AssetDatabaseRequestsBus Handler
+    bool GetAssetDatabaseLocation(AZStd::string& location) override;
 protected:
 
     AZ_DISABLE_COPY_MOVE(AssetBuilderComponent);
@@ -116,6 +120,8 @@ protected:
     //! Handles calling the appropriate builder job function for the incoming job
     void JobThread();
 
+    void ProcessJob(const AssetBuilderSDK::ProcessJobFunction& job, const AssetBuilderSDK::ProcessJobRequest& request, AssetBuilderSDK::ProcessJobResponse& outResponse);
+
     //! Handles a builder registration request
     bool HandleRegisterBuilder(const AZStd::string& inputFilePath, const AZStd::string& outputFilePath) const;
 
@@ -133,7 +139,7 @@ protected:
     AZStd::vector<AZStd::unique_ptr<AssetBuilder::ExternalModuleAssetBuilderInfo>> m_assetBuilderInfoList;
 
     //! Currently loading builder
-    AssetBuilder::ExternalModuleAssetBuilderInfo* m_currentAssetBuilder;
+    AssetBuilder::ExternalModuleAssetBuilderInfo* m_currentAssetBuilder = nullptr;
     
     //! Thread for running a job, so we don't block the network thread while doing work
     AZStd::thread_desc m_jobThreadDesc;

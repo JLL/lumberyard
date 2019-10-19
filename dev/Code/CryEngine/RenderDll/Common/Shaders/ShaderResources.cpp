@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -14,6 +14,9 @@
 #include "StdAfx.h"
 #include "ShaderResources.h"
 #include "GraphicsPipeline/Common/GraphicsPipelineStateSet.h"
+
+#include <AzCore/std/sort.h>
+#include <AzCore/std/smart_ptr/make_shared.h>
 
 #ifndef  NULL_RENDERER
     #include "DriverD3D.h"
@@ -115,7 +118,7 @@ size_t CShaderResources::GetResourceMemoryUsage(ICrySizer*  pSizer)
     SIZER_COMPONENT_NAME(pSizer, "CShaderResources");
     for (auto &iter : m_TexturesResourcesMap )
     {
-        SEfResTexture*  	pTexture = &(iter.second);
+        SEfResTexture* pTexture = &(iter.second);
         if (pTexture->m_Sampler.m_pITex)
         {
             nCurrentElementSize = pTexture->m_Sampler.m_pITex->GetDataSize();
@@ -183,7 +186,10 @@ CShaderResources::~CShaderResources()
 
 CShaderResources::CShaderResources()
 {
-    m_pipelineStateCache = std::make_shared<CGraphicsPipelineStateLocalCache>();
+    // Only do expensive DX12 resource set building for PC DX12
+#if defined(CRY_USE_DX12)
+    m_pipelineStateCache = AZStd::make_shared<CGraphicsPipelineStateLocalCache>();
+#endif
     Reset();
 }
 
@@ -192,7 +198,10 @@ CShaderResources::CShaderResources(SInputShaderResources* pSrc)
     assert(pSrc);
     PREFAST_ASSUME(pSrc);
 
-    m_pipelineStateCache = std::make_shared<CGraphicsPipelineStateLocalCache>();
+    // Only do expensive DX12 resource set building for PC DX12
+#if defined(CRY_USE_DX12)
+    m_pipelineStateCache = AZStd::make_shared<CGraphicsPipelineStateLocalCache>();
+#endif
     Reset();
 
     if (!pSrc)
@@ -212,16 +221,15 @@ CShaderResources::CShaderResources(SInputShaderResources* pSrc)
         *m_pDeformInfo = pSrc->m_DeformInfo;
     }
 
-    for (const auto& it : pSrc->m_TexturesResourcesMap)
+    for (auto it = pSrc->m_TexturesResourcesMap.begin(), end = pSrc->m_TexturesResourcesMap.end(); it != end; ++it)
     {
-        const SEfResTexture& texture = it.second;
+        const SEfResTexture& texture = it->second;
         // Omit any resources with no texture present
         if (!texture.m_Name.empty() || texture.m_Sampler.m_pTex)
         {
-            m_TexturesResourcesMap[it.first] = texture;
+            m_TexturesResourcesMap[it->first] = texture;
         }
     }
-    
 
     SetInputLM(pSrc->m_LMaterial);
 }
@@ -258,7 +266,6 @@ CShaderResources* CShaderResources::Clone() const
         return CShader::s_ShaderResources_known[1];
     }
     pSR->m_Id = CShader::s_ShaderResources_known.Num();
-    ScopedSwitchToGlobalHeap globalHeap;
     CShader::s_ShaderResources_known.AddElem(pSR);
 
     return pSR;
@@ -457,11 +464,12 @@ void CShaderResources::UpdateConstants(IShader* pISH)
 
 namespace
 {
-    void WriteConstants(SFXParam* requestedParameter, DynArray<SShaderParam>& parameters, Vec4* outConstants)
+    void WriteConstants(SFXParam* requestedParameter, DynArray<SShaderParam>& parameters, AZStd::vector<Vec4>& outConstants)
     {
         const AZ::u32 parameterFlags = requestedParameter->GetFlags();
         const AZ::u8  paramStageSetter = requestedParameter->m_OffsetStageSetter;
         const AZ::u32 registerOffset = requestedParameter->m_Register[paramStageSetter];
+        AZ_Assert(registerOffset < outConstants.size(), "Requested parameter beyond the bounds of the constant buffer.");
         float* outputData = &outConstants[registerOffset][0];
 
         for (AZ::u32 componentIdx = 0; componentIdx < 4; componentIdx++)
@@ -481,7 +489,7 @@ namespace
 
     // Creates a parameters list for populating the constants in the Constant Buffer and returns the minimum and maximum slot offset 
     // of the newly added parameters taking their size into account for the maximum offset.
-	// NOTE:  the minimum and maximum slot offsets MUST be initialized outside (min=10000, max=0) for the gathering to be valid.
+    // NOTE:  the minimum and maximum slot offsets MUST be initialized outside (min=10000, max=0) for the gathering to be valid.
     void AddShaderParamToArray( 
         SShaderFXParams& inParameters, FixedDynArray<SFXParam*>& outParameters, 
         EHWShaderClass shaderClass, AZ::s32 &minSlotOffset, AZ::s32 &maxSlotOffset )
@@ -522,8 +530,8 @@ namespace
                     outParameters.push_back(parameter);
                     parameter->m_OffsetStageSetter = shaderClass;
                     parameter->m_StagesUsage = ((0x1 << shaderClass) & 0xff);
-                    minSlotOffset = std::min(minSlotOffset, static_cast<AZ::s32>(parameter->m_Register[shaderClass]));
-                    maxSlotOffset = std::max(maxSlotOffset, static_cast<AZ::s32>(parameter->m_Register[shaderClass] + parameter->m_RegisterCount));
+                    minSlotOffset = AZStd::GetMin(minSlotOffset, static_cast<AZ::s32>(parameter->m_Register[shaderClass]));
+                    maxSlotOffset = AZStd::GetMax(maxSlotOffset, static_cast<AZ::s32>(parameter->m_Register[shaderClass] + parameter->m_RegisterCount));
                 }
             }
         }
@@ -534,7 +542,19 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
 {
     AZ_TRACE_METHOD();
     CShader* shader = (CShader*)abstractShader;
-    assert(shader->m_Flags & EF_LOADED); // Make sure shader is parsed
+    
+    // Do not attempt to update constant buffers for shaders that are not compiled or parsed.
+    // We can hit this case easily when r_shadersImport >= 2 under two primary scenarios:
+    // 1) We want to render an object with a shader that was never compiled because it was never added to the shader list from the Remote Shader Compiler.
+    // This is resolved by running the game in Debug or Profile and properly building your shader permutation list and rebuilding your shader paks.
+    // 2) The shader permutation was never compiled because it was never intended to render, but it is still loaded into memory and active.
+    // This occurs when a material's submaterial is unused, for example when a nodraw shader is attached as a submaterial.
+    // The material system naively attempts to update shader constants for all submaterial's shader techniques/passes 
+    // via CMatInfo::RefreshShaderResourceConstants(), so we do not want to attempt to upload shader constants for shader permutations that will never be used.
+    if (!(shader->m_Flags & EF_LOADED))
+    {
+        return;
+    }
 
     // Build list of used parameters and fill constant buffer scratchpad
     SShaderFXParams& parameterRegistry = gRenDev->m_cEF.m_Bin.mfGetFXParams(shader);
@@ -567,11 +587,11 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
         }
     }
 
-	// Ordering the slots according to the Vertex Shader's slots offsets.  The order is valid in most cases with 
-	// the exception when the different stages have different slots offsets, however the slots' offsets range 
-	// is always valid since it's covered by the minimum and maximum gathering that happens during the 
-	// slots go over.
-    std::sort(usedParameters.begin(), usedParameters.end(), [] (const SFXParam* lhs, const SFXParam* rhs)
+    // Ordering the slots according to the Vertex Shader's slots offsets.  The order is valid in most cases with 
+    // the exception when the different stages have different slots offsets, however the slots' offsets range 
+    // is always valid since it's covered by the minimum and maximum gathering that happens during the 
+    // slots go over.
+    AZStd::sort(usedParameters.begin(), usedParameters.end(), [] (const SFXParam* lhs, const SFXParam* rhs)
     {
         return lhs->m_Register[0] < rhs->m_Register[0];
     });
@@ -600,7 +620,7 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
                     for (AZ::u32 j = 0; j < publicParameters.size(); j++)
                     {
                         SShaderParam& outParameter = publicParameters[j];
-                        if (!strcmp(outParameter.m_Name, tweakable.m_Name))
+                        if (outParameter.m_Name == tweakable.m_Name)
                         {
                             tweakable.CopyType(outParameter);
                             outParameter.CopyValueNoString(tweakable); // there should not be 'string' values set to shader
@@ -611,7 +631,7 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
 
                 for (AZ::u32 i = 0; i < usedParameters.size(); i++)
                 {
-                    WriteConstants(usedParameters[i], publicParameters, m_Constants.data());
+                    WriteConstants(usedParameters[i], publicParameters, m_Constants);
                 }
             }
         }
@@ -691,6 +711,8 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
 
         m_ConstantBuffer->UpdateBuffer(&m_Constants[0], m_Constants.size() * sizeof(Vec4));
 
+    // Only do expensive DX12 resource set building for PC DX12
+#if defined(CRY_USE_DX12)
         if (!m_pCompiledResourceSet)
         {
             m_pCompiledResourceSet = CDeviceObjectFactory::GetInstance().CreateResourceSet();
@@ -699,6 +721,7 @@ void CShaderResources::Rebuild(IShader* abstractShader, AzRHI::ConstantBufferUsa
         m_pCompiledResourceSet->Clear();
         m_pCompiledResourceSet->Fill(shader, this, EShaderStage_AllWithoutCompute);
         m_pCompiledResourceSet->Build();
+#endif
     }
 }
 

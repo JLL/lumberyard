@@ -10,8 +10,6 @@
 *
 */
 
-#include "precompiled.h"
-
 #include "Indexer.h"
 
 #include <Include/ScriptCanvas/Libraries/Logic/Indexer.generated.cpp>
@@ -22,9 +20,6 @@ namespace ScriptCanvas
     {
         namespace Logic
         {
-            Indexer::Indexer()
-            {}
-
             void Indexer::OnInputSignal(const SlotId& slotId)
             {
                 auto findSlotOutcome = FindSlotIndex(slotId);

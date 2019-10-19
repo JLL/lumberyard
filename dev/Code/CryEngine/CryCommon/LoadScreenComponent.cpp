@@ -31,7 +31,7 @@
 
 #if AZ_LOADSCREENCOMPONENT_ENABLED
 
-namespace 
+namespace
 {
     // Due to issues with DLLs sometimes there can be different values of gEnv in different DLLs.
     // So we use this preferred method of getting the global environment
@@ -62,7 +62,7 @@ void LoadScreenComponent::Reflect(AZ::ReflectContext* context)
     {
         serializeContext->Class<LoadScreenComponent, AZ::Component>()
             ->Version(1)
-            ->SerializerForEmptyClass();
+            ;
 
         AZ::EditContext* editContext = serializeContext->GetEditContext();
         if (editContext)
@@ -96,6 +96,7 @@ void LoadScreenComponent::Reset()
             if (canvasEntity)
             {
                 GetGlobalEnv()->pLyShine->ReleaseCanvas(m_gameCanvasEntityId, false);
+                GetGlobalEnv()->pLyShine->OnLoadScreenUnloaded();
             }
         }
 
@@ -106,6 +107,7 @@ void LoadScreenComponent::Reset()
             if (canvasEntity)
             {
                 GetGlobalEnv()->pLyShine->ReleaseCanvas(m_levelCanvasEntityId, false);
+                GetGlobalEnv()->pLyShine->OnLoadScreenUnloaded();
             }
         }
     }
@@ -160,6 +162,9 @@ AZ::EntityId LoadScreenComponent::loadFromCfg(const char* pathVarName, const cha
     }
 
     EBUS_EVENT_ID(canvasId, UiCanvasBus, SetKeepLoadedOnLevelUnload, true);
+
+    // Set the load screen draw order so it renders in front of other canvases that may load during the level load
+    EBUS_EVENT_ID(canvasId, UiCanvasBus, SetDrawOrder, std::numeric_limits<int>::max());
 
     ICVar* autoPlayVar = GetGlobalEnv()->pConsole->GetCVar(autoPlayVarName);
     string sequence = autoPlayVar ? autoPlayVar->GetString() : "";
@@ -382,6 +387,11 @@ void LoadScreenComponent::Resume()
 void LoadScreenComponent::Stop()
 {
     Reset();
+}
+
+bool LoadScreenComponent::IsPlaying()
+{
+    return m_isPlaying;
 }
 
 #endif // if AZ_LOADSCREENCOMPONENT_ENABLED

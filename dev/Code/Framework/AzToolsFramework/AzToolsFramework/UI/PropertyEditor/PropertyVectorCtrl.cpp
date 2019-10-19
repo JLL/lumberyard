@@ -13,10 +13,11 @@
 #include "PropertyVectorCtrl.hxx"
 #include "DHQSpinbox.hxx"
 #include "PropertyQTConstants.h"
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 #include <QtWidgets/QLabel>
 #include <AzCore/Math/Transform.h>
-#include <AzFramework/Math/MathUtils.h> // for ConvertTransformToEulerDegrees
 #include <cmath>
 
 namespace AzToolsFramework
@@ -38,6 +39,7 @@ namespace AzToolsFramework
         using OnValueChanged = void(QDoubleSpinBox::*)(double);
         auto valueChanged = static_cast<OnValueChanged>(&QDoubleSpinBox::valueChanged);
         connect(m_spinBox, valueChanged, this, &VectorElement::onValueChanged);
+        connect(m_spinBox, &QDoubleSpinBox::editingFinished, this, &VectorElement::editingFinished);
     }
 
     void VectorElement::SetLabel(const char* label)
@@ -93,7 +95,7 @@ namespace AzToolsFramework
 
         // Adding elements to the layout
         int numberOfElementsRemaining = m_elementCount;
-        int numberOfRowsInLayout = elementsPerRow <= 0 ? 1 : std::ceil(static_cast<float>(m_elementCount) / elementsPerRow);
+        int numberOfRowsInLayout = elementsPerRow <= 0 ? 1 : static_cast<int>(std::ceil(static_cast<float>(m_elementCount) / static_cast<float>(elementsPerRow)));
         int actualElementsPerRow = elementsPerRow <= 0 ? m_elementCount : elementsPerRow;
 
         for (int rowIdx = 0; rowIdx < numberOfRowsInLayout; rowIdx++)
@@ -118,6 +120,7 @@ namespace AzToolsFramework
                         {
                             OnValueChangedInElement(value, elementIndex);
                         });
+                    connect(m_elements[elementIndex]->GetSpinBox(), &QDoubleSpinBox::editingFinished, this, &PropertyVectorCtrl::editingFinished);
 
                     numberOfElementsRemaining--;
                 }
@@ -252,10 +255,14 @@ namespace AzToolsFramework
     PropertyVectorCtrl* VectorPropertyHandlerCommon::ConstructGUI(QWidget* parent) const
     {
         PropertyVectorCtrl* newCtrl = aznew PropertyVectorCtrl(parent, m_elementCount, m_elementsPerRow, m_customLabels);
-        QObject::connect(newCtrl, &PropertyVectorCtrl::valueChanged, [newCtrl]()
+        QObject::connect(newCtrl, &PropertyVectorCtrl::valueChanged, newCtrl, [newCtrl]()
             {
                 EBUS_EVENT(PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
             });
+        newCtrl->connect(newCtrl, &PropertyVectorCtrl::editingFinished, [newCtrl]()
+        {
+            PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::Bus::Handler::OnEditingFinished, newCtrl);
+        });
 
         newCtrl->setMinimum(-std::numeric_limits<float>::max());
         newCtrl->setMaximum(std::numeric_limits<float>::max());
@@ -410,9 +417,9 @@ namespace AzToolsFramework
     {
         VectorElement** elements = GUI->getElements();
 
-        AZ::Vector3 eulerRotation(elements[0]->GetValue(), elements[1]->GetValue(), elements[2]->GetValue());
-        AZ::Transform eulerRepresentation = AzFramework::ConvertEulerDegreesToTransform(eulerRotation);
-        AZ::Quaternion newValue = AZ::Quaternion::CreateFromTransform(eulerRepresentation);
+        AZ::Vector3 eulerRotation(static_cast<float>(elements[0]->GetValue()), static_cast<float>(elements[1]->GetValue()), static_cast<float>(elements[2]->GetValue()));
+        AZ::Quaternion newValue;
+        newValue.SetFromEulerDegrees(eulerRotation);
 
         instance = static_cast<AZ::Quaternion>(newValue);
     }
@@ -420,8 +427,8 @@ namespace AzToolsFramework
     bool QuaternionPropertyHandler::ReadValuesIntoGUI(size_t, PropertyVectorCtrl* GUI, const AZ::Quaternion& instance, InstanceDataNode*)
     {
         GUI->blockSignals(true);
-
-        AZ::Vector3 eulerRotation = AzFramework::ConvertTransformToEulerDegrees(AZ::Transform::CreateFromQuaternion(instance));
+        
+        AZ::Vector3 eulerRotation = instance.GetEulerDegrees();
 
         for (int idx = 0; idx < m_common.GetElementCount(); ++idx)
         {

@@ -23,7 +23,9 @@
 
 #include <QtWidgets/QApplication>
 #include <QtCore/QTimer>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QFileInfo::d_ptr': class 'QSharedDataPointer<QFileInfoPrivate>' needs to have dll-interface to be used by clients of class 'QFileInfo'
 #include <QtCore/QDir>
+AZ_POP_DISABLE_WARNING
 
 #include <AzFramework/CommandLine/CommandLine.h>
 
@@ -35,8 +37,10 @@
 #include <QAction>
 #include <QMenu>
 #include <QFontDatabase>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QResource::d_ptr': class 'QScopedPointer<QResourcePrivate,QScopedPointerDeleter<T>>' needs to have dll-interface to be used by clients of class 'QResource'
 #include <QResource>
-#include <QDir>
+AZ_POP_DISABLE_WARNING
+#include <QProxyStyle>
 
 #include <AzFramework/StringFunc/StringFunc.h>
 
@@ -45,7 +49,7 @@ extern int __argc;
 extern char **__argv;
 #endif
 
-#ifdef AZ_PLATFORM_APPLE
+#if AZ_TRAIT_OS_PLATFORM_APPLE
 #include <mach-o/dyld.h>
 #endif
 
@@ -123,6 +127,19 @@ namespace AzToolsFramework
         }
     }
 
+    class AZQtApplicationStyle : public QProxyStyle
+    {
+    public:
+        int styleHint(StyleHint hint, const QStyleOption* option = nullptr, const QWidget* widget = nullptr, QStyleHintReturn* returnData = nullptr) const override
+        {
+            if (hint == QStyle::SH_TabBar_Alignment)
+            {
+                return Qt::AlignLeft;
+            }
+            return QProxyStyle::styleHint(hint, option, widget, returnData);
+        }
+    };
+
     class AZQtApplication
         : public QApplication
     {
@@ -131,6 +148,7 @@ namespace AzToolsFramework
         AZQtApplication(int& argc, char** argv)
             : QApplication(argc, argv)
         {
+            setStyle(new AZQtApplicationStyle);
             qInstallMessageHandler(myMessageOutput);
         }
 
@@ -147,7 +165,6 @@ namespace AzToolsFramework
         {
             serialize->Class<Framework, AZ::Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass()
             ;
 
             MainWindowSavedState::Reflect(serialize);
@@ -308,7 +325,7 @@ namespace AzToolsFramework
     void Framework::Init()
     {
         char myFileName[MAX_PATH] = {0};
-#ifdef AZ_PLATFORM_APPLE
+#if AZ_TRAIT_OS_PLATFORM_APPLE
         uint32_t bufSize = AZ_ARRAY_SIZE(myFileName);
         _NSGetExecutablePath(myFileName, &bufSize);
         if (strlen(myFileName) > 0)
@@ -394,7 +411,7 @@ namespace AzToolsFramework
         EBUS_EVENT_RESULT(pApp, AZ::ComponentApplicationBus, GetApplication);
         if (pApp)
         {
-            
+
             AZStd::chrono::system_clock::time_point now = AZStd::chrono::system_clock::now();
             static AZStd::chrono::system_clock::time_point lastUpdate = now;
 

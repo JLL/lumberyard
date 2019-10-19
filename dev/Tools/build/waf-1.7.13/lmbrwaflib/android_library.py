@@ -9,7 +9,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #
 
-import os, re, string, urllib, urllib2, zipfile
+import errno, os, re, string, urllib, urllib2, zipfile
+
+from socket import error as SocketError
+from ssl import SSLEOFError as SSLEOFError
 
 import xml.etree.ElementTree as ET
 
@@ -30,13 +33,15 @@ ANDROID_SDK_LOCAL_REPOS = [
     '${THIRD_PARTY}/android-sdk/1.0-az/google/m2repository',
 ]
 
-GOOGLE_MAIN_MAVEN_REPO = 'https://maven.google.com'
+GOOGLE_MAIN_MAVEN_REPO = 'maven.google.com'
 GOOGLE_MAIN_MAVEN_REPO_INDEX = {}
 
 GOOGLE_BINTRAY_MAVEN_REOPS = [
-    'https://google.bintray.com/play-billing',
-    'https://google.bintray.com/googlevr',
+    'google.bintray.com/play-billing',
+    'google.bintray.com/googlevr',
 ]
+
+PROTOCOL = None
 #                                                              #
 ################################################################
 
@@ -63,6 +68,24 @@ def get_package_name(android_manifest):
     return raw_attributes.get('package', None)
 
 
+def attempt_to_open_url(url):
+    try:
+        return urllib2.urlopen(url, timeout = 1)
+
+    except Exception as error:
+        Logs.debug('android_library: Failed to open URL %s', url)
+        Logs.debug('android_library: Exception = %s', error)
+
+        # known errors related to an SSL issue on macOS
+        if isinstance(error, urllib2.URLError):
+            reason = error.reason
+            if isinstance(reason, SSLEOFError) or (isinstance(reason, SocketError) and reason.errno == errno.ECONNRESET):
+                Logs.debug('android_library: If url is using HTTPS, try running the command with --android-maven-force-http-requests=True, '
+                            'or setting android_maven_force_http=True in _WAF_/user_settings.options.')
+
+    return None
+
+
 def build_google_main_maven_repo_index():
     '''
     Connects to the Google's main Maven repository and creates a local map of all libs currently hosted there
@@ -72,32 +95,32 @@ def build_google_main_maven_repo_index():
     if GOOGLE_MAIN_MAVEN_REPO_INDEX:
         return
 
-    master_url = '/'.join([ GOOGLE_MAIN_MAVEN_REPO, 'master-index.xml' ])
+    global PROTOCOL
+    master_root_url = '{}://{}'.format(PROTOCOL, GOOGLE_MAIN_MAVEN_REPO)
 
-    try:
-        master_repo = urllib2.urlopen(master_url)
-    except:
-        Logs.error('[ERROR] Failed to connect to {}.  Unable to access to Google\'s main Maven repository at this time.'.format(master_url))
+    master_index_url = '/'.join([ master_root_url, 'master-index.xml' ])
+    master_repo = attempt_to_open_url(master_index_url)
+    if not master_repo:
+        Logs.error('[ERROR] Failed to connect to {}.  Unable to access to Google\'s main Maven repository at this time.'.format(master_index_url))
         return
 
     data = master_repo.read()
     if not data:
-        Logs.error('[ERROR] Failed to retrive data from {}.  Unable to access to Google\'s main Maven repository at this time.'.format(master_url))
+        Logs.error('[ERROR] Failed to retrive data from {}.  Unable to access to Google\'s main Maven repository at this time.'.format(master_index_url))
         return
 
     master_index = ET.fromstring(data)
     if not is_xml_elem_valid(master_index):
-        Logs.error('[ERROR] Data retrived from {} is malformed.  Unable to access to Google\'s main Maven repository at this time.'.format(master_url))
+        Logs.error('[ERROR] Data retrived from {} is malformed.  Unable to access to Google\'s main Maven repository at this time.'.format(master_index_url))
         return
 
     for group in master_index:
         Logs.debug('android_library: Adding group %s to the main maven repo index', group.tag)
 
-        group_index_url = '/'.join([ GOOGLE_MAIN_MAVEN_REPO ] + group.tag.split('.') + [ 'group-index.xml' ])
+        group_index_url = '/'.join([ master_root_url ] + group.tag.split('.') + [ 'group-index.xml' ])
 
-        try:
-            group_index = urllib2.urlopen(group_index_url)
-        except:
+        group_index = attempt_to_open_url(group_index_url)
+        if not group_index:
             Logs.warn('[WARN] Failed to connect to {}.  Access to Google\'s main Maven repository may be incomplete.'.format(group_index_url))
             continue
 
@@ -129,9 +152,9 @@ def get_bintray_version_info(url_root):
         Logs.error('[ERROR] {}.  Unable to access this repository at this time.'.format(message))
 
     bintray_metadata_url = '/'.join([ url_root, 'maven-metadata.xml' ])
-    try:
-        bintray_metadata = urllib2.urlopen(bintray_metadata_url)
-    except:
+
+    bintray_metadata = attempt_to_open_url(bintray_metadata_url)
+    if not bintray_metadata:
         return None, []
 
     data = bintray_metadata.read()
@@ -260,6 +283,9 @@ def search_maven_repos(ctx, name, group, version):
     Logs.debug('android_library: Searching %s', GOOGLE_MAIN_MAVEN_REPO)
     build_google_main_maven_repo_index()
 
+    global PROTOCOL
+    main_repo_root = '{}://{}'.format(PROTOCOL, GOOGLE_MAIN_MAVEN_REPO)
+
     if group in GOOGLE_MAIN_MAVEN_REPO_INDEX:
         repo_libs = GOOGLE_MAIN_MAVEN_REPO_INDEX[group]
         if name in repo_libs:
@@ -273,20 +299,22 @@ def search_maven_repos(ctx, name, group, version):
                 highest_useable_version = valid_versions[-1]
 
                 aar_file = '{}-{}.aar'.format(name, highest_useable_version)
-                file_url = '/'.join([ GOOGLE_MAIN_MAVEN_REPO, group_path, name, highest_useable_version, aar_file ])
+                file_url = '/'.join([ main_repo_root, group_path, name, highest_useable_version, aar_file ])
 
                 return file_url, aar_file
 
             elif version in repo_versions:
 
                 aar_file = '{}-{}.aar'.format(name, version)
-                file_url = '/'.join([ GOOGLE_MAIN_MAVEN_REPO, group_path, name, version, aar_file ])
+                file_url = '/'.join([ main_repo_root, group_path, name, version, aar_file ])
 
                 return file_url, aar_file
 
     # finally check the other known google maven repos
-    for repo_root in GOOGLE_BINTRAY_MAVEN_REOPS:
-        Logs.debug('android_library: Searching %s', repo_root)
+    for repo in GOOGLE_BINTRAY_MAVEN_REOPS:
+        Logs.debug('android_library: Searching %s', repo)
+
+        repo_root = '{}://{}'.format(PROTOCOL, repo)
 
         lib_root = '/'.join([ repo_root, group_path, name ])
         latest_version, all_versions = get_bintray_version_info(lib_root)
@@ -357,7 +385,7 @@ class android_manifest_merger(Task):
     Merges the input manifests into the "main" manifest specifed in the task generator
     '''
     color = 'PINK'
-    run_str = '${JAVA} -cp ${MANIFEST_MERGER_CLASSPATH} ${MANIFEST_MERGER_ENTRY_POINT} --main ${MAIN_MANIFEST} --libs ${LIBRARY_MANIFESTS} --out ${TGT}'
+    run_str = '${JAVA} -cp ${MANIFEST_MERGER_CLASSPATH} com.android.manifmerger.Merger --main ${MAIN_MANIFEST} --libs ${LIBRARY_MANIFESTS} --out ${TGT}'
 
     def runnable_status(self):
         result = super(android_manifest_merger, self).runnable_status()
@@ -424,7 +452,7 @@ def process_aar(self):
     Find the Android library and unpack it so it's resources can be used by other modules
     '''
     def _could_not_find_lib_error():
-        raise Errors.WafError('[ERROR] Could not find Android library %r' % self.name)
+        raise Errors.WafError('[ERROR] Could not find Android library %r.  Run the command again with "--zones=android_library" included for more information.' % self.name)
 
     bld = self.bld
     platform = bld.env['PLATFORM']
@@ -434,6 +462,10 @@ def process_aar(self):
     if not (bld.is_android_platform(platform) or bld.cmd == 'android_studio'):
         Logs.debug('android_library: Skipping the reading of the aar')
         return
+
+    global PROTOCOL
+    if not PROTOCOL:
+        PROTOCOL = 'http' if bld.is_option_true('android_maven_force_http') else 'https'
 
     Utils.def_attrs(
         self,
@@ -502,10 +534,14 @@ def process_aar(self):
                     url_opener = urllib.FancyURLopener()
                     url_opener.retrieve(file_url, filename = lib_node.abspath())
                 except:
-                    bld.Fatal('[ERROR] Failed to download Android library {} from {}.'.format(self.name, file_url))
+                    bld.fatal('[ERROR] Failed to download Android library {} from {}.'.format(self.name, file_url))
 
         if not version:
-            version = os.path.splitext(aar_filename)[0].split('-')[-1]
+            name_components = os.path.splitext(aar_filename)[0].split('-')
+            for index, value in enumerate(name_components):
+                if value.split('.')[0].isdigit():
+                    version = '-'.join(name_components[index:])
+                    break
 
         self.android_studio_name = '{}:{}:{}'.format(group, self.name, version)
 

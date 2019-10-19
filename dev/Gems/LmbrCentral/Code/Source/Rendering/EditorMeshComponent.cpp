@@ -33,23 +33,19 @@ namespace LmbrCentral
 {
     void EditorMeshComponent::Reflect(AZ::ReflectContext* context)
     {
-        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
-
-        if (serializeContext)
+        if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             serializeContext->Class<EditorMeshComponent, EditorComponentBase>()
                 ->Version(1)
                 ->Field("Static Mesh Render Node", &EditorMeshComponent::m_mesh)
                 ;
 
-            AZ::EditContext* editContext = serializeContext->GetEditContext();
-
-            if (editContext)
+            if (AZ::EditContext* editContext = serializeContext->GetEditContext())
             {
                 editContext->Class<EditorMeshComponent>("Mesh", "The Mesh component is the primary method of adding visual geometry to entities")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Rendering")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/StaticMesh.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/StaticMesh.svg")
                         ->Attribute(AZ::Edit::Attributes::PrimaryAssetType, AZ::AzTypeInfo<LmbrCentral::MeshAsset>::Uuid())
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/StaticMesh.png")
                         ->Attribute(AZ::Edit::Attributes::DynamicIconOverride, &EditorMeshComponent::GetMeshViewportIconPath)
@@ -57,7 +53,8 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-static-mesh.html")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
-                    ->DataElement(AZ::Edit::UIHandlers::Default, &EditorMeshComponent::m_mesh);
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &EditorMeshComponent::m_mesh)
+                    ;
 
                 editContext->Class<MeshComponentRenderNode::MeshRenderOptions>(
                     "Render Options", "Rendering options for the mesh.")
@@ -90,6 +87,8 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::Max, 255)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::MeshRenderOptions::m_castShadows, "Cast shadows", "Casts shadows.")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::MeshRenderOptions::OnMinorChanged)
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::MeshRenderOptions::m_lodBoundingBoxBased, "LOD based on Bounding Boxes", "LOD based on Bounding Boxes.")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::MeshRenderOptions::OnMinorChanged)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::MeshRenderOptions::m_useVisAreas, "Use VisAreas", "Allow VisAreas to control this component's visibility.")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::MeshRenderOptions::OnMinorChanged)
 
@@ -114,7 +113,10 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::Visibility, &MeshComponentRenderNode::MeshRenderOptions::StaticPropertyVisibility)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::MeshRenderOptions::m_dynamicMesh, "Deformable mesh", "Enables vertex deformation on mesh.")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::MeshRenderOptions::OnMajorChanged)
-                    ;
+                    ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::MeshRenderOptions::m_affectGI, "Affects GI", "Affects the global illumination results.")
+                        ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::MeshRenderOptions::OnMinorChanged)
+                        ->Attribute(AZ::Edit::Attributes::Visibility, &MeshComponentRenderNode::MeshRenderOptions::StaticPropertyVisibility)
+                        ;
 
                 editContext->Class<MeshComponentRenderNode>(
                     "Mesh Rendering", "Attach geometry to the entity.")
@@ -129,11 +131,11 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::OnAssetPropertyChanged)
                     ->DataElement(AZ::Edit::UIHandlers::Default, &MeshComponentRenderNode::m_renderOptions, "Render options", "Render/draw options.")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &MeshComponentRenderNode::RefreshRenderState)
-                    ;
+                        ;
             }
         }
 
-        if (AZ::BehaviorContext* behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
+        if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
         {
             behaviorContext->Class<EditorMeshComponent>()->RequestBus("MeshComponentRequestBus");
         }
@@ -149,12 +151,14 @@ namespace LmbrCentral
         m_mesh.SetTransformStaticState(isStatic);
 
         bool currentVisibility = true;
-        AzToolsFramework::EditorVisibilityRequestBus::EventResult(currentVisibility, GetEntityId(), &AzToolsFramework::EditorVisibilityRequests::GetCurrentVisibility);
+        AzToolsFramework::EditorVisibilityRequestBus::EventResult(
+            currentVisibility, GetEntityId(), &AzToolsFramework::EditorVisibilityRequests::GetCurrentVisibility);
         m_mesh.UpdateAuxiliaryRenderFlags(!currentVisibility, ERF_HIDDEN);
 
         // Note we are purposely connecting to buses before calling m_mesh.CreateMesh().
         // m_mesh.CreateMesh() can result in events (eg: OnMeshCreated) that we want receive.
         MaterialOwnerRequestBus::Handler::BusConnect(m_entity->GetId());
+        RenderBoundsRequestBus::Handler::BusConnect(m_entity->GetId());
         MeshComponentRequestBus::Handler::BusConnect(m_entity->GetId());
         MeshComponentNotificationBus::Handler::BusConnect(m_entity->GetId());
         LegacyMeshComponentRequestBus::Handler::BusConnect(m_entity->GetId());
@@ -162,24 +166,26 @@ namespace LmbrCentral
         AZ::TransformNotificationBus::Handler::BusConnect(m_entity->GetId());
         AzToolsFramework::EditorVisibilityNotificationBus::Handler::BusConnect(GetEntityId());
         AzFramework::EntityDebugDisplayEventBus::Handler::BusConnect(GetEntityId());
+        CryPhysicsComponentRequestBus::Handler::BusConnect(GetEntityId());
         AzToolsFramework::EditorComponentSelectionRequestsBus::Handler::BusConnect(GetEntityId());
         AzToolsFramework::EditorComponentSelectionNotificationsBus::Handler::BusConnect(GetEntityId());
+        AzToolsFramework::EditorLocalBoundsRequestBus::Handler::BusConnect(GetEntityId());
 
-        auto renderOptionsChangeCallback =
+        m_mesh.m_renderOptions.m_changeCallback =
             [this]()
-        {
-            this->m_mesh.RefreshRenderState();
-
-            AffectNavmesh();
-        };
-        m_mesh.m_renderOptions.m_changeCallback = renderOptionsChangeCallback;
+            {
+                m_mesh.RefreshRenderState();
+                AffectNavmesh();
+            };
 
         m_mesh.CreateMesh();
     }
 
     void EditorMeshComponent::Deactivate()
     {
+        CryPhysicsComponentRequestBus::Handler::BusDisconnect();
         MaterialOwnerRequestBus::Handler::BusDisconnect();
+        RenderBoundsRequestBus::Handler::BusDisconnect();
         MeshComponentRequestBus::Handler::BusDisconnect();
         MeshComponentNotificationBus::Handler::BusDisconnect();
         LegacyMeshComponentRequestBus::Handler::BusDisconnect();
@@ -189,15 +195,53 @@ namespace LmbrCentral
         AzFramework::EntityDebugDisplayEventBus::Handler::BusDisconnect();
         AzToolsFramework::EditorComponentSelectionRequestsBus::Handler::BusDisconnect();
         AzToolsFramework::EditorComponentSelectionNotificationsBus::Handler::BusDisconnect();
+        AzToolsFramework::EditorLocalBoundsRequestBus::Handler::BusDisconnect();
 
         DestroyEditorPhysics();
 
-        m_mesh.m_renderOptions.m_changeCallback = 0;
+        m_mesh.m_renderOptions.m_changeCallback = nullptr;
 
         m_mesh.DestroyMesh();
         m_mesh.AttachToEntity(AZ::EntityId());
 
         EditorComponentBase::Deactivate();
+    }
+
+    IPhysicalEntity* EditorMeshComponent::GetPhysicalEntity()
+    {
+        return m_physicalEntity;
+    }
+
+    void EditorMeshComponent::GetPhysicsParameters(pe_params& outParameters)
+    {
+        if (m_physicalEntity)
+        {
+            m_physicalEntity->GetParams(&outParameters);
+        }
+    }
+
+    void EditorMeshComponent::SetPhysicsParameters(const pe_params& parameters)
+    {
+        if (m_physicalEntity)
+        {
+            m_physicalEntity->SetParams(&parameters);
+        }
+    }
+
+    void EditorMeshComponent::GetPhysicsStatus(pe_status& outStatus)
+    {
+        if (m_physicalEntity)
+        {
+            m_physicalEntity->GetStatus(&outStatus);
+        }
+    }
+
+    void EditorMeshComponent::ApplyPhysicsAction(const pe_action& action, bool threadSafe)
+    {
+        if (m_physicalEntity)
+        {
+            m_physicalEntity->Action(&action, threadSafe);
+        }
     }
 
     void EditorMeshComponent::OnMeshCreated(const AZ::Data::Asset<AZ::Data::AssetData>& asset)
@@ -232,9 +276,9 @@ namespace LmbrCentral
     {
         if (m_physicalEntity)
         {
-            const AZ::Vector3 newScale = world.RetrieveScale();
+            const AZ::Vector3 scale = world.RetrieveScale();
 
-            if (!m_physScale.IsClose(newScale))
+            if (!m_physScale.IsClose(scale))
             {
                 // Scale changes require re-physicalizing.
                 DestroyEditorPhysics();
@@ -252,6 +296,10 @@ namespace LmbrCentral
     void EditorMeshComponent::OnStaticChanged(bool isStatic)
     {
         m_mesh.SetTransformStaticState(isStatic);
+        if (m_mesh.m_renderOptions.m_changeCallback)
+        {
+            m_mesh.m_renderOptions.m_changeCallback();
+        }
         AffectNavmesh();
     }
 
@@ -268,14 +316,18 @@ namespace LmbrCentral
     void EditorMeshComponent::SetMeshAsset(const AZ::Data::AssetId& id)
     {
         m_mesh.SetMeshAsset(id);
-        EBUS_EVENT(AzToolsFramework::ToolsApplicationRequests::Bus, AddDirtyEntity, GetEntityId());
+        AzToolsFramework::ToolsApplicationRequests::Bus::Broadcast(
+            &AzToolsFramework::ToolsApplicationRequests::AddDirtyEntity,
+            GetEntityId());
     }
 
     void EditorMeshComponent::SetMaterial(_smart_ptr<IMaterial> material)
     {
         m_mesh.SetMaterial(material);
 
-        EBUS_EVENT(AzToolsFramework::ToolsApplicationEvents::Bus, InvalidatePropertyDisplay, AzToolsFramework::Refresh_AttributesAndValues);
+        AzToolsFramework::ToolsApplicationEvents::Bus::Broadcast(
+            &AzToolsFramework::ToolsApplicationEvents::InvalidatePropertyDisplay,
+            AzToolsFramework::Refresh_AttributesAndValues);
     }
 
     _smart_ptr<IMaterial> EditorMeshComponent::GetMaterial()
@@ -283,56 +335,86 @@ namespace LmbrCentral
         return m_mesh.GetMaterial();
     }
 
-    void EditorMeshComponent::SetPrimaryAsset(const AZ::Data::AssetId& id)
+    void EditorMeshComponent::SetPrimaryAsset(const AZ::Data::AssetId& assetId)
     {
-        SetMeshAsset(id);
+        SetMeshAsset(assetId);
     }
 
     void EditorMeshComponent::OnEntityVisibilityChanged(bool visibility)
     {
-            m_mesh.UpdateAuxiliaryRenderFlags(!visibility, ERF_HIDDEN);
-            m_mesh.RefreshRenderState();
+        m_mesh.UpdateAuxiliaryRenderFlags(!visibility, ERF_HIDDEN);
+        m_mesh.RefreshRenderState();
     }
 
-    void EditorMeshComponent::DisplayEntity(bool& handled)
+    static void DecideColor(
+        const bool selected, const bool mouseHovered, const bool visible,
+        ColorB& triangleColor, ColorB& lineColor)
+    {
+        const ColorB translucentPurple = ColorB(250, 0, 250, 30);
+
+        // default both colors to hidden
+        triangleColor = ColorB(AZ::u32(0));
+        lineColor = ColorB(AZ::u32(0));
+
+        if (selected)
+        {
+            if (!visible)
+            {
+                lineColor = Col_Black;
+
+                if (mouseHovered)
+                {
+                    triangleColor = translucentPurple;
+                }
+            }
+        }
+        else
+        {
+            if (mouseHovered)
+            {
+                triangleColor = translucentPurple;
+                lineColor = AZColorToLYColorF(AzFramework::ViewportColors::HoverColor);
+            }
+        }
+    }
+
+    void EditorMeshComponent::DisplayEntityViewport(
+        const AzFramework::ViewportInfo& viewportInfo,
+        AzFramework::DebugDisplayRequests& /*debugDisplay*/)
     {
         const bool mouseHovered = m_accentType == AzToolsFramework::EntityAccentType::Hover;
 
         IEditor* editor = nullptr;
         AzToolsFramework::EditorRequests::Bus::BroadcastResult(editor, &AzToolsFramework::EditorRequests::GetEditor);
 
-        bool highlightGeometryOnMouseHover = editor->GetEditorSettings()->viewports.bHighlightMouseOverGeometry;
-        bool highlightGeometryWhenSelected = editor->GetEditorSettings()->viewports.bHighlightSelectedGeometry;
+        const bool highlightGeometryOnMouseHover = editor->GetEditorSettings()->viewports.bHighlightMouseOverGeometry;
+        // if the mesh component is not visible, when selected we still draw the wireframe to indicate the shapes extent and position
+        const bool highlightGeometryWhenSelected = editor->GetEditorSettings()->viewports.bHighlightSelectedGeometry || !GetVisibility();
 
         if ((!IsSelected() && mouseHovered && highlightGeometryOnMouseHover) || (IsSelected() && highlightGeometryWhenSelected))
         {
             AZ::Transform transform = AZ::Transform::CreateIdentity();
             AZ::TransformBus::EventResult(transform, GetEntityId(), &AZ::TransformBus::Events::GetWorldTM);
-            auto legacyTransform = AZTransformToLYTransform(transform);
+
+            ColorB triangleColor, lineColor;
+            DecideColor(IsSelected(), mouseHovered, GetVisibility(), triangleColor, lineColor);
 
             SGeometryDebugDrawInfo dd;
-            dd.tm = legacyTransform;
+            dd.tm = AZTransformToLYTransform(transform);
             dd.bExtrude = true;
-            dd.color = ColorB(250, 0, 250, 30);
-            dd.lineColor = AZColorToLYColorF(AzFramework::ViewportColors::HoverColor);
+            dd.color = triangleColor;
+            dd.lineColor = lineColor;
             
             if (IStatObj* geometry = GetStatObj())
             {
                 geometry->DebugDraw(dd);
             }
         }
-
-        if (m_mesh.HasMesh())
-        {
-            // Only allow Sandbox to draw the default sphere if we don't have a
-            // visible mesh.
-            handled = true;
-        }
     }
 
     void EditorMeshComponent::BuildGameEntity(AZ::Entity* gameEntity)
     {
-        if (MeshComponent* meshComponent = gameEntity->CreateComponent<MeshComponent>())
+        if (auto meshComponent = gameEntity->CreateComponent<MeshComponent>())
         {
             m_mesh.CopyPropertiesTo(meshComponent->m_meshRenderNode);
             // ensure we do not copy across the edit time entity id
@@ -344,7 +426,8 @@ namespace LmbrCentral
     {
         DestroyEditorPhysics();
 
-        if (!GetTransform())
+        AZ::TransformInterface* transformInterface = GetTransform();
+        if (transformInterface == nullptr)
         {
             return;
         }
@@ -364,7 +447,7 @@ namespace LmbrCentral
             geometry->Physicalize(m_physicalEntity, &params);
 
             // Immediately set transform, otherwise physics doesn't propgate the world change.
-            const AZ::Transform& transform = GetTransform()->GetWorldTM();
+            const AZ::Transform& transform = transformInterface->GetWorldTM();
             Matrix34 cryTransform = AZTransformToLYTransform(transform);
             pe_params_pos par_pos;
             par_pos.pMtx3x4 = &cryTransform;
@@ -404,9 +487,9 @@ namespace LmbrCentral
         return m_mesh.GetVisible();
     }
 
-    void EditorMeshComponent::SetVisibility(bool isVisible)
+    void EditorMeshComponent::SetVisibility(bool visible)
     {
-        m_mesh.SetVisible(isVisible);
+        m_mesh.SetVisible(visible);
     }
 
     void EditorMeshComponent::AffectNavmesh()
@@ -427,7 +510,7 @@ namespace LmbrCentral
             m_physicalEntity->SetParams(&foreignData);
 
             // Refresh the nav tile when the flag changes.
-            INavigationSystem* pNavigationSystem = gEnv->pAISystem->GetNavigationSystem();
+            INavigationSystem* pNavigationSystem = gEnv->pAISystem ? gEnv->pAISystem->GetNavigationSystem() : nullptr;
             if (pNavigationSystem)
             {
                 pNavigationSystem->WorldChanged(AZAabbToLyAABB(GetWorldBounds()));
@@ -436,33 +519,43 @@ namespace LmbrCentral
     }
     AZStd::string_view staticViewportIcon = "Editor/Icons/Components/Viewport/StaticMesh.png";
     AZStd::string_view dynamicViewportIcon = "Editor/Icons/Components/Viewport/DynamicMesh.png";
-    AZStd::string EditorMeshComponent::GetMeshViewportIconPath()
+    AZStd::string EditorMeshComponent::GetMeshViewportIconPath() const
     {
         if (m_mesh.m_renderOptions.IsStatic())
+        {
             return staticViewportIcon;
-        else
-          return dynamicViewportIcon;
+        }
+        
+        return dynamicViewportIcon;
     }
 
-    void EditorMeshComponent::OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> asset)
+    void EditorMeshComponent::OnAssetReloaded(AZ::Data::Asset<AZ::Data::AssetData> /*asset*/)
     {
         CreateEditorPhysics();
     }
 
-    AZ::Aabb EditorMeshComponent::GetEditorSelectionBounds()
+    AZ::Aabb EditorMeshComponent::GetEditorSelectionBoundsViewport(
+        const AzFramework::ViewportInfo& /*viewportInfo*/)
     {
         return GetWorldBounds();
     }
 
-    bool EditorMeshComponent::EditorSelectionIntersectRay(const AZ::Vector3& src, const AZ::Vector3& dir, AZ::VectorFloat& distance)
+    AZ::Aabb EditorMeshComponent::GetEditorLocalBounds()
+    {
+        return GetLocalBounds();
+    }
+
+    bool EditorMeshComponent::EditorSelectionIntersectRayViewport(
+        const AzFramework::ViewportInfo& /*viewportInfo*/,
+        const AZ::Vector3& src, const AZ::Vector3& dir, AZ::VectorFloat& distance)
     {
         if (IStatObj* geometry = GetStatObj())
         {
             AZ::Transform transform = AZ::Transform::CreateIdentity();
             AZ::TransformBus::EventResult(transform, GetEntityId(), &AZ::TransformBus::Events::GetWorldTM);
             auto legacyTransform = AZTransformToLYTransform(transform);
-            auto legacySrc = AZVec3ToLYVec3(src);
-            auto legacyDir = AZVec3ToLYVec3(dir);
+            const auto legacySrc = AZVec3ToLYVec3(src);
+            const auto legacyDir = AZVec3ToLYVec3(dir);
 
             const Matrix34 inverseTM = legacyTransform.GetInverted();
             const Vec3 raySrcLocal = inverseTM.TransformPoint(legacySrc);
@@ -486,5 +579,4 @@ namespace LmbrCentral
     {
         m_accentType = accent;
     }
-
 } // namespace LmbrCentral

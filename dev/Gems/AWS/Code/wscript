@@ -25,8 +25,13 @@ def build(bld):
         includes    = [ '.' , 
                         '..', 
                         bld.Path('Code/CryEngine/CryAction'),
-                        bld.Path('Code/CryEngine/CryCommon')],
+                        bld.Path('Code/CryEngine/CryCommon')
+                      ],
         uselib      = ['AWS_CPP_SDK_ALL'],
-        use         = ['CloudGemFrameworkStaticLibrary'],
-        file_list   = file_list
+        use         = ['CloudGemFramework.StaticLibrary', 'CloudGemFramework', 'CryAction_AutoFlowNode'],
+        file_list   = file_list,
+
+        # warning added in clang 6.0 / ndk r17, the issue stems from an object in AWS that has virtual functions
+        # but no virtual destructor in the base class
+        android_cxxflags = ['-Wno-delete-non-virtual-dtor'],
     )

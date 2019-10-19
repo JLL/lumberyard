@@ -12,15 +12,16 @@
 
 // include the required headers
 #include "PreferencesWindow.h"
-#include "EMStudioManager.h"
+
+#include <AzToolsFramework/UI/PropertyEditor/ReflectedPropertyEditor.hxx>
 #include <MCore/Source/LogManager.h>
-#include <EMotionFX/Source/Importer/Importer.h>
+#include <MysticQt/Source/MysticQtManager.h>
+
 #include <QLabel>
 #include <QPixmap>
 #include <QVBoxLayout>
 #include <QStackedWidget>
 #include <QListWidget>
-#include "MainWindow.h"
 
 
 namespace EMStudio
@@ -64,7 +65,7 @@ namespace EMStudio
         mCategoriesWidget->setMinimumHeight(5 * iconSize + 5 * spacing);
         mCategoriesWidget->setSpacing(spacing);
         mCategoriesWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-        connect(mCategoriesWidget, SIGNAL(currentItemChanged(QListWidgetItem*, QListWidgetItem*)),   this, SLOT(ChangePage(QListWidgetItem*, QListWidgetItem*)));
+        connect(mCategoriesWidget, &QListWidget::currentItemChanged,   this, &PreferencesWindow::ChangePage);
 
         // create the stacked widget, this one will store all the different property browsers for the categories
         mStackedWidget = new QStackedWidget();
@@ -75,23 +76,6 @@ namespace EMStudio
         horizontalLayout->addWidget(mCategoriesWidget);
         horizontalLayout->addWidget(mStackedWidget);
         setLayout(horizontalLayout);
-    }
-
-
-    // add categories from the given plugin or in case the parameter is nullptr from all active plugins
-    void PreferencesWindow::AddCategoriesFromPlugin(EMStudioPlugin* plugin)
-    {
-        PluginManager* pluginManager = GetPluginManager();
-        const uint32 numPlugins = pluginManager->GetNumActivePlugins();
-        for (uint32 i = 0; i < numPlugins; ++i)
-        {
-            EMStudioPlugin* currentPlugin = pluginManager->GetActivePlugin(i);
-
-            if (plugin == nullptr || currentPlugin == plugin)
-            {
-                currentPlugin->AddSettings(this);
-            }
-        }
 
         mCategoriesWidget->setCurrentRow(0);
     }
@@ -131,7 +115,7 @@ namespace EMStudio
 
 
     // add a new category
-    MysticQt::PropertyWidget* PreferencesWindow::AddCategory(const char* categoryName, const char* relativeFileName, bool readOnly)
+    AzToolsFramework::ReflectedPropertyEditor* PreferencesWindow::AddCategory(const char* categoryName, const char* relativeFileName, bool readOnly)
     {
         MCORE_UNUSED(readOnly);
 
@@ -148,7 +132,7 @@ namespace EMStudio
         categoryButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
         // create the new property widget
-        MysticQt::PropertyWidget* propertyWidget = new MysticQt::PropertyWidget(this);
+        AzToolsFramework::ReflectedPropertyEditor* propertyWidget = aznew AzToolsFramework::ReflectedPropertyEditor(this);
         propertyWidget->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
 
         // add the button to the categories list and the property widget to the stacked widget on the right

@@ -18,8 +18,11 @@
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
+AZ_PUSH_DISABLE_WARNING(4244 4251, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
+                                                               // 4251: 'QInputEvent::modState': class 'QFlags<Qt::KeyboardModifier>' needs to have dll-interface to be used by clients of class 'QInputEvent'
 #include <QtWidgets/QHBoxLayout>
 #include <QtGui/QMouseEvent>
+AZ_POP_DISABLE_WARNING
 
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
@@ -71,7 +74,7 @@ namespace AzToolsFramework
         m_clearButton->setContentsMargins(0, 0, 0, 0);
         m_clearButton->setToolTip("Clear ATL control");
 
-        connect(m_controlEdit, &QLineEdit::editingFinished,
+        connect(m_controlEdit, &QLineEdit::editingFinished, this,
             [this] ()
             {
                 SetControlName(m_controlEdit->text());
@@ -179,10 +182,10 @@ namespace AzToolsFramework
         SetControlName(QString(resourceResult.c_str()));
     }
 
-    bool AudioControlSelectorWidget::IsCorrectMimeData(const QMimeData* data) const
+    bool AudioControlSelectorWidget::IsCorrectMimeData(const QMimeData* data_) const
     {
         // todo: enable drag-n-drop from Audio Controls Editor
-        Q_UNUSED(data);
+        Q_UNUSED(data_);
         return false;
     }
 
@@ -230,6 +233,7 @@ namespace AzToolsFramework
             [newCtrl] ()
             {
                 EBUS_EVENT(AzToolsFramework::PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
+                AzToolsFramework::PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::Bus::Handler::OnEditingFinished, newCtrl);
             }
         );
         return newCtrl;

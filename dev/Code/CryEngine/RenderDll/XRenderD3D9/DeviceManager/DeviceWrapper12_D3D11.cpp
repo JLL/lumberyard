@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -17,10 +17,16 @@
 #include "../../Common/ReverseDepth.h"
 #include "CryUtils.h"
 
+#include <AzCore/std/smart_ptr/make_shared.h>
+
 #if !defined(CRY_USE_DX12_NATIVE)
 #define DEVICEWRAPPER12_D3D11_CPP_WRAP_DX11
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(DeviceWrapper12_D3D11_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DeviceWrapper12_D3D11_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DeviceWrapper12_D3D11_cpp_provo.inl"
+    #endif
 #endif
 #if defined(DEVICEWRAPPER12_D3D11_CPP_WRAP_DX11)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -130,8 +136,8 @@ bool CDeviceGraphicsPSO_DX11::Init(const CDeviceGraphicsPSODesc& psoDesc)
 
             const bool bMorph = false;
             const bool bInstanced = (streamMask & VSM_INSTANCED) != 0;
-            AZ::u32 declCacheCRC = pVsInstance->GenerateVertexDeclarationCacheCRC(psoDesc.m_VertexFormat);
-            SOnDemandD3DVertexDeclarationCache& declCache = rd->m_RP.m_D3DVertexDeclarationCache[streamMask >> 1][bMorph || bInstanced][declCacheCRC];
+            AZ::u32 declCacheKey = pVsInstance->GenerateVertexDeclarationCacheKey(psoDesc.m_VertexFormat);
+            SOnDemandD3DVertexDeclarationCache& declCache = rd->m_RP.m_D3DVertexDeclarationCache[streamMask >> 1][bMorph || bInstanced][declCacheKey];
 
             if (!declCache.m_pDeclaration)
             {
@@ -341,6 +347,7 @@ class CDeviceResourceLayout_DX11
     : public CDeviceResourceLayout
 {
 public:
+    ~CDeviceResourceLayout_DX11() override = default;
     virtual bool Build() final
     {
         return IsValid();
@@ -825,7 +832,7 @@ void CDeviceGraphicsCommandList::SetVertexBuffers(uint32 streamCount, const SStr
         if (streams[slot].pStream && pCmdList->m_CurrentVertexStream[slot].Set(streams[slot]))
         {
             D3DBuffer* pBuffer = const_cast<D3DBuffer*>(reinterpret_cast<const D3DBuffer*>(streams[slot].pStream));
-            gcpRendD3D.m_DevMan.BindVB(pBuffer, slot, streams[slot].nOffset, streams[slot].nStride);
+            gcpRendD3D->m_DevMan.BindVB(pBuffer, slot, streams[slot].nOffset, streams[slot].nStride);
         }
     }
 }
@@ -839,9 +846,9 @@ void CDeviceGraphicsCommandList::SetIndexBuffer(const SStreamInfo& indexStream)
         D3DBuffer* pIB = const_cast<D3DBuffer*>(reinterpret_cast<const D3DBuffer*>(indexStream.pStream));
 
 #if !defined(SUPPORT_FLEXIBLE_INDEXBUFFER)
-        gcpRendD3D.m_DevMan.BindIB(pIB, indexStream.nOffset, DXGI_FORMAT_R16_UINT);
+        gcpRendD3D->m_DevMan.BindIB(pIB, indexStream.nOffset, DXGI_FORMAT_R16_UINT);
 #else
-        gcpRendD3D.m_DevMan.BindIB(pIB, indexStream.nOffset, (DXGI_FORMAT)indexStream.nStride);
+        gcpRendD3D->m_DevMan.BindIB(pIB, indexStream.nOffset, (DXGI_FORMAT)indexStream.nStride);
 #endif
     }
 }
@@ -974,7 +981,7 @@ void CDeviceCopyCommandList::Build()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CDeviceObjectFactory::CDeviceObjectFactory()
 {
-    m_pCoreCommandList = std::make_shared<CDeviceGraphicsCommandList_DX11>();
+    m_pCoreCommandList = AZStd::make_shared<CDeviceGraphicsCommandList_DX11>();
 }
 
 CDeviceGraphicsPSOUPtr CDeviceObjectFactory::CreateGraphicsPSOImpl(const CDeviceGraphicsPSODesc& psoDesc) const
@@ -982,7 +989,7 @@ CDeviceGraphicsPSOUPtr CDeviceObjectFactory::CreateGraphicsPSOImpl(const CDevice
     auto pResult = CryMakeUnique<CDeviceGraphicsPSO_DX11>();
     if (pResult->Init(psoDesc))
     {
-        return std::move(pResult);
+        return AZStd::move(pResult);
     }
 
     return nullptr;
@@ -990,17 +997,17 @@ CDeviceGraphicsPSOUPtr CDeviceObjectFactory::CreateGraphicsPSOImpl(const CDevice
 
 CDeviceComputePSOPtr CDeviceObjectFactory::CreateComputePSO(CDeviceResourceLayoutPtr pResourceLayout) const
 {
-    return std::make_shared<CDeviceComputePSO_DX11>();
+    return AZStd::make_shared<CDeviceComputePSO_DX11>();
 }
 
 CDeviceResourceSetPtr CDeviceObjectFactory::CreateResourceSet(CDeviceResourceSet::EFlags flags) const
 {
-    return std::make_shared<CDeviceResourceSet_DX11>(flags);
+    return AZStd::make_shared<CDeviceResourceSet_DX11>(flags);
 }
 
 CDeviceResourceLayoutPtr CDeviceObjectFactory::CreateResourceLayout() const
 {
-    return std::make_shared<CDeviceResourceLayout_DX11>();
+    return AZStd::make_shared<CDeviceResourceLayout_DX11>();
 }
 
 CDeviceGraphicsCommandListPtr CDeviceObjectFactory::GetCoreGraphicsCommandList() const

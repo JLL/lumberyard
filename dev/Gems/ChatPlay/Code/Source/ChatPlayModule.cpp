@@ -1,3 +1,14 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
 
 #include "ChatPlay_precompiled.h"
 #include <platform_impl.h>
@@ -8,9 +19,10 @@
 
 #include "ChatPlay/ChatPlayCVars.h"
 #include "Broadcast/BroadcastCVars.h"
-#if !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#include <ChatPlay_Traits_Platform.h>
+#if AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
 #include "JoinIn/JoinInCVars.h"
-#endif // !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#endif // AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
 
 
 namespace ChatPlay
@@ -44,10 +56,10 @@ namespace ChatPlay
         {
             CryHooksModule::OnCrySystemInitialized(system, systemInitParams);
             ChatPlayCVars::GetInstance()->RegisterCVars();
-#if !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#if AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
             JoinInCVars::GetInstance()->RegisterCVars();
             BroadcastCVars::GetInstance()->RegisterCVars();
-#endif // !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#endif // AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
         }
 
         void OnSystemEvent(ESystemEvent systemEvent, UINT_PTR wparam, UINT_PTR lparam)
@@ -63,10 +75,10 @@ namespace ChatPlay
             case ESYSTEM_EVENT_FULL_SHUTDOWN:
             case ESYSTEM_EVENT_FAST_SHUTDOWN:
                 ChatPlayCVars::GetInstance()->UnregisterCVars();
-#if !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#if AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
                 JoinInCVars::GetInstance()->UnregisterCVars();
                 BroadcastCVars::GetInstance()->UnregisterCVars();
-#endif // !defined(CONSOLE) && !defined(MOBILE) && !defined(APPLE) && !defined(LINUX)
+#endif // AZ_TRAIT_CHATPLAY_JOIN_AND_BROADCAST
                 break;
             default:
                 break;

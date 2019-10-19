@@ -460,7 +460,6 @@ namespace AZ
             return *this;
         }
 
-#if defined(AZ_HAS_RVALUE_REFS)
         EnvironmentVariable(EnvironmentVariable&& rhs)
             : m_data(rhs.m_data)
         {
@@ -471,7 +470,7 @@ namespace AZ
             EnvironmentVariable(static_cast< EnvironmentVariable && >(rhs)).Swap(*this);
             return *this;
         }
-#endif
+
         EnvironmentVariable& operator=(EnvironmentVariable const& rhs)
         {
             EnvironmentVariable(rhs).Swap(*this);
@@ -651,6 +650,16 @@ namespace AZ
     {
         return FindVariable<T>(Internal::EnvironmentVariableNameToId(uniqueName));
     }
+
+    namespace Internal
+    {
+        inline void AttachGlobalEnvironment(void* globalEnv)
+        {
+            AZ_Assert(!AZ::Environment::IsReady(), "An environment is already created in this module!");
+            AZ::Environment::Attach(static_cast<AZ::EnvironmentInstance>(globalEnv));
+        }
+    }
+
 } // namespace AZ
 
 #ifdef AZ_MONOLITHIC_BUILD
@@ -665,8 +674,7 @@ namespace AZ
 #define AZ_DECLARE_MODULE_INITIALIZATION \
     extern "C" AZ_DLL_EXPORT void InitializeDynamicModule(void* env) \
     { \
-        AZ_Assert(!AZ::Internal::EnvironmentInterface::s_environment, "This module already has an attached environment"); \
-        AZ::Environment::Attach(static_cast<AZ::EnvironmentInstance>(env)); \
+        AZ::Internal::AttachGlobalEnvironment(env); \
     } \
     extern "C" AZ_DLL_EXPORT void UninitializeDynamicModule() { AZ::Environment::Detach(); }
 

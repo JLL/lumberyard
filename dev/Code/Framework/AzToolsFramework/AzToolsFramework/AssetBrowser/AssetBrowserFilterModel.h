@@ -11,7 +11,7 @@
 */
 #pragma once
 
-#include <AzToolsFramework/AssetBrowser/AssetBrowserEntry.h>
+#include <AzToolsFramework/AssetBrowser/Entries/AssetBrowserEntry.h>
 #include <AzToolsFramework/AssetBrowser/Search/Filter.h>
 
 #include <AzCore/Asset/AssetCommon.h>
@@ -20,6 +20,9 @@
 
 #include <QSortFilterProxyModel>
 #include <QSharedPointer>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QCollatorSortKey::d': class 'QSharedDataPointer<QCollatorSortKeyPrivate>' needs to have dll-interface to be used by clients of class 'QCollatorSortKey'
+#include <QCollator>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -37,6 +40,10 @@ namespace AzToolsFramework
 
             //asset type filtering
             void SetFilter(FilterConstType filter);
+            void FilterUpdatedSlotImmediate();
+
+        Q_SIGNALS:
+            void filterChanged();
 
             //////////////////////////////////////////////////////////////////////////
             //QSortFilterProxyModel
@@ -58,6 +65,7 @@ namespace AzToolsFramework
             FilterConstType m_filter;
             QWeakPointer<const StringFilter> m_stringFilter;
             QWeakPointer<const CompositeFilter> m_assetTypeFilter;
+            QCollator m_collator;  // cache the collator as its somewhat expensive to constantly create and destroy one.
         };
     } // namespace AssetBrowser
 } // namespace AzToolsFramework

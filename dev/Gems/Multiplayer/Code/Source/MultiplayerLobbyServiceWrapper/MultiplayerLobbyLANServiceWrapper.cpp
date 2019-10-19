@@ -16,6 +16,7 @@
 #include "Multiplayer/MultiplayerLobbyServiceWrapper/MultiplayerLobbyLANServiceWrapper.h"
 
 #include "Multiplayer/MultiplayerUtils.h"
+#include <Multiplayer_Traits_Platform.h>
 
 namespace Multiplayer
 {
@@ -75,8 +76,9 @@ namespace Multiplayer
         searchParams.m_version = gEnv->pConsole->GetCVar("gm_version")->GetIVal();
         searchParams.m_familyType = Multiplayer::Utils::CVarToFamilyType(gEnv->pConsole->GetCVar("gm_ipversion")->GetString());
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(MultiplayerLobbyLANServiceWrapper_cpp, AZ_RESTRICTED_PLATFORM)
+#if AZ_TRAIT_MULTIPLAYER_ASSIGN_NETWORK_FAMILY
+        AZ_Error(AZ_TRAIT_MULTIPLAYER_SESSION_NAME, searchParams.m_familyType == AZ_TRAIT_MULTIPLAYER_ADDRESS_TYPE, AZ_TRAIT_MULTIPLAYER_DRIVER_MESSAGE);
+        searchParams.m_familyType = AZ_TRAIT_MULTIPLAYER_ADDRESS_TYPE;
 #endif
 
         EBUS_EVENT_ID_RESULT(retVal, gridMate, GridMate::LANSessionServiceBus, StartGridSearch, searchParams);

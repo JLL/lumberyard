@@ -1,4 +1,15 @@
-#include "stdafx.h"
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
+#include "StdAfx.h"
 
 #include "PropertyAnimationCtrl.h"
 #include <QtWidgets/QHBoxLayout>
@@ -61,7 +72,7 @@ void AnimationPropertyCtrl::OnBrowseClicked()
     if (IsLegacyEntityId(m_animation.m_entityID))
     {
         EntityId entityId = GetLegacyEntityId(m_animation.m_entityID);
-        IEntity *pEntity = gEnv->pEntitySystem->GetEntity(entityId);
+        IEntity *pEntity = gEnv->pEntitySystem ? gEnv->pEntitySystem->GetEntity(entityId) : nullptr;
         if (pEntity)
             pCharacterInstance = pEntity->GetCharacter(0);
     }
@@ -146,7 +157,7 @@ void AnimationPropertyCtrl::UpdateTabOrder()
 QWidget* AnimationPropertyWidgetHandler::CreateGUI(QWidget *pParent)
 {
     AnimationPropertyCtrl* newCtrl = aznew AnimationPropertyCtrl(pParent);
-    connect(newCtrl, &AnimationPropertyCtrl::ValueChanged, [newCtrl]()
+    connect(newCtrl, &AnimationPropertyCtrl::ValueChanged, newCtrl, [newCtrl]()
     {
         EBUS_EVENT(AzToolsFramework::PropertyEditorGUIMessages::Bus, RequestWrite, newCtrl);
     });

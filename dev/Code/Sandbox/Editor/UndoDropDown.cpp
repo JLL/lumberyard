@@ -11,7 +11,7 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "UndoDropDown.h"
 #include "Undo/Undo.h"
 
@@ -234,6 +234,13 @@ void CUndoDropDown::SelectionChanged(const QItemSelection& selected, const QItem
             .arg(m_view->selectionModel()->selectedIndexes().size())
             .arg(m_view->selectionModel()->selectedIndexes().size() > 1 ? "s" : "");
     m_doButton->setText(label);
+}
+
+void CUndoDropDown::contextMenuEvent(QContextMenuEvent*)
+{
+    // Inhibit QDialog::contextMenuEvent() as this will trigger the "What's this" popup.
+    // That happens because we're a child of a QMenu, and menus have Qt::WA_CustomWhatsThis
+    // which make the popup show even if QWidget::whatsThis() text is empty.
 }
 
 #include <UndoDropDown.moc>

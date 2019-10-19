@@ -33,7 +33,7 @@
 #include "../SimpleStringPool.h"
 
 
-#if defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX)
+#if AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
 #include <clocale>
 #include <locale>
 
@@ -161,19 +161,19 @@ CXmlNode::CXmlNode()
     , m_pChilds(NULL)
     , m_pAttributes(NULL)
     , m_line(0)
+    , m_isProcessingInstruction(false)
 {
     m_nRefCount = 0; //TODO: move initialization to IXmlNode constructor
 }
 
-CXmlNode::CXmlNode(const char* tag, bool bReuseStrings)
+CXmlNode::CXmlNode(const char* tag, bool bReuseStrings, bool bIsProcessingInstruction)
     : m_content("")
     , m_parent(NULL)
     , m_pChilds(NULL)
     , m_pAttributes(NULL)
     , m_line(0)
+    , m_isProcessingInstruction(bIsProcessingInstruction)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "XML");
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "New node (constructor)");
     m_nRefCount = 0; //TODO: move initialization to IXmlNode constructor
 
     m_pStringPool = new CXmlStringPool(bReuseStrings);
@@ -201,14 +201,7 @@ void CXmlNode::GetMemoryUsage(ICrySizer* pSizer) const
 //////////////////////////////////////////////////////////////////////////
 XmlNodeRef CXmlNode::createNode(const char* tag)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "XML");
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "New node (createNode)");
-
-    CXmlNode* pNewNode;
-    {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Node construction");
-        pNewNode = new CXmlNode;
-    }
+    CXmlNode* pNewNode = new CXmlNode;
     pNewNode->m_pStringPool = m_pStringPool;
     m_pStringPool->AddRef();
     pNewNode->m_tag = m_pStringPool->AddString(tag);
@@ -294,9 +287,6 @@ void CXmlNode::removeAllAttributes()
 
 void CXmlNode::setAttr(const char* key, const char* value)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "XML");
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "setAttr");
-
     if (!m_pAttributes)
     {
         m_pAttributes = new XmlAttributes;
@@ -323,14 +313,14 @@ void CXmlNode::setAttr(const char* key, const char* value)
 void CXmlNode::setAttr(const char* key, int value)
 {
     char str[128];
-    itoa(value, str, 10);
+    azitoa(value, str, AZ_ARRAY_SIZE(str), 10);
     setAttr(key, str);
 }
 
 void CXmlNode::setAttr(const char* key, unsigned int value)
 {
     char str[128];
-    _ui64toa(value, str, 10);
+    azui64toa(value, str, AZ_ARRAY_SIZE(str), 10);
     setAttr(key, str);
 }
 
@@ -454,7 +444,7 @@ bool CXmlNode::getAttr(const char* key, int64& value) const
     const char* svalue = GetValue(key);
     if (svalue)
     {
-        sscanf(svalue, "%" PRId64, &value);
+        azsscanf(svalue, "%" PRId64, &value);
         return true;
     }
     return false;
@@ -468,11 +458,11 @@ bool CXmlNode::getAttr(const char* key, uint64& value, bool useHexFormat) const
     {
         if (useHexFormat)
         {
-            sscanf(svalue, "%" PRIX64, &value);
+            azsscanf(svalue, "%" PRIX64, &value);
         }
         else
         {
-            sscanf(svalue, "%" PRIu64, &value);
+            azsscanf(svalue, "%" PRIu64, &value);
         }
         return true;
     }
@@ -484,11 +474,11 @@ bool CXmlNode::getAttr(const char* key, bool& value) const
     const char* svalue = GetValue(key);
     if (svalue)
     {
-        if (stricmp(svalue, "true") == 0)
+        if (azstricmp(svalue, "true") == 0)
         {
             value = true;
         }
-        else if (stricmp(svalue, "false") == 0)
+        else if (azstricmp(svalue, "false") == 0)
         {
             value = false;
         }
@@ -530,7 +520,7 @@ bool CXmlNode::getAttr(const char* key, Ang3& value) const
     {
         LocaleResetter l;
         float x, y, z;
-        if (sscanf(svalue, "%f,%f,%f", &x, &y, &z) == 3)
+        if (azsscanf(svalue, "%f,%f,%f", &x, &y, &z) == 3)
         {
             value(x, y, z);
             return true;
@@ -547,7 +537,7 @@ bool CXmlNode::getAttr(const char* key, Vec3& value) const
     {
         LocaleResetter l;
         float x, y, z;
-        if (sscanf(svalue, "%f,%f,%f", &x, &y, &z) == 3)
+        if (azsscanf(svalue, "%f,%f,%f", &x, &y, &z) == 3)
         {
             value = Vec3(x, y, z);
             return true;
@@ -564,7 +554,7 @@ bool CXmlNode::getAttr(const char* key, Vec4& value) const
     {
         LocaleResetter l;
         float x, y, z, w;
-        if (sscanf(svalue, "%f,%f,%f,%f", &x, &y, &z, &w) == 4)
+        if (azsscanf(svalue, "%f,%f,%f,%f", &x, &y, &z, &w) == 4)
         {
             value = Vec4(x, y, z, w);
             return true;
@@ -581,7 +571,7 @@ bool CXmlNode::getAttr(const char* key, Vec3d& value) const
     {
         LocaleResetter l;
         double x, y, z;
-        if (sscanf(svalue, "%lf,%lf,%lf", &x, &y, &z) == 3)
+        if (azsscanf(svalue, "%lf,%lf,%lf", &x, &y, &z) == 3)
         {
             value = Vec3d(x, y, z);
             return true;
@@ -598,7 +588,7 @@ bool CXmlNode::getAttr(const char* key, Vec2& value) const
     {
         LocaleResetter l;
         float x, y;
-        if (sscanf(svalue, "%f,%f", &x, &y) == 2)
+        if (azsscanf(svalue, "%f,%f", &x, &y) == 2)
         {
             value = Vec2(x, y);
             return true;
@@ -614,7 +604,7 @@ bool CXmlNode::getAttr(const char* key, Vec2d& value) const
     {
         LocaleResetter l;
         double x, y;
-        if (sscanf(svalue, "%lf,%lf", &x, &y) == 2)
+        if (azsscanf(svalue, "%lf,%lf", &x, &y) == 2)
         {
             value = Vec2d(x, y);
             return true;
@@ -631,7 +621,7 @@ bool CXmlNode::getAttr(const char* key, Quat& value) const
     {
         LocaleResetter l;
         float w, x, y, z;
-        if (sscanf(svalue, "%f,%f,%f,%f", &w, &x, &y, &z) == 4)
+        if (azsscanf(svalue, "%f,%f,%f,%f", &w, &x, &y, &z) == 4)
         {
             if (fabs(w) > VEC_EPSILON || fabs(x) > VEC_EPSILON || fabs(y) > VEC_EPSILON || fabs(z) > VEC_EPSILON)
             {
@@ -652,7 +642,7 @@ bool CXmlNode::getAttr(const char* key, ColorB& value) const
     if (svalue)
     {
         unsigned int r, g, b, a = 255;
-        int numFound = sscanf(svalue, "%u,%u,%u,%u", &r, &g, &b, &a);
+        int numFound = azsscanf(svalue, "%u,%u,%u,%u", &r, &g, &b, &a);
         if (numFound == 3 || numFound == 4)
         {
             // If we only found 3 values, a should be unchanged, and still be 255
@@ -736,7 +726,6 @@ void CXmlNode::deleteChildAt(int nIndex)
 //! Adds new child node.
 void CXmlNode::addChild(const XmlNodeRef& node)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "addChild");
     if (!m_pChilds)
     {
         m_pChilds = new XmlNodes;
@@ -914,8 +903,6 @@ bool CXmlNode::getAttributeByIndex(int index, XmlString& key, XmlString& value)
 //////////////////////////////////////////////////////////////////////////
 XmlNodeRef CXmlNode::clone()
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "XML");
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "clone");
     CXmlNode* node = new CXmlNode;
     XmlNodeRef  result(node);
     node->m_pStringPool = m_pStringPool;
@@ -926,7 +913,6 @@ XmlNodeRef CXmlNode::clone()
     CXmlNode* n = (CXmlNode*)(IXmlNode*)node;
     n->copyAttributes(this);
     // Clone sub nodes.
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Clone children");
 
     if (m_pChilds)
     {
@@ -1041,21 +1027,14 @@ void CXmlNode::removeAllChildsImpl()
 }
 
 //////////////////////////////////////////////////////////////////////////
-void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType fileHandle, IPlatformOS::ISaveWriterPtr pSaveWriter, size_t chunkSize) const
+void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType fileHandle, size_t chunkSize) const
 {
-    if (((fileHandle != AZ::IO::InvalidHandle) || pSaveWriter) && chunkSize > 0)
+    if (fileHandle != AZ::IO::InvalidHandle && chunkSize > 0)
     {
         size_t len = xml.length();
         if (len >= chunkSize)
         {
-            if (pSaveWriter)
-            {
-                pSaveWriter->AppendBytes(xml.c_str(), len);
-            }
-            else
-            {
-                gEnv->pCryPak->FWrite(xml.c_str(), len, 1, fileHandle);
-            }
+            gEnv->pCryPak->FWrite(xml.c_str(), len, 1, fileHandle);
             xml.assign (""); // should not free memory and does not!
         }
     }
@@ -1068,11 +1047,22 @@ void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType file
     if (!m_pAttributes || m_pAttributes->empty())
     {
         xml += "<";
+        if (m_isProcessingInstruction)
+        {
+            xml += "?";
+        }
         xml += m_tag;
         if (*m_content == 0 && !bHasChildren)
         {
+            if (m_isProcessingInstruction)
+            {
+                xml += "?>\n";
+            }
+            else
+            {
             // Compact tag form.
             xml += " />\n";
+            }
             return;
         }
         xml += ">";
@@ -1080,6 +1070,10 @@ void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType file
     else
     {
         xml += "<";
+        if (m_isProcessingInstruction)
+        {
+            xml += "?";
+        }
         xml += m_tag;
         xml += " ";
 
@@ -1108,8 +1102,15 @@ void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType file
         }
         if (*m_content == 0 && !bHasChildren)
         {
+            if (m_isProcessingInstruction)
+            {
+                xml += "?>\n";
+            }
+            else
+            {
             // Compact tag form.
             xml += "/>\n";
+            }
             return;
         }
         xml += ">";
@@ -1139,7 +1140,7 @@ void CXmlNode::AddToXmlString(XmlString& xml, int level, AZ::IO::HandleType file
     for (XmlNodes::iterator it = m_pChilds->begin(), itEnd = m_pChilds->end(); it != itEnd; ++it)
     {
         IXmlNode* node = *it;
-        ((CXmlNode*)node)->AddToXmlString(xml, level + 1, fileHandle, pSaveWriter, chunkSize);
+        ((CXmlNode*)node)->AddToXmlString(xml, level + 1, fileHandle, chunkSize);
     }
 
     // Add tabs.
@@ -1162,7 +1163,7 @@ ILINE static char* stpcpy(char* dst, const char* src)
 }
 #endif
 
-char* CXmlNode::AddToXmlStringUnsafe(char* xml, int level, char* endPtr, AZ::IO::HandleType fileHandle, IPlatformOS::ISaveWriterPtr pSaveWriter, size_t chunkSize) const
+char* CXmlNode::AddToXmlStringUnsafe(char* xml, int level, char* endPtr, AZ::IO::HandleType fileHandle, size_t chunkSize) const
 {
     const bool bHasChildren = (m_pChilds && !m_pChilds->empty());
 
@@ -1247,7 +1248,7 @@ char* CXmlNode::AddToXmlStringUnsafe(char* xml, int level, char* endPtr, AZ::IO:
     for (XmlNodes::iterator it = m_pChilds->begin(), itEnd = m_pChilds->end(); it != itEnd; ++it)
     {
         IXmlNode* node = *it;
-        xml = ((CXmlNode*)node)->AddToXmlStringUnsafe(xml, level + 1, endPtr, fileHandle, pSaveWriter, chunkSize);
+        xml = ((CXmlNode*)node)->AddToXmlStringUnsafe(xml, level + 1, endPtr, fileHandle, chunkSize);
     }
 
     for (int i = 0; i < level; i++)
@@ -1307,40 +1308,6 @@ bool CXmlNode::saveToFile(const char* fileName)
         return false;
     }
 
-    bool isLogFile = (azstrnicmp(fileName, "@log@", 5) == 0);
-    
-    if ((!isLogFile)&&(pPlatformOS->UsePlatformSavingAPI()))
-    {
-#ifdef WIN32
-        CrySetFileAttributes(fileName, 0x00000080); // FILE_ATTRIBUTE_NORMAL
-#endif //WIN32
-
-        IPlatformOS::ISaveWriterPtr pSaveWriter;
-        pSaveWriter = pPlatformOS->SaveGetWriter(fileName);
-
-        if (!pSaveWriter)
-        {
-            return false;
-        }
-
-        XmlString xml;
-        xml.assign("");
-        xml.reserve(chunkSizeBytes * 2);
-        xml = getXML();
-
-        size_t len = xml.length();
-        if (len > 0)
-        {
-            if (pSaveWriter)
-            {
-                pSaveWriter->AppendBytes(xml.c_str(), len);
-            }
-        }
-        xml.clear();
-
-        return (len > 0);
-    }
-    else
     {
         AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen(fileName, "wt");
         if (fileHandle != AZ::IO::InvalidHandle)
@@ -1377,35 +1344,17 @@ bool CXmlNode::saveToFile(const char* fileName, size_t chunkSize, AZ::IO::Handle
     xml.assign ("");
     xml.reserve(chunkSize * 2); // we reserve double memory, as writing in chunks is not really writing in fixed blocks but a bit fuzzy
     ICryPak* pCryPak = gEnv->pCryPak;
-    IPlatformOS::ISaveWriterPtr pSaveWriter;
     if (fileHandle == AZ::IO::InvalidHandle)
-    {
-        pSaveWriter = gEnv->pSystem->GetPlatformOS()->SaveGetWriter(fileName);
-    }
-    if ((fileHandle == AZ::IO::InvalidHandle) && !pSaveWriter)
     {
         return false;
     }
-    AddToXmlString(xml, 0, fileHandle, pSaveWriter, chunkSize);
+    AddToXmlString(xml, 0, fileHandle, chunkSize);
     size_t len = xml.length();
     if (len > 0)
     {
-        if (pSaveWriter)
-        {
-            pSaveWriter->AppendBytes(xml.c_str(), len);
-        }
-        else
-        {
-            pCryPak->FWrite(xml.c_str(), len, 1, fileHandle);
-        }
+        pCryPak->FWrite(xml.c_str(), len, 1, fileHandle);
     }
     xml.clear(); // xml.resize(0) would not reclaim memory
-
-    if (pSaveWriter)
-    {
-        pSaveWriter->Close();
-    }
-
     return true;
 }
 
@@ -1631,15 +1580,15 @@ namespace
 {
     void* custom_xml_malloc(size_t nSize)
     {
-        return malloc(nSize);
+        return CryModuleMalloc(nSize);
     }
     void* custom_xml_realloc(void* p, size_t nSize)
     {
-        return realloc(p, nSize);
+        return CryModuleRealloc(p, nSize);
     }
     void custom_xml_free(void* p)
     {
-        free(p);
+        CryModuleFree(p);
     }
 }
 
@@ -1751,43 +1700,6 @@ XmlNodeRef XmlParserImp::ParseFile(const char* filename, XmlString& errorString,
 
     char str[1024];
 
-    // Check the hard link @user@ to use IPlatformOS::ISaveReader
-    static const char USER_ENV[] = "@user@";
-    if (!_strnicmp(filename, USER_ENV, sizeof(USER_ENV) - 1))
-    {
-        IPlatformOS* const pPlatformOS = gEnv->pSystem->GetPlatformOS();
-        if (pPlatformOS)
-        {
-            IPlatformOS::ISaveReaderPtr const pSaveReader = pPlatformOS->SaveGetReader(filename);
-
-            if (pSaveReader)
-            {
-                if ((IPlatformOS::eFOC_Success != pSaveReader->GetNumBytes(fileSize)) || (fileSize <= 0))
-                {
-                    return 0;
-                }
-
-                if (fileSize == ~size_t(0))
-                {
-                    sprintf_s(str, "%sReported file size is -1 (%s)", errorPrefix, filename);
-                    errorString = str;
-                    CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_WARNING, "%s", str);
-                    return 0;
-                }
-
-                pFileContents = new char[fileSize];
-                if (!pFileContents)
-                {
-                    sprintf_s(str, "%sCan't allocate %u bytes of memory (%s)", errorPrefix, static_cast<unsigned>(fileSize), filename);
-                    errorString = str;
-                    CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_WARNING, "%s", str);
-                    return 0;
-                }
-
-                pSaveReader->ReadBytes(pFileContents, fileSize);
-            }
-        }
-    }
     CryStackStringT<char, 256> adjustedFilename;
     CryStackStringT<char, 256> pakPath;
     if (fileSize <= 0)

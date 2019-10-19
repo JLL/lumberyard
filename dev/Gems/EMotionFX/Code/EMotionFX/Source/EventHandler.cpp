@@ -12,82 +12,12 @@
 
 // include required headers
 #include "EventHandler.h"
-
+#include <EMotionFX/Source/Allocators.h>
 
 namespace EMotionFX
 {
-    //-------------------------------------------------------------------------------
-    // class EventHandler
-    //-------------------------------------------------------------------------------
+    AZ_CLASS_ALLOCATOR_IMPL(EventHandler, EventHandlerAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphInstanceEventHandler, AnimGraphEventHandlerAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(MotionInstanceEventHandler, MotionEventHandlerAllocator, 0)
 
-    // constructor
-    EventHandler::EventHandler()
-        : BaseObject()
-    {
-    }
-
-
-    // destructor
-    EventHandler::~EventHandler()
-    {
-    }
-
-
-    // creation method
-    EventHandler* EventHandler::Create()
-    {
-        return new EventHandler();
-    }
-
-
-
-    //-------------------------------------------------------------------------------
-    // class AnimGraphInstanceEventHandler
-    //-------------------------------------------------------------------------------
-
-    // constructor
-    AnimGraphInstanceEventHandler::AnimGraphInstanceEventHandler()
-        : BaseObject()
-    {
-    }
-
-
-    // destructor
-    AnimGraphInstanceEventHandler::~AnimGraphInstanceEventHandler()
-    {
-    }
-
-
-    // creation method
-    AnimGraphInstanceEventHandler* AnimGraphInstanceEventHandler::Create()
-    {
-        return new AnimGraphInstanceEventHandler();
-    }
-
-
-
-
-    //-------------------------------------------------------------------------------
-    // class MotionInstanceEventHandler
-    //-------------------------------------------------------------------------------
-
-    // constructor
-    MotionInstanceEventHandler::MotionInstanceEventHandler()
-        : BaseObject()
-    {
-        mMotionInstance = nullptr;
-    }
-
-
-    // destructor
-    MotionInstanceEventHandler::~MotionInstanceEventHandler()
-    {
-    }
-
-
-    // creation method
-    MotionInstanceEventHandler* MotionInstanceEventHandler::Create()
-    {
-        return new MotionInstanceEventHandler();
-    }
-}   // namespace EMotionFX
+}

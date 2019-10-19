@@ -38,7 +38,7 @@ namespace AZ
                         "VR Preview", "The VR Preview component creates a user-editable navigation mesh that defines valid areas that users can teleport to")
                         ->ClassElement(Edit::ClassElements::EditorData, "")
                         ->Attribute(Edit::Attributes::Category, "VR")
-                        ->Attribute(Edit::Attributes::Icon, "Editor/Icons/Components/VRPreview.png")
+                        ->Attribute(Edit::Attributes::Icon, "Editor/Icons/Components/VRPreview.svg")
                         ->Attribute(Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/VRPreview.png")
                         ->Attribute(Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-vrpreview-component.html")
@@ -78,9 +78,9 @@ namespace AZ
 
         //////////////////////////////////////////////////////////////////////////
         // AzToolsFramework::EditorEntityContextNotificationBus interface implementation
-        void EditorVRPreviewComponent::OnSliceInstantiated(const Data::AssetId& sliceAssetId, const SliceComponent::SliceInstanceAddress& sliceAddress, const AzFramework::SliceInstantiationTicket& ticket)
+        void EditorVRPreviewComponent::OnSliceInstantiated(const Data::AssetId& sliceAssetId, SliceComponent::SliceInstanceAddress& sliceAddress, const AzFramework::SliceInstantiationTicket& ticket)
         {
-            const SliceComponent::EntityList& entities = sliceAddress.second->GetInstantiated()->m_entities;
+            const SliceComponent::EntityList& entities = sliceAddress.GetInstance()->GetInstantiated()->m_entities;
             const EntityId entityId = m_entity->GetId();
 
             for (const Entity* entity : entities)

@@ -43,13 +43,10 @@ namespace ScriptCanvasEditor
         ScriptCanvasData(const ScriptCanvasData&) = delete;
     };
 
-    /**
-    * Inherits from GraphCanvas SceneSliceAsset class so that it can be associated with new type uuid which is used by the asset processor to detect changes
-    */
     class ScriptCanvasAsset
         : public AZ::Data::AssetData
     {
-        // The Document Context is friended to allow it to set the AssetStauts state to Ready,
+        // The Document Context is friended to allow it to set the AssetStatus state to Ready,
         // as it is responsible for creating new Script Canvas assets in the SC editor
         friend class DocumentContext; 
     public:
@@ -65,14 +62,17 @@ namespace ScriptCanvasEditor
       
         static const char* GetFileExtension() { return "scriptcanvas"; }
         static const char* GetFileFilter() { return "*.scriptcanvas"; }
-        
+        static const char* GetGroup() { return "ScriptCanvas"; }
+       
         AZ::Entity* GetScriptCanvasEntity() const;
         void SetScriptCanvasEntity(AZ::Entity* scriptCanvasEntity);
 
         ScriptCanvasData& GetScriptCanvasData();
         const ScriptCanvasData& GetScriptCanvasData() const;
 
-    private:
+    protected:
         ScriptCanvasData m_data;
     };
+
+    
 } // namespace ScriptCanvasEditor

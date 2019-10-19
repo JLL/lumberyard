@@ -170,7 +170,7 @@ void UiCanvasAssetRefComponent::Reflect(AZ::ReflectContext* context)
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                 ->Attribute(AZ::Edit::Attributes::Category, "UI")
-                ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiCanvasRef.png")
+                ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiCanvasAssetRef.svg")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiCanvasRef.png")
                 ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-ui-canvas-asset-ref.html")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c));
@@ -190,20 +190,16 @@ void UiCanvasAssetRefComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiCanvasAssetRefBus>("UiCanvasAssetRefBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("LoadCanvas", &UiCanvasAssetRefBus::Events::LoadCanvas)
             ->Event("UnloadCanvas", &UiCanvasAssetRefBus::Events::UnloadCanvas);
 
         behaviorContext->EBus<UiCanvasRefBus>("UiCanvasRefBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetCanvas", &UiCanvasRefBus::Events::GetCanvas);
 
         behaviorContext->EBus<UiCanvasAssetRefNotificationBus>("UiCanvasAssetRefNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiCanvasAssetRefNotificationBusBehaviorHandler>();
 
         behaviorContext->EBus<UiCanvasRefNotificationBus>("UiCanvasRefNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiCanvasRefNotificationBusBehaviorHandler>();
     }
 }
@@ -215,6 +211,7 @@ void UiCanvasAssetRefComponent::Reflect(AZ::ReflectContext* context)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiCanvasAssetRefComponent::Activate()
 {
+#if !defined(DEDICATED_SERVER)
     UiCanvasRefBus::Handler::BusConnect(GetEntityId());
     UiCanvasAssetRefBus::Handler::BusConnect(GetEntityId());
     UiCanvasManagerNotificationBus::Handler::BusConnect();
@@ -228,11 +225,13 @@ void UiCanvasAssetRefComponent::Activate()
             EBUS_EVENT_ID(m_canvasEntityId, UiCanvasBus, SetEnabled, false);
         }
     }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UiCanvasAssetRefComponent::Deactivate()
 {
+#if !defined(DEDICATED_SERVER)
     if (m_canvasEntityId.IsValid())
     {
         gEnv->pLyShine->ReleaseCanvas(m_canvasEntityId);
@@ -242,4 +241,5 @@ void UiCanvasAssetRefComponent::Deactivate()
     UiCanvasAssetRefBus::Handler::BusDisconnect();
     UiCanvasRefBus::Handler::BusDisconnect();
     UiCanvasManagerNotificationBus::Handler::BusDisconnect();
+#endif
 }

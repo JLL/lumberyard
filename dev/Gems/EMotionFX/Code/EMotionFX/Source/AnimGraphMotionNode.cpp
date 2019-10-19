@@ -10,7 +10,8 @@
 *
 */
 
-// include required headers
+#include <AzCore/Serialization/SerializeContext.h>
+#include <AzCore/Serialization/EditContext.h>
 #include "EMotionFXConfig.h"
 #include "AnimGraphMotionNode.h"
 #include "MotionInstance.h"
@@ -18,7 +19,6 @@
 #include "EventManager.h"
 #include "EventHandler.h"
 #include "AnimGraphInstance.h"
-#include "AnimGraphAttributeTypes.h"
 #include "MotionSet.h"
 #include "SkeletalSubMotion.h"
 #include "SkeletalMotion.h"
@@ -28,72 +28,33 @@
 #include "EMotionFXManager.h"
 #include "MotionEventTable.h"
 #include "AnimGraph.h"
-#include <MCore/Source/AttributeSettings.h>
 
 
 namespace EMotionFX
 {
-    // only motion and playback info are known
-    AnimGraphMotionNode::AnimGraphMotionNode(AnimGraph* animGraph)
-        : AnimGraphNode(animGraph, nullptr, TYPE_ID)
-    {
-        // allocate space for the variables
-        CreateAttributeValues();
-        RegisterPorts();
-        InitInternalAttributesForAllInstances();
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphMotionNode, AnimGraphAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphMotionNode::UniqueData, AnimGraphObjectUniqueDataAllocator, 0)
 
-        mLastReverse                = false;
-        mLastLoop                   = true;
-        mLastEvents                 = true;
-        mLastRetarget               = true;
-        mLastMirror                 = false;
-        mLastMotionExtraction       = true;
-    }
+    const float AnimGraphMotionNode::s_defaultWeight = 1.0f;
 
-
-    // destructor
-    AnimGraphMotionNode::~AnimGraphMotionNode()
-    {
-    }
-
-
-    // create
-    AnimGraphMotionNode* AnimGraphMotionNode::Create(AnimGraph* animGraph)
-    {
-        return new AnimGraphMotionNode(animGraph);
-    }
-
-
-    // create unique data
-    AnimGraphObjectData* AnimGraphMotionNode::CreateObjectData()
-    {
-        return new UniqueData(this, nullptr, MCORE_INVALIDINDEX32, nullptr);
-    }
-
-
-    // init
-    void AnimGraphMotionNode::Init(AnimGraphInstance* animGraphInstance)
-    {
-        // force it to use some sync track
-        //  if (GetAttributeString(ATTRIB_EVENTTRACK)->GetValue().GetLength() == 0)
-        //  GetAttributeString(ATTRIB_EVENTTRACK)->SetValue("Sync");
-
-        // pre-create the motion instance
-        UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
-        PickNewActiveMotion(uniqueData);
-        if (uniqueData->mMotionInstance == nullptr)
-        {
-            CreateMotionInstance(animGraphInstance->GetActorInstance(), animGraphInstance);
-        }
-    }
-
-
-    // register the ports
-    void AnimGraphMotionNode::RegisterPorts()
+    AnimGraphMotionNode::AnimGraphMotionNode()
+        : AnimGraphNode()
+        , m_playSpeed(1.0f)
+        , m_indexMode(INDEXMODE_RANDOMIZE)
+        , m_loop(true)
+        , m_retarget(true)
+        , m_reverse(false)
+        , m_emitEvents(true)
+        , m_mirrorMotion(false)
+        , m_motionExtraction(true)
+        , m_nextMotionAfterLoop(false)
+        , m_rewindOnZeroWeight(false)
+        , m_inPlace(false)
     {
         // setup the input ports
-        InitInputPorts(1);
+        InitInputPorts(2);
         SetupInputPortAsNumber("Play Speed", INPUTPORT_PLAYSPEED, PORTID_INPUT_PLAYSPEED);
+        SetupInputPortAsNumber("In Place", INPUTPORT_INPLACE, PORTID_INPUT_INPLACE);
 
         // setup the output ports
         InitOutputPorts(2);
@@ -102,115 +63,55 @@ namespace EMotionFX
     }
 
 
-    // register the attributes
-    void AnimGraphMotionNode::RegisterAttributes()
+    AnimGraphMotionNode::~AnimGraphMotionNode()
     {
-        // register the source motion file name
-        MCore::AttributeSettings* param = RegisterAttribute("Motion", "motionID", "The source input motion to use.", ATTRIBUTE_INTERFACETYPE_MULTIPLEMOTIONPICKER);
-        param->SetReinitGuiOnValueChange(true);
-        param->SetDefaultValue(MCore::AttributeArray::Create(MCore::AttributeString::TYPE_ID));
-
-        param = RegisterAttribute("Loop", "loop", "Loop the motion?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(1.0f));
-
-        param = RegisterAttribute("Retarget", "retargetEnabled", "Is this motion allowed to be retargeted?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(1.0f));
-
-        param = RegisterAttribute("Reverse", "reverse", "Playback reversed?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-
-        param = RegisterAttribute("Emit Events", "events", "Are motion events enabled?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(1.0f));
-
-        param = RegisterAttribute("Mirror Motion", "mirror", "Mirror the motion?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-
-        param = RegisterAttribute("Motion Extraction", "motionExtraction", "Enable motion extraction?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(1.0f));
-
-        param = RegisterAttribute("Play Speed", "playSpeed", "The playback speed factor.", MCore::ATTRIBUTE_INTERFACETYPE_FLOATSPINNER);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(1.0f));
-        param->SetMinValue(MCore::AttributeFloat::Create(0.0f));
-        param->SetMaxValue(MCore::AttributeFloat::Create(100.0f));
-
-        param = RegisterAttribute("Indexing Mode", "indexMode", "The indexing mode to use when using multiple motions inside this motion node.", MCore::ATTRIBUTE_INTERFACETYPE_COMBOBOX);
-        param->ResizeComboValues((uint32)INDEXMODE_NUMMETHODS);
-        param->SetComboValue(INDEXMODE_RANDOMIZE,           "Randomize");
-        param->SetComboValue(INDEXMODE_RANDOMIZE_NOREPEAT,  "Random No Repeat");
-        param->SetComboValue(INDEXMODE_SEQUENTIAL,          "Sequential");
-        param->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-
-        param = RegisterAttribute("Next Motion After Loop", "nextMotionAfterEnd", "Switch to the next motion after this motion has ended/looped?", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-
-        param = RegisterAttribute("Rewind On Zero Weight", "rewindOnZeroWeight", "Rewind the motion when its local weight is near zero. Useful to restart non-looping motions. Looping needs to be disabled for this to work.", MCore::ATTRIBUTE_INTERFACETYPE_CHECKBOX);
-        param->SetDefaultValue(MCore::AttributeFloat::Create(0.0f));
-
-        /*  param = RegisterAttribute("Clip Start", "clipStart", "The start time of the motion, used when you want to play or loop a given range of the motion.", MCore::ATTRIBUTE_INTERFACETYPE_FLOATSPINNER);
-            param->SetDefaultValue( MCore::AttributeFloat::Create(0.0f) );
-            param->SetMinValue( MCore::AttributeFloat::Create(0.0f) );
-            param->SetMaxValue( MCore::AttributeFloat::Create(FLT_MAX) );
-
-            param = RegisterAttribute("Clip End", "clipEnd", "The end time of the motion, used when you want to play or loop a given range of the motion, set to zero to use the real motion maximum time.", MCore::ATTRIBUTE_INTERFACETYPE_FLOATSPINNER);
-            param->SetDefaultValue( MCore::AttributeFloat::Create(0.0f) );
-            param->SetMinValue( MCore::AttributeFloat::Create(0.0f) );
-            param->SetMaxValue( MCore::AttributeFloat::Create(FLT_MAX) );*/
     }
 
 
-    // get the palette name
+    void AnimGraphMotionNode::Reinit()
+    {
+        OnMotionIdsChanged();
+        OnMirrorMotionChanged();
+
+        AnimGraphNode::Reinit();
+    }
+
+
+    bool AnimGraphMotionNode::InitAfterLoading(AnimGraph* animGraph)
+    {
+        if (!AnimGraphNode::InitAfterLoading(animGraph))
+        {
+            return false;
+        }
+
+        InitInternalAttributesForAllInstances();
+
+        Reinit();
+        return true;
+    }
+
+
     const char* AnimGraphMotionNode::GetPaletteName() const
     {
         return "Motion";
     }
 
 
-    // get the palette category
     AnimGraphObject::ECategory AnimGraphMotionNode::GetPaletteCategory() const
     {
         return AnimGraphObject::CATEGORY_SOURCES;
     }
 
 
-    // convert attributes for backward compatibility
-    // this handles attributes that got renamed or who's types have changed during the development progress
-    bool AnimGraphMotionNode::ConvertAttribute(uint32 attributeIndex, const MCore::Attribute* attributeToConvert, const AZStd::string& attributeName)
+    bool AnimGraphMotionNode::GetIsInPlace(AnimGraphInstance* animGraphInstance) const
     {
-        // convert things by the base class
-        const bool result = AnimGraphObject::ConvertAttribute(attributeIndex, attributeToConvert, attributeName);
-
-        // if we try to convert the old motionID string attribute into an array attribute
-        if (attributeName == "motionID" && attributeIndex != MCORE_INVALIDINDEX32) // if we deal with the motionID and it is an attribute in the current attribute set
+        EMotionFX::BlendTreeConnection* inPlaceConnection = GetInputPort(INPUTPORT_INPLACE).mConnection;
+        if (inPlaceConnection)
         {
-            // if its a string, convert into an array
-            if (attributeToConvert->GetType() == MCore::AttributeString::TYPE_ID)
-            {
-                MCore::AttributeString* motionAttrib    = MCore::AttributeString::Create(static_cast<const MCore::AttributeString*>(attributeToConvert)->GetValue());
-                MCore::AttributeArray*  arrayAttrib     = GetAttributeArray(ATTRIB_MOTION);
-                arrayAttrib->Clear();
-                arrayAttrib->AddAttribute(motionAttrib, false);
-                return true;
-            }
+            return GetInputNumberAsBool(animGraphInstance, INPUTPORT_INPLACE);
         }
 
-        return result;
-    }
-
-
-    // create a clone of this node
-    AnimGraphNode* AnimGraphMotionNode::Clone(AnimGraph* animGraph)
-    {
-        // create the clone
-        AnimGraphMotionNode* clone = AnimGraphMotionNode::Create(animGraph);
-
-        // copy base class settings such as parameter values to the new clone
-        CopyBaseObjectTo(clone);
-
-        // copy settings specific to this node type
-        clone->mPlayInfo = mPlayInfo;
-
-        // return a pointer to the clone
-        return clone;
+        return m_inPlace;
     }
 
 
@@ -291,25 +192,26 @@ namespace EMotionFX
         UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
 
         // check if we have multiple motions in this node
-        const uint32 numMotions = GetAttributeArray(ATTRIB_MOTION)->GetNumAttributes();
+        const size_t numMotions = GetNumMotions();
         if (numMotions > 1)
         {
             // check if we reached the end of the motion, if so, pick a new one
             if (uniqueData->mMotionInstance)
             {
-                if (uniqueData->mMotionInstance->GetHasLooped() && GetAttributeFloatAsBool(ATTRIB_NEXTMOTIONAFTEREND))
+                if (uniqueData->mMotionInstance->GetHasLooped() && m_nextMotionAfterLoop)
                 {
-                    PickNewActiveMotion(uniqueData);
+                    PickNewActiveMotion(animGraphInstance, uniqueData);
                 }
             }
         }
 
         // rewind when the weight reaches 0 when we want to
-        if (!GetAttributeFloatAsBool(ATTRIB_LOOP))
+        if (!m_loop)
         {
-            if (uniqueData->GetLocalWeight() < MCore::Math::epsilon && GetAttributeFloatAsBool(ATTRIB_REWINDONZEROWEIGHT))
+            if (uniqueData->mMotionInstance && uniqueData->GetLocalWeight() < MCore::Math::epsilon && m_rewindOnZeroWeight)
             {
-                uniqueData->mMotionInstance->SetCurrentTime(0.0f);
+                uniqueData->SetCurrentPlayTime(0.0f);
+                uniqueData->SetPreSyncTime(0.0f);
             }
         }
 
@@ -317,10 +219,9 @@ namespace EMotionFX
         HierarchicalSyncAllInputNodes(animGraphInstance, uniqueData);
 
         // top down update all incoming connections
-        const uint32 numConnections = mConnections.GetLength();
-        for (uint32 i = 0; i < numConnections; ++i)
+        for (BlendTreeConnection* connection : mConnections)
         {
-            mConnections[i]->GetSourceNode()->PerformTopDownUpdate(animGraphInstance, timePassedInSeconds);
+            connection->GetSourceNode()->PerformTopDownUpdate(animGraphInstance, timePassedInSeconds);
         }
     }
 
@@ -335,33 +236,40 @@ namespace EMotionFX
             UpdateIncomingNode(animGraphInstance, playSpeedConnection->GetSourceNode(), timePassedInSeconds);
         }
 
+        if (!mDisabled)
+        {
+            UpdateIncomingNode(animGraphInstance, GetInputNode(INPUTPORT_INPLACE), timePassedInSeconds);
+        }
+
         // update the motion instance (current time etc)
         UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
         MotionInstance* motionInstance = uniqueData->mMotionInstance;
         if (motionInstance == nullptr || mDisabled)
         {
-        #ifdef EMFX_EMSTUDIOBUILD
-            if (mDisabled == false)
+            if (GetEMotionFX().GetIsInEditorMode())
             {
-                if (motionInstance == nullptr)
+                if (mDisabled == false)
                 {
-                    SetHasError(animGraphInstance, true);
+                    if (motionInstance == nullptr)
+                    {
+                        SetHasError(animGraphInstance, true);
+                    }
                 }
             }
-        #endif
 
             uniqueData->Clear();
             return;
         }
 
-    #ifdef EMFX_EMSTUDIOBUILD
-        SetHasError(animGraphInstance, false);
-    #endif
+        if (GetEMotionFX().GetIsInEditorMode())
+        {
+            SetHasError(animGraphInstance, false);
+        }
 
         // enable freeze at last frame for motions that are not looping
         motionInstance->SetFreezeAtLastFrame(!motionInstance->GetIsPlayingForever());
 
-        // if there is a node connected to the speed input port, read that value and use it as internal speed if not get the playspeed attribute
+        // if there is a node connected to the speed input port, read that value and use it as internal speed if not use the playspeed property
         float customSpeed = ExtractCustomPlaySpeed(animGraphInstance);
 
         // set the internal speed and play speeds etc
@@ -374,12 +282,7 @@ namespace EMotionFX
         {
             // calculate the new internal values when we would update with a given time delta
             float newTime;
-            float passedTime;
-            float totalPlayTime;
-            float timeDifToEnd;
-            uint32 numLoops;
-            bool frozenInLastFrame;
-            motionInstance->CalcNewTimeAfterUpdate(timePassedInSeconds, &newTime, &passedTime, &totalPlayTime, &timeDifToEnd, &numLoops, &hasLooped, &frozenInLastFrame);
+            motionInstance->CalcNewTimeAfterUpdate(timePassedInSeconds, &newTime);
 
             // set the current time to the new calculated time
             uniqueData->ClearInheritFlags();
@@ -391,23 +294,8 @@ namespace EMotionFX
         // make sure the motion is not paused
         motionInstance->SetPause(false);
 
-        // init the sync track
-        //uniqueData->GetSyncTrack().InitFromEventTrack( motionInstance->GetMotion()->GetEventTable().GetSyncTrack() );
-        if (uniqueData->mEventTrackIndex < motionInstance->GetMotion()->GetEventTable()->GetNumTracks())
-        {
-            if (motionInstance->GetMirrorMotion() == false)
-            {
-                uniqueData->GetSyncTrack().InitFromEventTrack(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-            }
-            else
-            {
-                uniqueData->GetSyncTrack().InitFromEventTrackMirrored(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-            }
-        }
-        else
-        {
-            uniqueData->GetSyncTrack().Clear();
-        }
+        uniqueData->SetSyncTrack(motionInstance->GetMotion()->GetEventTable()->GetSyncTrack());
+        uniqueData->SetIsMirrorMotion(motionInstance->GetMirrorMotion());
 
         // update some flags
         if (motionInstance->GetPlayMode() == PLAYMODE_BACKWARD)
@@ -424,41 +312,16 @@ namespace EMotionFX
 
     void AnimGraphMotionNode::UpdatePlayBackInfo(AnimGraphInstance* animGraphInstance)
     {
-        // add the unique data of this node to the anim graph
-        UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
-
-        // update the last motion ID
-        mLastLoop               = GetAttributeFloatAsBool(ATTRIB_LOOP);
-        mLastRetarget           = GetAttributeFloatAsBool(ATTRIB_RETARGET);
-        mLastReverse            = GetAttributeFloatAsBool(ATTRIB_REVERSE);
-        mLastEvents             = GetAttributeFloatAsBool(ATTRIB_EVENTS);
-        mLastMirror             = GetAttributeFloatAsBool(ATTRIB_MIRROR);
-        mLastMotionExtraction   = GetAttributeFloatAsBool(ATTRIB_MOTIONEXTRACTION);
-        /////mLastClipStart         = GetAttributeFloat(ATTRIB_CLIPSTART)->GetValue();
-        /////mLastClipEnd           = GetAttributeFloat(ATTRIB_CLIPEND)->GetValue();
-
-        MotionInstance* motionInstance = uniqueData->mMotionInstance;
-        if (motionInstance)
-        {
-            uniqueData->mEventTrackIndex = motionInstance->GetMotion()->GetEventTable()->FindTrackIndexByName("Sync");
-        }
-        else
-        {
-            uniqueData->mEventTrackIndex = MCORE_INVALIDINDEX32;
-        }
-
         // check if we need to play backwards
-        mPlayInfo.mPlayMode             = (mLastReverse) ? PLAYMODE_BACKWARD : PLAYMODE_FORWARD;
-        mPlayInfo.mNumLoops             = (mLastLoop) ? EMFX_LOOPFOREVER : 1;
-        mPlayInfo.mFreezeAtLastFrame    = true;
-        mPlayInfo.mEnableMotionEvents   = mLastEvents;
-        mPlayInfo.mMirrorMotion         = mLastMirror;
-        mPlayInfo.mPlaySpeed            = ExtractCustomPlaySpeed(animGraphInstance);
-        mPlayInfo.mMotionExtractionEnabled = mLastMotionExtraction;
-
-        /////mPlayInfo.mClipStartTime       = mLastClipStart;
-        /////mPlayInfo.mClipEndTime         = mLastClipEnd;
-        mPlayInfo.mRetarget             = mLastRetarget;
+        m_playInfo.mPlayMode                 = (m_reverse) ? PLAYMODE_BACKWARD : PLAYMODE_FORWARD;
+        m_playInfo.mNumLoops                 = (m_loop) ? EMFX_LOOPFOREVER : 1;
+        m_playInfo.mFreezeAtLastFrame        = true;
+        m_playInfo.mEnableMotionEvents       = m_emitEvents;
+        m_playInfo.mMirrorMotion             = m_mirrorMotion;
+        m_playInfo.mPlaySpeed                = ExtractCustomPlaySpeed(animGraphInstance);
+        m_playInfo.mMotionExtractionEnabled  = m_motionExtraction;
+        m_playInfo.mRetarget                 = m_retarget;
+        m_playInfo.mInPlace                  = GetIsInPlace(animGraphInstance);
     }
 
 
@@ -473,7 +336,7 @@ namespace EMotionFX
 
         // try to find the motion to use for this actor instance in this blend node
         Motion*         motion      = nullptr;
-        PlayBackInfo    playInfo    = mPlayInfo;
+        PlayBackInfo    playInfo    = m_playInfo;
 
         // reset playback properties
         const float curPlayTime = uniqueData->GetCurrentPlayTime();
@@ -495,23 +358,25 @@ namespace EMotionFX
         MotionSet* motionSet = animGraphInstance->GetMotionSet();
         if (motionSet == nullptr)
         {
-            //#ifdef EMFX_EMSTUDIOBUILD
-            //SetHasError(animGraphInstance, true);
-            //#endif
+            if (GetEMotionFX().GetIsInEditorMode())
+            {
+                SetHasError(animGraphInstance, true);
+            }
             return nullptr;
         }
 
         // get the motion from the motion set, load it on demand and make sure the motion loaded successfully
         if (uniqueData->mActiveMotionIndex != MCORE_INVALIDINDEX32)
         {
-            motion = motionSet->RecursiveFindMotionByStringID(GetMotionID(uniqueData->mActiveMotionIndex));
+            motion = motionSet->RecursiveFindMotionById(GetMotionId(uniqueData->mActiveMotionIndex));
         }
 
         if (motion == nullptr)
         {
-            //#ifdef EMFX_EMSTUDIOBUILD
-            //SetHasError(animGraphInstance, true);
-            //#endif
+            if (GetEMotionFX().GetIsInEditorMode())
+            {
+                SetHasError(animGraphInstance, true);
+            }
             return nullptr;
         }
 
@@ -526,24 +391,8 @@ namespace EMotionFX
         motionInstance->InitFromPlayBackInfo(playInfo, true);
         motionInstance->SetRetargetingEnabled(animGraphInstance->GetRetargetingEnabled() && playInfo.mRetarget);
 
-        // find the sync track
-        uniqueData->mEventTrackIndex = motionInstance->GetMotion()->GetEventTable()->FindTrackIndexByName("Sync");
-
-        if (uniqueData->mEventTrackIndex < motionInstance->GetMotion()->GetEventTable()->GetNumTracks())
-        {
-            if (motionInstance->GetMirrorMotion() == false)
-            {
-                uniqueData->GetSyncTrack().InitFromEventTrack(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-            }
-            else
-            {
-                uniqueData->GetSyncTrack().InitFromEventTrackMirrored(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-            }
-        }
-        else
-        {
-            uniqueData->GetSyncTrack().Clear();
-        }
+        uniqueData->SetSyncTrack(motionInstance->GetMotion()->GetEventTable()->GetSyncTrack());
+        uniqueData->SetIsMirrorMotion(motionInstance->GetMirrorMotion());
 
         // create the motion links
         //motion->CreateMotionLinks( actorInstance->GetActor(), motionInstance );
@@ -569,36 +418,6 @@ namespace EMotionFX
         GetEventManager().OnStartMotionInstance(motionInstance, &playInfo);
         return motionInstance;
     }
-
-
-    void AnimGraphMotionNode::Prepare(AnimGraphInstance* animGraphInstance)
-    {
-    #ifdef EMFX_EMSTUDIOBUILD
-        SetHasError(animGraphInstance, false);
-    #endif
-
-        // get the motion set
-        MotionSet* motionSet = animGraphInstance->GetMotionSet();
-        if (motionSet == nullptr)
-        {
-        #ifdef EMFX_EMSTUDIOBUILD
-            SetHasError(animGraphInstance, true);
-        #endif
-            return;
-        }
-
-        // get the motion from the motion set, load it on demand and make sure the motion loaded successfully
-        UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
-        Motion* motion = motionSet->RecursiveFindMotionByStringID(GetMotionID(uniqueData->mActiveMotionIndex));
-        if (motion == nullptr)
-        {
-        #ifdef EMFX_EMSTUDIOBUILD
-            SetHasError(animGraphInstance, true);
-        #endif
-            return;
-        }
-    }
-
 
 
     // the main process method of the final node
@@ -646,16 +465,17 @@ namespace EMotionFX
             AnimGraphPose* outputPose = GetOutputPose(animGraphInstance, OUTPUTPORT_POSE)->GetValue();
             outputPose->InitFromBindPose(actorInstance);
 
-            //#ifdef EMFX_EMSTUDIOBUILD
-            //SetHasError(animGraphInstance, true);
-            //#endif
-
+            if (GetEMotionFX().GetIsInEditorMode())
+            {
+                SetHasError(animGraphInstance, true);
+            }
             return;
         }
-        //#ifdef EMFX_EMSTUDIOBUILD
-        //else
-        //SetHasError(animGraphInstance, false);
-        //#endif
+
+        if (GetEMotionFX().GetIsInEditorMode())
+        {
+            SetHasError(animGraphInstance, false);
+        }
 
         // make sure the motion instance is ready for sampling
         if (motionInstance->GetIsReadyForSampling() == false)
@@ -663,15 +483,22 @@ namespace EMotionFX
             motionInstance->InitForSampling();
         }
 
-        // sync the motion instance with the motion node attributes
-        motionInstance->SetPlayMode(mPlayInfo.mPlayMode);
-        motionInstance->SetRetargetingEnabled(mPlayInfo.mRetarget && animGraphInstance->GetRetargetingEnabled());
-        motionInstance->SetFreezeAtLastFrame(mPlayInfo.mFreezeAtLastFrame);
-        motionInstance->SetMotionEventsEnabled(mPlayInfo.mEnableMotionEvents);
-        motionInstance->SetMirrorMotion(mPlayInfo.mMirrorMotion);
-        motionInstance->SetEventWeightThreshold(mPlayInfo.mEventWeightThreshold);
-        motionInstance->SetMaxLoops(mPlayInfo.mNumLoops);
-        motionInstance->SetMotionExtractionEnabled(mPlayInfo.mMotionExtractionEnabled);
+        EMotionFX::BlendTreeConnection* inPlaceConnection = GetInputPort(INPUTPORT_INPLACE).mConnection;
+        if (inPlaceConnection)
+        {
+            OutputIncomingNode(animGraphInstance, inPlaceConnection->GetSourceNode());
+        }
+
+        // sync the motion instance with the motion node properties
+        motionInstance->SetPlayMode(m_playInfo.mPlayMode);
+        motionInstance->SetRetargetingEnabled(m_playInfo.mRetarget && animGraphInstance->GetRetargetingEnabled());
+        motionInstance->SetFreezeAtLastFrame(m_playInfo.mFreezeAtLastFrame);
+        motionInstance->SetMotionEventsEnabled(m_playInfo.mEnableMotionEvents);
+        motionInstance->SetMirrorMotion(m_playInfo.mMirrorMotion);
+        motionInstance->SetEventWeightThreshold(m_playInfo.mEventWeightThreshold);
+        motionInstance->SetMaxLoops(m_playInfo.mNumLoops);
+        motionInstance->SetMotionExtractionEnabled(m_playInfo.mMotionExtractionEnabled);
+        motionInstance->SetIsInPlace(GetIsInPlace(animGraphInstance));
 
         // request poses to use from the pool, so that all output pose ports have a valid pose to output to we reuse them using a pool system to save memory
         RequestPoses(animGraphInstance);
@@ -688,94 +515,16 @@ namespace EMotionFX
         // we already moved our actor instance's position and rotation at this point
         // so we have to cancel/compensate this delta offset from the motion extraction node, so that we don't double-transform
         // basically this will keep the motion in-place rather than moving it away from the origin
-        if (motionInstance->GetMotionExtractionEnabled() && actorInstance->GetMotionExtractionEnabled())
+        if (motionInstance->GetMotionExtractionEnabled() && actorInstance->GetMotionExtractionEnabled() && !motionInstance->GetMotion()->GetIsAdditive())
         {
             outputTransformPose.CompensateForMotionExtractionDirect(motionInstance->GetMotion()->GetMotionExtractionFlags());
         }
 
         // visualize it
-    #ifdef EMFX_EMSTUDIOBUILD
-        if (GetCanVisualize(animGraphInstance))
+        if (GetEMotionFX().GetIsInEditorMode() && GetCanVisualize(animGraphInstance))
         {
             actorInstance->DrawSkeleton(outputPose->GetPose(), mVisualizeColor);
         }
-    #endif
-    }
-
-
-    // get the type string
-    const char* AnimGraphMotionNode::GetTypeString() const
-    {
-        return "AnimGraphMotionNode";
-    }
-
-
-    // when parameter values have changed through the interface
-    void AnimGraphMotionNode::OnUpdateAttributes()
-    {
-        // check if the motion string attribute changed
-        const bool convertSuccess = GetAttributeArray(ATTRIB_MOTION)->ConvertToString(mCurMotionArrayString);
-        MCORE_ASSERT(convertSuccess);
-
-        // if the motion changed, update all corresponding anim graph instances
-        const uint32 numAnimGraphInstances = mAnimGraph->GetNumAnimGraphInstances();
-        for (uint32 i = 0; i < numAnimGraphInstances; ++i)
-        {
-            AnimGraphInstance* animGraphInstance = mAnimGraph->GetAnimGraphInstance(i);
-            UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
-            if (uniqueData)
-            {
-                PickNewActiveMotion(uniqueData);
-
-                if (convertSuccess && mLastMotionArrayString != mCurMotionArrayString)
-                {
-                    uniqueData->mReload = true;
-                }
-            }
-
-            OnUpdateUniqueData(animGraphInstance);
-        }
-
-        if (convertSuccess && mLastMotionArrayString != mCurMotionArrayString)
-        {
-            // update the node info
-            const uint32 numMotions = GetAttributeArray(ATTRIB_MOTION)->GetNumAttributes();
-            if (numMotions > 0)
-            {
-                if (numMotions > 1)
-                {
-                    SetNodeInfo("<Multiple>");
-                }
-                else
-                {
-                    SetNodeInfo(GetMotionID(0));
-                }
-            }
-            else
-            {
-                SetNodeInfo("<None>");
-            }
-
-            mLastMotionArrayString = mCurMotionArrayString;
-        }
-
-        // disable GUI items that have no influence
-    #ifdef EMFX_EMSTUDIOBUILD
-        // enable all attributes
-        EnableAllAttributes(true);
-
-        // if events processing is disabled also disable the events threshold
-        if (GetAttributeArray(ATTRIB_MOTION)->GetNumAttributes() <= 1)
-        {
-            SetAttributeDisabled(ATTRIB_INDEXMODE);
-            SetAttributeDisabled(ATTRIB_NEXTMOTIONAFTEREND);
-        }
-
-        if (GetAttributeFloatAsBool(ATTRIB_LOOP))
-        {
-            SetAttributeDisabled(ATTRIB_REWINDONZEROWEIGHT);
-        }
-    #endif
     }
 
 
@@ -793,10 +542,15 @@ namespace EMotionFX
         UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
         if (uniqueData == nullptr)
         {
-            uniqueData = (UniqueData*)GetEMotionFX().GetAnimGraphManager()->GetObjectDataPool().RequestNew(TYPE_ID, this, animGraphInstance);
+            uniqueData = aznew UniqueData(this, animGraphInstance, MCORE_INVALIDINDEX32, nullptr);
             animGraphInstance->RegisterUniqueObjectData(uniqueData);
+            PickNewActiveMotion(animGraphInstance, uniqueData);
+        }
 
-            // pre-create the motion instance
+        OnUpdateTriggerActionsUniqueData(animGraphInstance);
+
+        if (!uniqueData->mMotionInstance)
+        {
             CreateMotionInstance(animGraphInstance->GetActorInstance(), animGraphInstance);
         }
 
@@ -808,27 +562,8 @@ namespace EMotionFX
             motionSetID = motionSet->GetID();
         }
 
-        // check if some settings have changed that will need a reload of the motion
-        if ((mLastMotionArrayString != mCurMotionArrayString) ||
-            (uniqueData->mMotionSetID   != motionSetID) ||
-            //(MCore::Math::IsFloatEqual(mLastClipStart, GetAttributeFloat(ATTRIB_CLIPSTART)->GetValue()) == false) ||
-            //(MCore::Math::IsFloatEqual(mLastClipEnd, GetAttributeFloat(ATTRIB_CLIPEND)->GetValue()) == false)  ||
-            (mLastMirror != GetAttributeFloatAsBool(ATTRIB_MIRROR)))
-        {
-            uniqueData->mReload = true;
-        }
-
-        // check if some settings have changed that will will require to update the motion instance without recreating it
-        if ((mLastLoop              != GetAttributeFloatAsBool(ATTRIB_LOOP)) ||
-            (mLastRetarget          != GetAttributeFloatAsBool(ATTRIB_RETARGET)) ||
-            (mLastReverse           != GetAttributeFloatAsBool(ATTRIB_REVERSE)) ||
-            (mLastEvents            != GetAttributeFloatAsBool(ATTRIB_EVENTS)) ||
-            (mLastMirror            != GetAttributeFloatAsBool(ATTRIB_MIRROR)) ||
-            (mLastMotionExtraction  != GetAttributeFloatAsBool(ATTRIB_MOTIONEXTRACTION)))
-        {
-            // update the internally stored playback info
-            UpdatePlayBackInfo(animGraphInstance);
-        }
+        // update the internally stored playback info
+        UpdatePlayBackInfo(animGraphInstance);
 
         // update play info
         if (uniqueData->mMotionInstance)
@@ -837,22 +572,8 @@ namespace EMotionFX
             uniqueData->SetDuration(motionInstance->GetDuration());
             uniqueData->SetCurrentPlayTime(motionInstance->GetCurrentTime());
 
-            uniqueData->mEventTrackIndex = motionInstance->GetMotion()->GetEventTable()->FindTrackIndexByName("Sync");
-            if (uniqueData->mEventTrackIndex < motionInstance->GetMotion()->GetEventTable()->GetNumTracks())
-            {
-                if (motionInstance->GetMirrorMotion() == false)
-                {
-                    uniqueData->GetSyncTrack().InitFromEventTrack(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-                }
-                else
-                {
-                    uniqueData->GetSyncTrack().InitFromEventTrackMirrored(motionInstance->GetMotion()->GetEventTable()->GetTrack(uniqueData->mEventTrackIndex));
-                }
-            }
-            else
-            {
-                uniqueData->GetSyncTrack().Clear();
-            }
+            uniqueData->SetSyncTrack(motionInstance->GetMotion()->GetEventTable()->GetSyncTrack());
+            uniqueData->SetIsMirrorMotion(motionInstance->GetMirrorMotion());
         }
     }
 
@@ -875,7 +596,6 @@ namespace EMotionFX
     {
         mMotionInstance     = instance;
         mReload             = false;
-        mEventTrackIndex    = MCORE_INVALIDINDEX32;
         mMotionSetID        = motionSetID;
         mActiveMotionIndex  = MCORE_INVALIDINDEX32;
     }
@@ -905,7 +625,9 @@ namespace EMotionFX
         mCurrentTime    = 0.0f;
         mDuration       = 0.0f;
         mActiveMotionIndex = MCORE_INVALIDINDEX32;
-        mSyncTrack.Clear();
+
+        AnimGraphMotionNode* motionNode = static_cast<AnimGraphMotionNode*>(mObject);
+        motionNode->PickNewActiveMotion(mAnimGraphInstance, this);
     }
 
 
@@ -930,11 +652,11 @@ namespace EMotionFX
         uniqueData->SetPreSyncTime(uniqueData->GetCurrentPlayTime());
         //uniqueData->SetPlaySpeed( uniqueData->GetPlaySpeed() );
 
-        PickNewActiveMotion(uniqueData);
+        PickNewActiveMotion(animGraphInstance, uniqueData);
     }
 
 
-    // get the speed from the connection if there is one connected, if not get the speed attribute
+    // get the speed from the connection if there is one connected, if not use the node's playspeed
     float AnimGraphMotionNode::ExtractCustomPlaySpeed(AnimGraphInstance* animGraphInstance) const
     {
         EMotionFX::BlendTreeConnection* playSpeedConnection = GetInputPort(INPUTPORT_PLAYSPEED).mConnection;
@@ -947,65 +669,84 @@ namespace EMotionFX
         }
         else
         {
-            customSpeed = GetAttributeFloat(ATTRIB_PLAYSPEED)->GetValue(); // otherwise read the node's speed attribute value and use that
+            customSpeed = m_playSpeed; // otherwise use the node's playspeed
         }
+
         return customSpeed;
     }
 
 
     // pick a new motion from the list
-    void AnimGraphMotionNode::PickNewActiveMotion(UniqueData* uniqueData)
+    void AnimGraphMotionNode::PickNewActiveMotion(AnimGraphInstance* animGraphInstance, UniqueData* uniqueData)
     {
         if (uniqueData == nullptr)
         {
             return;
         }
 
-        const uint32 numMotions = GetAttributeArray(ATTRIB_MOTION)->GetNumAttributes();
-        if (numMotions > 0)
+        const size_t numMotions = m_motionRandomSelectionCumulativeWeights.size();
+        if (numMotions == 1)
         {
-            if (numMotions > 1)
+            uniqueData->mActiveMotionIndex = 0;
+        }
+        else if (numMotions > 1)
+        {
+            uniqueData->mReload = true;
+            switch (m_indexMode)
             {
-                uniqueData->mReload = true;
-                const uint32 indexMode = static_cast<uint32>(GetAttributeFloat(ATTRIB_INDEXMODE)->GetValue());
-                switch (indexMode)
+            // pick a random one, but make sure its not the same as the last one we played
+            case INDEXMODE_RANDOMIZE_NOREPEAT:
+            {
+                if (uniqueData->mActiveMotionIndex == MCORE_INVALIDINDEX32)
                 {
-                // pick a random one, but make sure its not the same as the last one we played
-                case INDEXMODE_RANDOMIZE_NOREPEAT:
-                {
-                    uint32 curIndex = uniqueData->mActiveMotionIndex;
-                    while (curIndex == uniqueData->mActiveMotionIndex)  // repeat until we found another value
-                    {
-                        curIndex = rand() % numMotions;
-                    }
-                    uniqueData->mActiveMotionIndex = curIndex;
-                    ;
+                    SelectAnyRandomMotionIndex(animGraphInstance, uniqueData);
+                    return;
                 }
-                break;
 
-                // pick the next motion from the list
-                case INDEXMODE_SEQUENTIAL:
-                {
-                    uniqueData->mActiveMotionIndex++;
-                    if (uniqueData->mActiveMotionIndex >= numMotions)
-                    {
-                        uniqueData->mActiveMotionIndex = 0;
-                    }
-                }
-                break;
+                AZ::u32 curIndex = uniqueData->mActiveMotionIndex;
 
-                // just pick a random one, this can result in the same one we already play
-                case INDEXMODE_RANDOMIZE:
-                default:
+                // Make sure we're in a valid range.
+                if (curIndex >= numMotions)
                 {
-                    const uint32 index = rand() % numMotions;
-                    uniqueData->mActiveMotionIndex = index;
+                    curIndex = static_cast<AZ::u32>(numMotions - 1);
                 }
+
+                // Removing the cumulative probability range for the element that we do not want to choose
+                const float previousIndexCumulativeWeight = curIndex > 0 ? m_motionRandomSelectionCumulativeWeights[curIndex - 1].second : 0;
+                const float currentIndexCumulativeWeight = m_motionRandomSelectionCumulativeWeights[curIndex].second;
+                const float randomRange = previousIndexCumulativeWeight + m_motionRandomSelectionCumulativeWeights.back().second - currentIndexCumulativeWeight;
+
+                // Picking a random number between [0, randomRange)
+                const float randomValue = animGraphInstance->GetLcgRandom().GetRandomFloat() * randomRange;
+                // Remapping the value onto the existing non normalized cumulative probabilities
+                float remappedRandomValue = randomValue;
+                if (randomValue > previousIndexCumulativeWeight)
+                {
+                    remappedRandomValue = randomValue - previousIndexCumulativeWeight + currentIndexCumulativeWeight;
+                }
+                const int index = FindCumulativeProbabilityIndex(remappedRandomValue);
+                AZ_Assert(index >= 0, "Unable to find random value in motion random weights");
+                uniqueData->mActiveMotionIndex = index;
+            }
+            break;
+
+            // pick the next motion from the list
+            case INDEXMODE_SEQUENTIAL:
+            {
+                uniqueData->mActiveMotionIndex++;
+                if (uniqueData->mActiveMotionIndex >= numMotions)
+                {
+                    uniqueData->mActiveMotionIndex = 0;
                 }
             }
-            else
+            break;
+
+            // just pick a random one, this can result in the same one we already play
+            case INDEXMODE_RANDOMIZE:
+            default:
             {
-                uniqueData->mActiveMotionIndex = 0;
+                SelectAnyRandomMotionIndex(animGraphInstance, uniqueData);
+            }
             }
         }
         else
@@ -1014,37 +755,83 @@ namespace EMotionFX
         }
     }
 
-
-    AZ::u32 AnimGraphMotionNode::GetNumMotions() const
+    void AnimGraphMotionNode::SelectAnyRandomMotionIndex(EMotionFX::AnimGraphInstance* animGraphInstance, EMotionFX::AnimGraphMotionNode::UniqueData* uniqueData)
     {
-        return GetAttributeArray(ATTRIB_MOTION)->GetNumAttributes();
+        // Selecting a random number between [0, m_motionIdRandomWeights.back().second)
+        const float randomValue = animGraphInstance->GetLcgRandom().GetRandomFloat() * m_motionRandomSelectionCumulativeWeights.back().second;
+        const int index = FindCumulativeProbabilityIndex(randomValue);
+        AZ_Assert(index >= 0, "Error: unable to find random value among motion random weights");
+        uniqueData->mActiveMotionIndex = index;
+    }
+
+    int AnimGraphMotionNode::FindCumulativeProbabilityIndex(float randomValue) const
+    {
+        for (unsigned int i = 0; i < m_motionRandomSelectionCumulativeWeights.size(); ++i)
+        {
+            if (randomValue < m_motionRandomSelectionCumulativeWeights[i].second)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    size_t AnimGraphMotionNode::GetNumMotions() const
+    {
+        return m_motionRandomSelectionCumulativeWeights.size();
     }
 
 
-    // get the motion ID from the list
-    const char* AnimGraphMotionNode::GetMotionID(uint32 index) const
+    const char* AnimGraphMotionNode::GetMotionId(size_t index) const
     {
-        MCore::AttributeArray* attributeArray = GetAttributeArray(ATTRIB_MOTION);
-        if (attributeArray->GetNumAttributes() <= index)
+        if (m_motionRandomSelectionCumulativeWeights.size() <= index)
         {
-            return nullptr;
+            return "";
         }
 
-        MCore::Attribute* attrib = attributeArray->GetAttribute(index);
-        if (attrib == nullptr)
-        {
-            return nullptr;
-        }
-
-        return static_cast<const MCore::AttributeString*>(attrib)->GetValue().c_str();
+        return m_motionRandomSelectionCumulativeWeights[index].first.c_str();
     }
 
 
-    // motion extraction node changed
+    void AnimGraphMotionNode::ReplaceMotionId(const char* oldId, const char* replaceWith)
+    {
+        for (auto& motionIdRandomWeightPair : m_motionRandomSelectionCumulativeWeights)
+        {
+            if (motionIdRandomWeightPair.first == oldId)
+            {
+                motionIdRandomWeightPair.first = replaceWith;
+            }
+        }
+    }
+
+
+    void AnimGraphMotionNode::AddMotionId(const AZStd::string& name)
+    {
+        for (const auto& pair : m_motionRandomSelectionCumulativeWeights)
+        {
+            if (pair.first == name)
+            {
+                return;
+            }
+        }
+        float weightSum = 0.0f;
+        if (!m_motionRandomSelectionCumulativeWeights.empty())
+        {
+            weightSum = m_motionRandomSelectionCumulativeWeights.back().second;
+        }
+        m_motionRandomSelectionCumulativeWeights.emplace_back(name, weightSum + s_defaultWeight);
+    }
+
+
+    // Motion extraction node changed
     void AnimGraphMotionNode::OnActorMotionExtractionNodeChanged()
     {
-        const uint32 numAnimGraphInstances = mAnimGraph->GetNumAnimGraphInstances();
-        for (uint32 i = 0; i < numAnimGraphInstances; ++i)
+        if (!mAnimGraph)
+        {
+            return;
+        }
+        const size_t numAnimGraphInstances = mAnimGraph->GetNumAnimGraphInstances();
+        for (size_t i = 0; i < numAnimGraphInstances; ++i)
         {
             AnimGraphInstance* animGraphInstance = mAnimGraph->GetAnimGraphInstance(i);
 
@@ -1054,5 +841,250 @@ namespace EMotionFX
             OnUpdateUniqueData(animGraphInstance);
         }
     }
-}   // namespace EMotionFX
 
+    void AnimGraphMotionNode::RecursiveOnChangeMotionSet(AnimGraphInstance* animGraphInstance, MotionSet* newMotionSet)
+    {
+        AnimGraphNode::RecursiveOnChangeMotionSet(animGraphInstance, newMotionSet);
+
+        UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
+        uniqueData->mReload = true;
+    }
+
+
+    void AnimGraphMotionNode::OnMotionIdsChanged()
+    {
+        if (!mAnimGraph)
+        {
+            return;
+        }
+        const size_t numAnimGraphInstances = mAnimGraph->GetNumAnimGraphInstances();
+        for (size_t i = 0; i < numAnimGraphInstances; ++i)
+        {
+            AnimGraphInstance* animGraphInstance = mAnimGraph->GetAnimGraphInstance(i);
+            UniqueData* uniqueData = static_cast<UniqueData*>(FindUniqueNodeData(animGraphInstance));
+            if (uniqueData)
+            {
+                PickNewActiveMotion(animGraphInstance, uniqueData);
+                uniqueData->mReload = true;
+            }
+
+            OnUpdateUniqueData(animGraphInstance);
+        }
+
+        // Set the node info text.
+        const size_t numMotions = m_motionRandomSelectionCumulativeWeights.size();
+        if (numMotions == 1)
+        {
+            SetNodeInfo(GetMotionId(0));
+        }
+        else if (numMotions > 1)
+        {
+            SetNodeInfo("<Multiple>");
+        }
+        else
+        {
+            SetNodeInfo("<None>");
+        }
+    }
+
+
+    void AnimGraphMotionNode::OnMirrorMotionChanged()
+    {
+        if (!mAnimGraph)
+        {
+            return;
+        }
+
+        const size_t numInstances = mAnimGraph->GetNumAnimGraphInstances();
+        for (size_t i = 0; i < numInstances; ++i)
+        {
+            AnimGraphInstance* animGraphInstance = mAnimGraph->GetAnimGraphInstance(i);
+
+            AnimGraphObjectData* baseUniqueData = animGraphInstance->FindUniqueNodeData(this);
+            if (!baseUniqueData)
+            {
+                continue;
+            }
+
+            UniqueData* uniqueData = static_cast<UniqueData*>(baseUniqueData);
+            uniqueData->mReload = true;
+
+            animGraphInstance->UpdateUniqueData();
+        }
+    }
+
+
+    AZ::Crc32 AnimGraphMotionNode::GetRewindOnZeroWeightVisibility() const
+    {
+        return m_loop ? AZ::Edit::PropertyVisibility::Hide : AZ::Edit::PropertyVisibility::Show;
+    }
+
+
+    AZ::Crc32 AnimGraphMotionNode::GetMultiMotionWidgetsVisibility() const
+    {
+        return GetNumMotions() > 1 ? AZ::Edit::PropertyVisibility::Show : AZ::Edit::PropertyVisibility::Hide;
+    }
+
+    void AnimGraphMotionNode::SetRewindOnZeroWeight(bool rewindOnZeroWeight)
+    {
+        m_rewindOnZeroWeight = rewindOnZeroWeight;
+    }
+
+    void AnimGraphMotionNode::SetNextMotionAfterLooop(bool nextMotionAfterLoop)
+    {
+        m_nextMotionAfterLoop = nextMotionAfterLoop;
+    }
+
+    void AnimGraphMotionNode::SetIndexMode(EIndexMode eIndexMode)
+    {
+        m_indexMode = eIndexMode;
+    }
+
+    void AnimGraphMotionNode::SetMotionPlaySpeed(float playSpeed)
+    {
+        m_playSpeed = playSpeed;
+    }
+
+    void AnimGraphMotionNode::SetEmitEvents(bool emitEvents)
+    {
+        m_emitEvents = emitEvents;
+    }
+
+    void AnimGraphMotionNode::SetMotionExtraction(bool motionExtraction)
+    {
+        m_motionExtraction = motionExtraction;
+    }
+
+    void AnimGraphMotionNode::SetMirrorMotion(bool mirrorMotion)
+    {
+        m_mirrorMotion = mirrorMotion;
+    }
+
+    void AnimGraphMotionNode::SetReverse(bool reverse)
+    {
+        m_reverse = reverse;
+    }
+
+    void AnimGraphMotionNode::SetRetarget(bool retarget)
+    {
+        m_retarget = retarget;
+    }
+
+    void AnimGraphMotionNode::SetLoop(bool loop)
+    {
+        m_loop = loop;
+    }
+
+    void AnimGraphMotionNode::SetMotionIds(const AZStd::vector<AZStd::string>& motionIds)
+    {
+        InitializeDefaultMotionIdsRandomWeights(motionIds, m_motionRandomSelectionCumulativeWeights);
+    }
+
+    void AnimGraphMotionNode::InitializeDefaultMotionIdsRandomWeights(const AZStd::vector<AZStd::string>& motionIds, AZStd::vector<AZStd::pair<AZStd::string, float> >& motionIdsRandomWeights)
+    {
+        motionIdsRandomWeights.clear();
+        const size_t count = motionIds.size();
+        motionIdsRandomWeights.reserve(count);
+
+        float currentCumulativeProbability = 0.0f;
+        for (size_t i = 0; i < count; ++i)
+        {
+            currentCumulativeProbability += s_defaultWeight;
+            motionIdsRandomWeights.emplace_back(motionIds[i], currentCumulativeProbability);
+        }
+    }
+
+    bool AnimGraphMotionNode::VersionConverter(AZ::SerializeContext& context, AZ::SerializeContext::DataElementNode& classElement)
+    {
+        const unsigned int version = classElement.GetVersion();
+        if (version < 2)
+        {
+            int motionIdsIndex = classElement.FindElement(AZ_CRC("motionIds", 0x3a3274c6));
+            if (motionIdsIndex < 0)
+            {
+                return false;
+            }
+            AZ::SerializeContext::DataElementNode& dataElementNode = classElement.GetSubElement(motionIdsIndex);
+            AZStd::vector<AZStd::string> oldMotionIds;
+            AZStd::vector<AZStd::pair<AZStd::string, float> > motionIdsWothRandomWeights;
+            const bool result = dataElementNode.GetData<AZStd::vector<AZStd::string> >(oldMotionIds);
+            if (!result)
+            {
+                return false;
+            }
+            InitializeDefaultMotionIdsRandomWeights(oldMotionIds, motionIdsWothRandomWeights);
+            classElement.RemoveElement(motionIdsIndex);
+            classElement.AddElementWithData(context, "motionIds", motionIdsWothRandomWeights);
+        }
+        return true;
+    }
+
+    void AnimGraphMotionNode::Reflect(AZ::ReflectContext* context)
+    {
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
+        {
+            return;
+        }
+
+        serializeContext->Class<AnimGraphMotionNode, AnimGraphNode>()
+            ->Version(3, VersionConverter)
+            ->Field("motionIds", &AnimGraphMotionNode::m_motionRandomSelectionCumulativeWeights)
+            ->Field("loop", &AnimGraphMotionNode::m_loop)
+            ->Field("retarget", &AnimGraphMotionNode::m_retarget)
+            ->Field("reverse", &AnimGraphMotionNode::m_reverse)
+            ->Field("emitEvents", &AnimGraphMotionNode::m_emitEvents)
+            ->Field("mirrorMotion", &AnimGraphMotionNode::m_mirrorMotion)
+            ->Field("motionExtraction", &AnimGraphMotionNode::m_motionExtraction)
+            ->Field("inPlace", &AnimGraphMotionNode::m_inPlace)
+            ->Field("playSpeed", &AnimGraphMotionNode::m_playSpeed)
+            ->Field("indexMode", &AnimGraphMotionNode::m_indexMode)
+            ->Field("nextMotionAfterLoop", &AnimGraphMotionNode::m_nextMotionAfterLoop)
+            ->Field("rewindOnZeroWeight", &AnimGraphMotionNode::m_rewindOnZeroWeight)
+        ;
+
+        AZ::EditContext* editContext = serializeContext->GetEditContext();
+        if (!editContext)
+        {
+            return;
+        }
+
+        editContext->Class<AnimGraphMotionNode>("Motion", "Motion attributes")
+            ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+            ->Attribute(AZ::Edit::Attributes::AutoExpand, "")
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
+            ->DataElement(AZ_CRC("MotionSetMotionIdsRandomSelectionWeights", 0xc882da3c), &AnimGraphMotionNode::m_motionRandomSelectionCumulativeWeights, "Motions", "")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::OnMotionIdsChanged)
+            ->Attribute(AZ::Edit::Attributes::ContainerCanBeModified, false)
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::HideChildren)
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, AZ::Edit::PropertyRefreshLevels::EntireTree)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_loop, "Loop", "Loop the motion?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, AZ::Edit::PropertyRefreshLevels::EntireTree)
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_retarget, "Retarget", "Is this motion allowed to be retargeted?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_reverse, "Reverse", "Playback reversed?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_emitEvents, "Emit Events", "Emit motion events?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_inPlace, "In Place", "Should the motion be in place and not move? This is most likely only used if you do not use motion extraction but your motion data moves the character away from the origin.")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_mirrorMotion, "Mirror Motion", "Mirror the motion?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::OnMirrorMotionChanged)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_motionExtraction, "Motion Extraction", "Enable motion extraction?")
+            ->Attribute(AZ::Edit::Attributes::ChangeNotify, &AnimGraphMotionNode::UpdateUniqueDatas)
+            ->DataElement(AZ::Edit::UIHandlers::SpinBox, &AnimGraphMotionNode::m_playSpeed, "Play Speed", "The playback speed factor.")
+            ->Attribute(AZ::Edit::Attributes::Min, 0.0f)
+            ->Attribute(AZ::Edit::Attributes::Max, 100.0f)
+            ->DataElement(AZ::Edit::UIHandlers::ComboBox, &AnimGraphMotionNode::m_indexMode, "Indexing Mode", "The indexing mode to use when using multiple motions inside this motion node.")
+            ->Attribute(AZ::Edit::Attributes::Visibility, &AnimGraphMotionNode::GetMultiMotionWidgetsVisibility)
+            ->EnumAttribute(INDEXMODE_RANDOMIZE,           "Randomize")
+            ->EnumAttribute(INDEXMODE_RANDOMIZE_NOREPEAT,  "Random No Repeat")
+            ->EnumAttribute(INDEXMODE_SEQUENTIAL,          "Sequential")
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_nextMotionAfterLoop, "Next Motion After Loop", "Switch to the next motion after this motion has ended/looped?")
+            ->Attribute(AZ::Edit::Attributes::Visibility, &AnimGraphMotionNode::GetMultiMotionWidgetsVisibility)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &AnimGraphMotionNode::m_rewindOnZeroWeight, "Rewind On Zero Weight", "Rewind the motion when its local weight is near zero. Useful to restart non-looping motions. Looping needs to be disabled for this to work.")
+            ->Attribute(AZ::Edit::Attributes::Visibility, &AnimGraphMotionNode::GetRewindOnZeroWeightVisibility)
+        ;
+    }
+} // namespace EMotionFX

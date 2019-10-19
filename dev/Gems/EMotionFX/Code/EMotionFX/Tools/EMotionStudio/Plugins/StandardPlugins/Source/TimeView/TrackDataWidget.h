@@ -53,16 +53,16 @@ namespace EMStudio
         
     protected:
         //void paintEvent(QPaintEvent* event);
-        void mouseDoubleClickEvent(QMouseEvent* event);
-        void mouseMoveEvent(QMouseEvent* event);
-        void mousePressEvent(QMouseEvent* event);
-        void mouseReleaseEvent(QMouseEvent* event);
-        void dragEnterEvent(QDragEnterEvent* event);
-        void dragMoveEvent(QDragMoveEvent* event);
-        void dropEvent(QDropEvent* event);
-        void keyPressEvent(QKeyEvent* event);
-        void keyReleaseEvent(QKeyEvent* event);
-        void contextMenuEvent(QContextMenuEvent* event);
+        void mouseDoubleClickEvent(QMouseEvent* event) override;
+        void mouseMoveEvent(QMouseEvent* event) override;
+        void mousePressEvent(QMouseEvent* event) override;
+        void mouseReleaseEvent(QMouseEvent* event) override;
+        void dragEnterEvent(QDragEnterEvent* event) override;
+        void dragMoveEvent(QDragMoveEvent* event) override;
+        void dropEvent(QDropEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
+        void keyReleaseEvent(QKeyEvent* event) override;
+        void contextMenuEvent(QContextMenuEvent* event) override;
 
     signals:
         void MotionEventPresetsDropped(QPoint position);
@@ -92,7 +92,7 @@ namespace EMStudio
         void RemoveMotionEvent(int32 x, int32 y);
         void AddMotionEvent(int32 x, int32 y);
 
-        void wheelEvent(QWheelEvent* event);
+        void wheelEvent(QWheelEvent* event) override;
         void DoPaste(bool useLocation);
         void PaintRecorder(QPainter& painter, const QRect& rect);
         void PaintRecorderNodeHistory(QPainter& painter, const QRect& rect, const EMotionFX::Recorder::ActorInstanceData* actorInstanceData);
@@ -138,12 +138,20 @@ namespace EMStudio
         // copy and paste
         struct CopyElement
         {
-            uint32          mMotionID;
-            AZStd::string   mTrackName;
-            AZStd::string   mEventType;
-            AZStd::string   mEventParameters;
-            float           mStartTime;
-            float           mEndTime;
+            uint32 m_motionID;
+            AZStd::string m_trackName;
+            const EMotionFX::EventDataSet m_eventDatas;
+            float m_startTime;
+            float m_endTime;
+
+            CopyElement(uint32 motionID, AZStd::string trackName, const EMotionFX::EventDataSet& eventDatas, float startTime, float endTime)
+                : m_motionID(motionID)
+                , m_trackName(trackName)
+                , m_eventDatas(eventDatas)
+                , m_startTime(startTime)
+                , m_endTime(endTime)
+            {
+            }
         };
 
         bool GetIsReadyForPaste() const                                                             { return mCopyElements.empty() == false; }
@@ -179,6 +187,6 @@ namespace EMStudio
         void BuildToolTipString(EMotionFX::Recorder::NodeHistoryItem* item, AZStd::string& outString);
         void BuildToolTipString(EMotionFX::Recorder::EventHistoryItem* item, AZStd::string& outString);
 
-        bool event(QEvent* event);
+        bool event(QEvent* event) override;
     };
 }   // namespace EMStudio

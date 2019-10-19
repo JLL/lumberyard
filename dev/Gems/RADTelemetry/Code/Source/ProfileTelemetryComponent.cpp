@@ -25,18 +25,19 @@
     tm_api* g_radTmApi;
 #endif
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(ProfileTelemetryComponent_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
-
-namespace
-{
-    const char * ProfileChannel = "RADTelemetry";
-    const AZ::u32 MaxProfileThreadCount = 128;
-}
-
 namespace RADTelemetry
 {
+    static const char * ProfileChannel = "RADTelemetry";
+    static const AZ::u32 MaxProfileThreadCount = 128;
+
+    static void MessageFrameTickType(AZ::Debug::ProfileFrameAdvanceType type)
+    {
+        const char * frameAdvanceTypeMessage = "Profile tick set to %s";
+        const char* frameAdvanceTypeString = (type == AZ::Debug::ProfileFrameAdvanceType::Game) ? "Game Thread" : "Render Frame";
+        AZ_Printf(ProfileChannel, frameAdvanceTypeMessage, frameAdvanceTypeString);
+        tmMessage(0, TMMF_SEVERITY_LOG, frameAdvanceTypeMessage, frameAdvanceTypeString);
+    }
+
     ProfileTelemetryComponent::ProfileTelemetryComponent()
     {
         // Connecting in the constructor because we need to catch ALL created threads
@@ -52,13 +53,14 @@ namespace RADTelemetry
         if (IsInitialized())
         {
             tmShutdown();
-            free(m_buffer);
+            AZ_OS_FREE(m_buffer);
             m_buffer = nullptr;
         }
     }
 
     void ProfileTelemetryComponent::Activate()
     {
+        AZ::Debug::ProfilerRequestBus::Handler::BusConnect();
         ProfileTelemetryRequestBus::Handler::BusConnect();
         AZ::SystemTickBus::Handler::BusConnect();
     }
@@ -67,6 +69,7 @@ namespace RADTelemetry
     {
         AZ::SystemTickBus::Handler::BusDisconnect();
         ProfileTelemetryRequestBus::Handler::BusDisconnect();
+        AZ::Debug::ProfilerRequestBus::Handler::BusDisconnect();
 
         Disable();
     }
@@ -144,7 +147,20 @@ namespace RADTelemetry
 
     void ProfileTelemetryComponent::OnSystemTick()
     {
-        tmTick(0);
+        FrameAdvance(AZ::Debug::ProfileFrameAdvanceType::Game);
+    }
+
+    void ProfileTelemetryComponent::FrameAdvance(AZ::Debug::ProfileFrameAdvanceType type)
+    {
+        if (type == m_frameAdvanceType)
+        {
+            tmTick(0);
+        }
+    }
+
+    bool ProfileTelemetryComponent::IsActive()
+    {
+        return m_running;
     }
 
     void ProfileTelemetryComponent::ToggleEnabled()
@@ -189,19 +205,19 @@ namespace RADTelemetry
             case TM_OK:
             {
                 m_running = true;
-                AZ_Printf(ProfileChannel, "Connected to the Telemetry server!");
+                AZ_Printf(ProfileChannel, "Connected to the Telemetry server at %s:%d", m_address, m_port);
+                MessageFrameTickType(m_frameAdvanceType);
 
 #if AZ_TRAIT_OS_USE_WINDOWS_THREADS
                 ScopedLock lock(m_threadNameLock);
                 for (const auto& threadNameEntry : m_threadNames)
                 {
                     const AZ::u32 newProfiledThreadCount = ++m_profiledThreadCount;
-                    AZ_Assert(newProfiledThreadCount <= MaxProfileThreadCount, "RAD Telemetry profiled threadcount exceeded MaxProfileThreadCount!");
+                    AZ_Assert(newProfiledThreadCount <= MaxProfileThreadCount, "RAD Telemetry profiled thread count exceeded MaxProfileThreadCount!");
                     tmThreadName(0, threadNameEntry.id.m_id, threadNameEntry.name.c_str());
                 }
                 m_threadNames.clear(); // Telemetry caches names so we can clear what we have sent on
 #endif
-
                 break;
             }
 
@@ -254,18 +270,12 @@ namespace RADTelemetry
         }
 
         tmLoadLibrary(TM_RELEASE);
-
-        if (!TM_API_PTR)
-        {
-            // Telemetry must be compiled as a static lib, set our global instance pointer to the internal telemetry one
-            TM_API_PTR = g_tm_api;
-        }
         AZ_Assert(TM_API_PTR, "Invalid RAD Telemetry API pointer state");
 
         tmSetMaxThreadCount(MaxProfileThreadCount);
 
         const tm_int32 telemetryBufferSize = 16 * 1024 * 1024;
-        m_buffer = static_cast<char*>(malloc(telemetryBufferSize));
+        m_buffer = static_cast<char*>(AZ_OS_MALLOC(telemetryBufferSize, sizeof(void*)));
         tmInitialize(telemetryBufferSize, m_buffer);
 
         // Notify so individual modules can update their Telemetry pointer
@@ -282,9 +292,40 @@ namespace RADTelemetry
         m_port = port;
     }
 
-    void ProfileTelemetryComponent::SetCaptureMask(AZ::u32 mask)
+    void ProfileTelemetryComponent::SetCaptureMask(AZ::Debug::ProfileCategoryPrimitiveType mask)
     {
         m_captureMask = mask;
+        if (IsInitialized())
+        {
+            tmSetCaptureMask(m_captureMask);
+        }
+    }
+
+    void ProfileTelemetryComponent::SetFrameAdvanceType(AZ::Debug::ProfileFrameAdvanceType type)
+    {
+        if (type != m_frameAdvanceType)
+        {
+            MessageFrameTickType(type);
+            m_frameAdvanceType = type;
+        }
+    }
+
+    AZ::Debug::ProfileCategoryPrimitiveType ProfileTelemetryComponent::GetDefaultCaptureMaskInternal()
+    {
+        using MaskType = AZ::Debug::ProfileCategoryPrimitiveType;
+
+        // Set all the category bits "below" FirstDetailedCategory and do not enable memory capture by default
+        return (static_cast<MaskType>(1) << static_cast<MaskType>(AZ::Debug::ProfileCategory::FirstDetailedCategory)) - 1;
+    }
+
+    AZ::Debug::ProfileCategoryPrimitiveType ProfileTelemetryComponent::GetDefaultCaptureMask()
+    {
+        return GetDefaultCaptureMaskInternal();
+    }
+
+    AZ::Debug::ProfileCategoryPrimitiveType ProfileTelemetryComponent::GetCaptureMask()
+    {
+        return m_captureMask;
     }
 
     void ProfileTelemetryComponent::Reflect(AZ::ReflectContext* context)

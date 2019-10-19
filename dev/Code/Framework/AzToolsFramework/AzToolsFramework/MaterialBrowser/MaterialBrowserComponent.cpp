@@ -19,7 +19,9 @@
 #include <AzToolsFramework/Thumbnails/SourceControlThumbnail.h>
 
 #include <QApplication>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QBrush::d': class 'QScopedPointer<QBrushData,QBrushDataPointerDeleter>' needs to have dll-interface to be used by clients of class 'QBrush'
 #include <QStyle>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -53,6 +55,11 @@ namespace AzToolsFramework
             {
                 serialize->Class<MaterialBrowserComponent, AZ::Component>();
             }
+        }
+
+        void MaterialBrowserComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
+        {
+            required.push_back(AZ_CRC("ThumbnailerService", 0x65422b97));
         }
     } // namespace MaterialBrowser
 } // namespace AzToolsFramework

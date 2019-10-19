@@ -13,27 +13,21 @@
 #pragma once
 
 #include <MCore/Source/StandardHeaders.h>
-#include <AzCore/std/containers/vector.h>
-#include <MCore/Source/CommandManager.h>
-#include "../StandardPluginsConfig.h"
-#include <EMotionFX/Source/AnimGraph.h>
-#include <EMotionFX/Source/AnimGraphStateMachine.h>
 #include <QWidget>
-#include <MysticQt/Source/SearchButton.h>
 
+QT_FORWARD_DECLARE_CLASS(QTreeView)
 
-QT_FORWARD_DECLARE_CLASS(QPushButton)
-QT_FORWARD_DECLARE_CLASS(QTreeWidget)
-QT_FORWARD_DECLARE_CLASS(QTreeWidgetItem)
-QT_FORWARD_DECLARE_CLASS(QContextMenuEvent)
-
+namespace AzQtComponents
+{
+    class FilteredSearchWidget;
+}
 
 namespace EMStudio
 {
     // forward declarations
     class AnimGraphPlugin;
-    class NodeGraph;
-
+    class AnimGraphSortFilterProxyModel;
+    class SelectionProxyModel;
 
     class NavigateWidget
         : public QWidget
@@ -41,94 +35,26 @@ namespace EMStudio
         MCORE_MEMORYOBJECTCATEGORY(NavigateWidget, EMFX_DEFAULT_ALIGNMENT, MEMCATEGORY_STANDARDPLUGINS_ANIMGRAPH);
         Q_OBJECT
 
-        friend class AnimGraphPlugin;
-
     public:
-        enum
-        {
-            COLUMN_NAME             = 0,
-            COLUMN_TYPE             = 1
-        };
-
         NavigateWidget(AnimGraphPlugin* plugin, QWidget* parent = nullptr);
         ~NavigateWidget();
 
-        void RemoveTreeRow(const QString& name);
-        void Rename(const char* oldName, const char* newName);
+    private:
+        void keyReleaseEvent(QKeyEvent* event) override;
 
-        MCORE_INLINE QTreeWidget* GetTreeWidget()   { return mTreeWidget; }
-        MCORE_INLINE QTreeWidgetItem* GetRootItem() { return mRootItem; }
-
-        QTreeWidgetItem* FindItem(const QString& name);
-
-        void ShowGraph(EMotionFX::AnimGraphNode* node, bool updateInterface);
-        void ShowGraphByNodeName(const AZStd::string& nodeName, bool updateInterface);
-
-        static QTreeWidgetItem* InsertNode(QTreeWidget* treeWidget, QTreeWidgetItem* parentItem, EMotionFX::AnimGraphNode* node, bool recursive, uint32 visibilityFilterNodeID = MCORE_INVALIDINDEX32, bool showStatesOnly = false, const char* searchFilterString = nullptr);
-
-        // returns the root item
-        static QTreeWidgetItem* UpdateTreeWidget(QTreeWidget* treeWidget, EMotionFX::AnimGraph* animGraph, uint32 visibilityFilterNodeID = MCORE_INVALIDINDEX32, bool showStatesOnly = false, const char* searchFilterString = nullptr);
-
-        void UpdateTreeWidget(EMotionFX::AnimGraph* animGraph, EMotionFX::AnimGraphNode* nodeToShow = nullptr);
-
-        EMotionFX::AnimGraphNode* GetSingleSelectedNode();
-        MCore::Array<EMotionFX::AnimGraphNode*> GetSelectedNodes(EMotionFX::AnimGraph* animGraph);
-        bool GetIsReadyForPaste();
-
-        void SetVisualOptionsNode(EMotionFX::AnimGraphNode* node)      { mVisualOptionsNode = node; }
-
-
-    public slots:
-        void NavigateToNode(QTreeWidgetItem* item, int column);
-        void OnSelectionChangedWithoutGraphUpdate();
-    public slots:
-        void OnSelectionChanged();
-        void OnItemClicked(QTreeWidgetItem* item, int column);
-        void OnContextMenuRename();
-        void OnDeleteSelectedNodes();
-        void OnActivateState();
-        void OnSetAsEntryState();
-        void OnAddWildCardTransition();
-        void OnVisualizeOptions();
-        void OnVisualizeColorChanged(const QColor& color);
-        void NavigateToNode();
-        void MakeVirtualFinalNode();
-        void RestoreVirtualFinalNode();
-        void EnableSelected()                               { SetEnabledSelectedNodes(true); }
-        void DisableSelected()                              { SetEnabledSelectedNodes(false); }
-        void Cut();
-        void Copy();
-        void Paste();
-        void OnFilterStringChanged(const QString& text);
+    private slots:
+        void OnFocusChanged(const QModelIndex& newFocusIndex, const QModelIndex& newFocusParent, const QModelIndex& oldFocusIndex, const QModelIndex& oldFocusParent);
+        void OnItemDoubleClicked(const QModelIndex& targetModelIndex);
+        void OnContextMenuEvent(const QPoint& point);
+        void OnTextFilterChanged(const QString& text);
 
     private:
-        QTreeWidget*        mTreeWidget;
-        AnimGraphPlugin*    mPlugin;
-        QTreeWidgetItem*    mItemClicked;
-        QString             mItemClickedName;
-        QTreeWidgetItem*    mVisibleItem;
-        QTreeWidgetItem*    mRootItem;
-        EMotionFX::AnimGraphNode*      mVisualColorNode;
-        EMotionFX::AnimGraphNode*      mVisualOptionsNode;
-        MysticQt::SearchButton*         mSearchFilter;
-        AZStd::string       mSearchString;
+        AnimGraphPlugin* m_plugin;
 
-        void SetEnabledSelectedNodes(bool flag);
-        void FillPasteCommandGroup(bool cutMode);
-        MCore::CommandGroup                         mPasteCommandGroup;
-        MCore::CommandGroup                         mPasteCommandGroupNoConnections;
-        AZStd::vector<AZStd::string>                mNodeNamesToCopy;
-        AZStd::vector<AZStd::string>                mNodeNamesToCopyNoConnections;
-        uint32                                      mCopyParentNodeTypeID;
-        bool                                        mCutMode;
-
-        void ChangeVisibleItem(EMotionFX::AnimGraphNode* node);
-
-        void contextMenuEvent(QContextMenuEvent* event);
-        void keyReleaseEvent(QKeyEvent* event);
-        void dropEvent(QDropEvent* event);
-        void dragEnterEvent(QDragEnterEvent* event);
-        void dragLeaveEvent(QDragLeaveEvent* event);
-        void dragMoveEvent(QDragMoveEvent* event);
+        AzQtComponents::FilteredSearchWidget* m_searchWidget;
+        QTreeView* m_treeView;
+        AnimGraphSortFilterProxyModel* m_filterProxyModel;
+        SelectionProxyModel* m_selectionProxyModel;
     };
+
 } // namespace EMStudio

@@ -19,10 +19,13 @@
 #include "Node.h"
 #include "Actor.h"
 #include "ActorInstance.h"
+#include <EMotionFX/Source/Allocators.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(MorphMeshDeformer, DeformerAllocator, 0)
+
     // constructor
     MorphMeshDeformer::MorphMeshDeformer(Mesh* mesh)
         : MeshDeformer(mesh)
@@ -40,7 +43,7 @@ namespace EMotionFX
     // create
     MorphMeshDeformer* MorphMeshDeformer::Create(Mesh* mesh)
     {
-        return new MorphMeshDeformer(mesh);
+        return aznew MorphMeshDeformer(mesh);
     }
 
 
@@ -62,7 +65,7 @@ namespace EMotionFX
     MeshDeformer* MorphMeshDeformer::Clone(Mesh* mesh)
     {
         // create the new cloned deformer
-        MorphMeshDeformer* result = new MorphMeshDeformer(mesh);
+        MorphMeshDeformer* result = aznew MorphMeshDeformer(mesh);
 
         // copy the deform passes
         result->mDeformPasses.Resize(mDeformPasses.GetLength());
@@ -137,34 +140,46 @@ namespace EMotionFX
             {
                 mDeformPasses[i].mLastNearZero = false; // we moved away from zero influence
             }
+
             // output data
-            AZ::PackedVector3f* positions   = (AZ::PackedVector3f*)mMesh->FindVertexData(Mesh::ATTRIB_POSITIONS);
-            AZ::PackedVector3f* normals     = (AZ::PackedVector3f*)mMesh->FindVertexData(Mesh::ATTRIB_NORMALS);
-            AZ::Vector4* tangents       = static_cast<AZ::Vector4*>(mMesh->FindVertexData(Mesh::ATTRIB_TANGENTS));
+            AZ::PackedVector3f* positions   = static_cast<AZ::PackedVector3f*>(mMesh->FindVertexData(Mesh::ATTRIB_POSITIONS));
+            AZ::PackedVector3f* normals     = static_cast<AZ::PackedVector3f*>(mMesh->FindVertexData(Mesh::ATTRIB_NORMALS));
+            AZ::Vector4*        tangents    = static_cast<AZ::Vector4*>(mMesh->FindVertexData(Mesh::ATTRIB_TANGENTS));
+            AZ::PackedVector3f* bitangents  = static_cast<AZ::PackedVector3f*>(mMesh->FindVertexData(Mesh::ATTRIB_BITANGENTS));
 
             // input data
             const MorphTargetStandard::DeformData::VertexDelta* deltas = deformData->mDeltas;
             const float minValue = deformData->mMinValue;
             const float maxValue = deformData->mMaxValue;
 
-            // if there are tangents
-            if (tangents)
+            if (tangents && bitangents)
             {
                 // process all vertices that we need to deform
                 uint32 vtxNr;
                 for (uint32 v = 0; v < numDeformVerts; ++v)
                 {
-                    // get the vertex number to deform
                     vtxNr = deltas[v].mVertexNr;
 
-                    // deform the vertex data
+                    positions [vtxNr] = AZ::PackedVector3f(AZ::Vector3(positions[vtxNr]) + deltas[v].mPosition.ToVector3(minValue, maxValue) * weight);
+                    normals   [vtxNr] = AZ::PackedVector3f(AZ::Vector3(normals[vtxNr]) + deltas[v].mNormal.ToVector3(-2.0f, 2.0f) * weight);
+                    bitangents[vtxNr] = AZ::PackedVector3f(AZ::Vector3(bitangents[vtxNr]) + deltas[v].mBitangent.ToVector3(-2.0f, 2.0f) * weight);
+
+                    const AZ::Vector3 tangentDirVector = deltas[v].mTangent.ToVector3(-2.0f, 2.0f);
+                    tangents[vtxNr] += AZ::Vector4(tangentDirVector.GetX()*weight, tangentDirVector.GetY()*weight, tangentDirVector.GetZ()*weight, 0.0f);
+                }
+            }
+            if (tangents && !bitangents)    // tangents but no bitangents
+            {
+                uint32 vtxNr;
+                for (uint32 v = 0; v < numDeformVerts; ++v)
+                {
+                    vtxNr = deltas[v].mVertexNr;
+
                     positions[vtxNr] = AZ::PackedVector3f(AZ::Vector3(positions[vtxNr]) + deltas[v].mPosition.ToVector3(minValue, maxValue) * weight);
                     normals  [vtxNr] = AZ::PackedVector3f(AZ::Vector3(normals[vtxNr]) + deltas[v].mNormal.ToVector3(-2.0f, 2.0f) * weight);
 
-                    AZ::Vector3 EmfxVector = deltas[v].mTangent.ToVector3(-1.0f, 1.0f);
-                    AZ::Vector4 scaleVector4(EmfxVector.GetX(), EmfxVector.GetY(), EmfxVector.GetZ(), 0.0f);
-                    scaleVector4 *= weight;
-                    tangents[vtxNr] += scaleVector4;
+                    const AZ::Vector3 tangentDirVector = deltas[v].mTangent.ToVector3(-2.0f, 2.0f);
+                    tangents[vtxNr] += AZ::Vector4(tangentDirVector.GetX()*weight, tangentDirVector.GetY()*weight, tangentDirVector.GetZ()*weight, 0.0f);
                 }
             }
             else // no tangents
@@ -173,12 +188,10 @@ namespace EMotionFX
                 uint32 vtxNr;
                 for (uint32 v = 0; v < numDeformVerts; ++v)
                 {
-                    // get the vertex number to deform
                     vtxNr = deltas[v].mVertexNr;
 
-                    // deform the vertex data
                     positions[vtxNr] = AZ::PackedVector3f(AZ::Vector3(positions[vtxNr]) + deltas[v].mPosition.ToVector3(minValue, maxValue) * weight);
-                    normals[vtxNr]   = AZ::PackedVector3f(AZ::Vector3(normals[vtxNr]) + deltas[v].mNormal.ToVector3(-1.0f, 1.0f) * weight);
+                    normals[vtxNr]   = AZ::PackedVector3f(AZ::Vector3(normals[vtxNr]) + deltas[v].mNormal.ToVector3(-2.0f, 2.0f) * weight);
                 }
             }
         }

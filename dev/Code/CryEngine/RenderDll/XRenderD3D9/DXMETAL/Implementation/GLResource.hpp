@@ -228,7 +228,8 @@ namespace NCryMetal
         id<MTLTexture>                  m_Texture;
         id<MTLTexture>                  m_StencilTexture;
         double                          m_ClearColor[4];
-        _smart_ptr<SOutputMergerView>   m_spViewToClear;
+        _smart_ptr<SOutputMergerView>   m_spTextureViewToClear;
+        _smart_ptr<SOutputMergerView>   m_spStencilTextureViewToClear;
         float                           m_fClearDepthValue;
         bool                            m_bClearDepth;
         bool                            m_bClearStencil;
@@ -333,7 +334,7 @@ namespace NCryMetal
     enum MemRingBufferStorage
     {
         MEM_SHARED_RINGBUFFER,  //This is CPU/GPU shared memory. Available to IOS and OSX.
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         MEM_MANAGED_RINGBUFFER,   //OSX supports Managed memory which is faster than shared memory because it creates a seprate copy on the GPU and uses didModifyRange to synchronise with CPU.
 #endif
     };
@@ -359,7 +360,7 @@ namespace NCryMetal
         //  Confetti BEGIN: Igor Lobanchikov
 
         id<MTLBuffer>   m_BufferShared;
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         id<MTLBuffer>   m_BufferManaged; //Pointer to the fast buffer
 #endif
         void*           m_pMappedData;

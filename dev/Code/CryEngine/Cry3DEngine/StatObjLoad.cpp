@@ -116,7 +116,7 @@ bool CStatObj::LoadLowLODS_Prep(bool bUseStreaming, unsigned long nLoadingFlags)
                 *sPointSeparator = '\0'; // Terminate at the dot
             }
             cry_strcat(sLodFileName, "_lod");
-            ltoa(nLodLevel, sLodNum, 10);
+            azltoa(nLodLevel, sLodNum, AZ_ARRAY_SIZE(sLodNum), 10);
             cry_strcat(sLodFileName, sLodNum);
             cry_strcat(sLodFileName, ".");
             cry_strcat(sLodFileName, sFileExt);
@@ -163,7 +163,7 @@ IStatObj* CStatObj::LoadLowLODS_Load(int nLodLevel, bool bUseStreaming, unsigned
         *sPointSeparator = '\0'; // Terminate at the dot
     }
     cry_strcat(sLodFileName, "_lod");
-    ltoa(nLodLevel, sLodNum, 10);
+    azltoa(nLodLevel, sLodNum, AZ_ARRAY_SIZE(sLodNum), 10);
     cry_strcat(sLodFileName, sLodNum);
     cry_strcat(sLodFileName, ".");
     cry_strcat(sLodFileName, sFileExt);
@@ -325,32 +325,9 @@ void TransformMesh(CMesh& mesh, Matrix34 tm)
     }
 }
 
-#if INCLUDE_MEMSTAT_CONTEXTS
-static string FindCGFSourceFilename(const char* filename)
-{
-    CChunkFile infoChunkFile;
-    if (!infoChunkFile.Read(filename))
-    {
-        return string();
-    }
-
-    for (int i = 0, n = infoChunkFile.NumChunks(); i < n; ++i)
-    {
-        const IChunkFile::ChunkDesc* const pChunkDesc = infoChunkFile.GetChunk(i);
-        if (pChunkDesc->chunkType == ChunkType_SourceInfo)
-        {
-            return (const char*)pChunkDesc->data;
-        }
-    }
-
-    return string();
-}
-#endif //INCLUDE_MEMSTAT_CONTEXTS
-
 //////////////////////////////////////////////////////////////////////////
 bool CStatObj::LoadStreamRenderMeshes(const char* filename, const void* pData, const int nDataSize, bool bLod)
 {
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_CGF, EMemStatContextFlags::MSF_Instance, "%s", m_szFileName.c_str());
     LOADING_TIME_PROFILE_SECTION;
 
     CLoaderCGF cgfLoader(util::pool_allocate, util::pool_free, GetCVars()->e_StatObjTessellationMode != 2 || bLod);
@@ -569,10 +546,6 @@ bool CStatObj::LoadCGF(const char* filename, bool bLod, unsigned long nLoadingFl
     {
         return true;
     }
-
-#if INCLUDE_MEMSTAT_CONTEXTS
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_CGF, EMemStatContextFlags::MSF_Instance, "%s", filename);
-#endif
 
     PrintComment("Loading %s", filename);
     if (!bLod)
@@ -1175,7 +1148,7 @@ bool CStatObj::LoadCGF_Int(const char* filename, bool bLod, unsigned long nLoadi
                 {
                     if (m_subObjects[i].nType == STATIC_SUB_OBJECT_MESH)
                     {
-                        if (_stricmp(m_subObjects[i].name, MESH_NAME_FOR_MAIN) == 0)
+                        if (azstricmp(m_subObjects[i].name, MESH_NAME_FOR_MAIN) == 0)
                         {
                             m_subObjects[i].bHidden = false;
                         }
@@ -1555,7 +1528,7 @@ static bool CreateNodeCGF(CContentCGF* pCGF, CStatObj* pStatObj, const char* nam
         }
 
         pNode->type = CNodeCGF::NODE_MESH;
-        _snprintf(pNode->name, sizeof(pNode->name), "%s", name);
+        azsnprintf(pNode->name, sizeof(pNode->name), "%s", name);
         pNode->localTM.SetIdentity();
         pNode->worldTM.SetIdentity();
         pNode->bIdentityMatrix = true;

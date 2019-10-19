@@ -17,11 +17,15 @@ def build(bld):
         vs_filter           = 'Network',
         file_list           = 'gridmate_test.waf_files',
         platforms           = ['win'],
-        configurations      = ['test_all'],
+        configurations      = ['all'],
+        test_only           = True,
         disable_pch         = True,
         use                 = ['AzTest', 'AzCore', 'GridMate'],
-        uselib              = ['GMOCK', 'OPENSSL'],   
+        uselib              = ['GMOCK', 'OPENSSL'],
 
+        # Platform Roots
+        platform_roots      = [bld.PlatformRoot('Platform', export_includes=True)],
+    
         # Compiler Specific
         msvc_cxxflags       = [
                                '/W4', # warning level
@@ -29,6 +33,6 @@ def build(bld):
 
         # Platform Specific
         win_features        = ['crcfix'],
-        win_lib             = ['Ws2_32', 'Mswsock', 'gdi32'],
+        win_lib             = ['Ws2_32', 'Mswsock', 'gdi32', 'crypt32'],
     )
 

@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "ProfilerDataView.hxx"
 #include <Woodpecker/Driller/Profiler/ProfilerDataView.moc>
@@ -84,7 +84,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<ProfilerDataViewLocal, AZ::UserSettings>()
+                serialize->Class<ProfilerDataViewLocal>()
                     ->Field("m_treeColumnStorage", &ProfilerDataViewLocal::m_treeColumnStorage)
                     ->Version(1);
             }
@@ -122,7 +122,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<ProfilerDataViewSavedState, AZ::UserSettings>()
+                serialize->Class<ProfilerDataViewSavedState>()
                     ->Field("m_chartLengthStr", &ProfilerDataViewSavedState::m_chartLengthStr)
                     ->Field("m_chartTypeStr", &ProfilerDataViewSavedState::m_chartTypeStr)
                     ->Field("m_threadIDStr", &ProfilerDataViewSavedState::m_threadIDStr)
@@ -625,7 +625,7 @@ namespace Driller
             ProfilerDataViewLocal::Reflect(context);
 
             // Driller doesn't use AzToolsFramework directly, so we have to initialize the serialization for the QTreeViewStateSaver
-            AzToolsFramework::QTreeViewStateSaver::Reflect(context);
+            AzToolsFramework::QTreeViewWithStateSaving::Reflect(context);
         }
     }
 }

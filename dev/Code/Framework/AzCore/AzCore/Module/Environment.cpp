@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Module/Environment.h>
 
@@ -113,7 +112,7 @@ namespace AZ
                 }
 
 #ifdef AZ_ENVIRONMENT_VALIDATE_ON_EXIT
-                AZ_Assert(m_numAttached == 0, "We should not delete an evironment while there are %d modules attached! Unload all DLLs first!", m_numAttached);
+                AZ_Assert(m_numAttached == 0, "We should not delete an environment while there are %d modules attached! Unload all DLLs first!", m_numAttached);
 #endif
                 
                 for (auto variableIt : m_variableMap)
@@ -503,5 +502,3 @@ namespace AZ
         }
     } // namespace Environment
 } // namespace AZ
-
-#endif // #ifndef AZ_UNITY_BUILD

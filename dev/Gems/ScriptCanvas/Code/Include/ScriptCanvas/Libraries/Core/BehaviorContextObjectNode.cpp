@@ -10,8 +10,6 @@
 *
 */
 
-#include "precompiled.h"
-
 #include "BehaviorContextObjectNode.h"
 
 #include <AzCore/RTTI/BehaviorContext.h>
@@ -30,13 +28,14 @@ namespace ScriptCanvas
                 static const AZ::u32 k_setValueParamIndex(1);
                 static const AZ::u32 k_firstFirstPropertyDataSlotIndex(2);
                 static const AZ::u32 k_valueArgumentIndex(1);
+                static const char* k_setThis("Set");
             } // namespace Internal
 
             AZStd::string BehaviorContextObjectNode::GetDebugName() const
             {
-                if (auto input = GetInput(GetSlotId(k_setThis)))
+                if (auto input = GetInput(GetSlotId(Internal::k_setThis)))
                 {
-                    return AZStd::string::format("%s", Data::GetName(input->GetType()));
+                    return Data::GetName(input->GetType());
                 }
 
                 return "Invalid";
@@ -54,7 +53,7 @@ namespace ScriptCanvas
                     const void* defaultValue = nullptr;
                     if (Data::IsEntityID(azType))
                     {
-                        defaultValue = &ScriptCanvas::SelfReferenceId;
+                        defaultValue = &ScriptCanvas::GraphOwnerId;
                     }
                     AddInputAndOutputTypeSlot(Data::FromAZType(azType), defaultValue);
                 }
@@ -74,7 +73,7 @@ namespace ScriptCanvas
                 const void* defaultValue = nullptr;
                 if (Data::IsEntityID(behaviorClass.m_typeId))
                 {
-                    defaultValue = &ScriptCanvas::SelfReferenceId;
+                    defaultValue = &ScriptCanvas::GraphOwnerId;
                 }
                 AddInputAndOutputTypeSlot(Data::FromAZType(behaviorClass.m_typeId), defaultValue);
                 ConfigureProperties(behaviorClass);
@@ -98,13 +97,23 @@ namespace ScriptCanvas
                     if (propertyIt != behaviorClass.m_properties.end())
                     {
                         const Data::SetterWrapper& setterWrapper = setterWrapperPair.second;
-                        const AZStd::string argName = AZStd::string::format("%s: %s", Data::GetName(setterWrapper.m_propertyType), setterWrapper.m_propertyName.data());
+                        const AZStd::string argName = AZStd::string::format("%s: %s", Data::GetName(setterWrapper.m_propertyType).data(), setterWrapper.m_propertyName.data());
                         const AZStd::string* argumentTooltipPtr = propertyIt->second->m_setter->GetArgumentToolTip(Internal::k_setValueParamIndex);
                         AZStd::string_view argumentTooltip = argumentTooltipPtr ? AZStd::string_view(*argumentTooltipPtr) : AZStd::string_view{};
+                        
                         // Add the slot if it doesn't exist
-                        if (!SlotExists(argName, SlotType::DataIn, setterSlotId))
+                        setterSlotId = FindSlotIdForDescriptor(argName, SlotDescriptors::DataIn());
+
+                        if (!setterSlotId.IsValid())
                         {
-                            setterSlotId = AddInputTypeSlot(argName, argumentTooltip, setterWrapper.m_propertyType, InputTypeContract::DatumType);
+                            DataSlotConfiguration slotConfiguration;
+
+                            slotConfiguration.m_name = argName;
+                            slotConfiguration.m_toolTip = argumentTooltip;
+                            slotConfiguration.SetType(setterWrapper.m_propertyType);
+                            slotConfiguration.SetConnectionType(ConnectionType::Input);
+
+                            setterSlotId = AddSlot(slotConfiguration);
                         }
 
                     }
@@ -126,11 +135,20 @@ namespace ScriptCanvas
                     if (propertyIt != behaviorClass.m_properties.end())
                     {
                         const Data::GetterWrapper& getterWrapper = getterWrapperPair.second;
-                        const AZStd::string resultSlotName(AZStd::string::format("%s: %s", getterWrapper.m_propertyName.data(), Data::GetName(getterWrapper.m_propertyType)));
+                        const AZStd::string resultSlotName(AZStd::string::format("%s: %s", getterWrapper.m_propertyName.data(), Data::GetName(getterWrapper.m_propertyType).data()));
+
                         // Add the slot if it doesn't exist
-                        if (!SlotExists(resultSlotName, SlotType::DataOut, getterSlotId))
+                        getterSlotId = FindSlotIdForDescriptor(resultSlotName, SlotDescriptors::DataOut());
+
+                        if (!getterSlotId.IsValid())
                         {
-                            getterSlotId = AddOutputTypeSlot(resultSlotName, {}, getterWrapper.m_propertyType, OutputStorage::Optional);
+                            DataSlotConfiguration slotConfiguration;
+
+                            slotConfiguration.m_name = resultSlotName;                            
+                            slotConfiguration.SetType(getterWrapper.m_propertyType);
+                            slotConfiguration.SetConnectionType(ConnectionType::Output);
+
+                            getterSlotId = AddSlot(slotConfiguration);
                         }
 
                     }

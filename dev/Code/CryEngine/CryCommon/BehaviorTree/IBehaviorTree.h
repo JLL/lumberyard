@@ -720,8 +720,6 @@ namespace BehaviorTree
 
         virtual INodePtr Create() override
         {
-            MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Other, 0, "Modular Behavior Tree Node Factory: %s", m_typeName);
-
             assert(m_nodeFactory != NULL);
 
             void* const pointer = m_nodeFactory->AllocateNodeMemory(sizeof(NodeType));
@@ -857,15 +855,6 @@ namespace BehaviorTree
             return gEnv->pAISystem->GetIBehaviorTreeManager()->GetNodeSerializationFactory();
         }
     };
-}
-
-namespace boost
-{
-    inline bool Serialize(Serialization::IArchive& ar, BehaviorTree::INodePtr& ptr, const char* name, const char* label)
-    {
-        BehaviorTree::NodePointerSerializer serializer(ptr);
-        return ar(static_cast<Serialization::IPointer&>(serializer), name, label);
-    }
 }
 
 #endif

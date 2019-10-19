@@ -61,7 +61,7 @@ typedef struct _FILETIME
 #include <AzCore/Math/Crc.h>
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/std/delegate/delegate.h>
-#include <AzCore/debug/trace.h>
+#include <AzCore/Debug/Trace.h>
 #include <AzCore/std/time.h>
 #include <AzCore/std/parallel/mutex.h>
 #include <AzCore/std/parallel/lock.h>
@@ -69,9 +69,9 @@ typedef struct _FILETIME
 #include <AzCore/std/containers/ring_buffer.h>
 #include <AzCore/std/containers/map.h>
 #include <AzCore/std/containers/vector.h>
-#include <AzCore/Math/uuid.h>
+#include <AzCore/Math/Uuid.h>
 #include <AzCore/Serialization/SerializeContext.h>
-#include <AzCore/IO/streamer.h>
+#include <AzCore/IO/Streamer.h>
 #include <AzCore/std/smart_ptr/shared_ptr.h>
 #include <AzCore/std/smart_ptr/make_shared.h>
 
@@ -83,6 +83,7 @@ typedef struct _FILETIME
 #pragma warning(disable : 4512)
 #pragma warning(disable : 4189)
 #pragma warning(disable : 4718) // warning C4718: 'QMapNode<int,bool>::destroySubTree' : recursive call has no side effects, deleting
+#pragma warning(disable : 4127) // conditional expression is constant in QVector and QMap
 #include <QtWidgets/QtWidgets>
 #include <QtWidgets/QApplication>
 #include <QtCore/QDir>

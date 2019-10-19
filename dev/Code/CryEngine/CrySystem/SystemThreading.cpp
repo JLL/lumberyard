@@ -33,7 +33,11 @@
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMTHREADING_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(SystemThreading_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemThreading_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemThreading_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -134,7 +138,11 @@ private:
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMTHREADING_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(SystemThreading_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemThreading_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemThreading_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -182,7 +190,11 @@ unsigned __stdcall CThreadManager::RunThread(void* thisPtr)
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION SYSTEMTHREADING_CPP_SECTION_3
-#include AZ_RESTRICTED_FILE(SystemThreading_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/SystemThreading_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/SystemThreading_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -405,7 +417,7 @@ bool CThreadManager::SpawnThread(IThread* pThreadTask, const char* sThreadName, 
 
     // Format thread name
     char strThreadName[THREAD_NAME_LENGTH_MAX];
-    const int cNumCharsNeeded = vsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
+    const int cNumCharsNeeded = azvsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
     if (cNumCharsNeeded > THREAD_NAME_LENGTH_MAX - 1 || cNumCharsNeeded < 0)
     {
         strThreadName[THREAD_NAME_LENGTH_MAX - 1] = '\0'; // The WinApi only null terminates if strLen < bufSize
@@ -490,7 +502,7 @@ bool CThreadManager::RegisterThirdPartyThread(void* pThreadHandle, const char* s
 
     // Format thread name
     char strThreadName[THREAD_NAME_LENGTH_MAX];
-    const int cNumCharsNeeded = vsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
+    const int cNumCharsNeeded = azvsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
     if (cNumCharsNeeded > THREAD_NAME_LENGTH_MAX - 1)
     {
         CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_WARNING, "<ThreadInfo>: ThreadName \"%s\" has been truncated. Max characters allowed: %i. ", strThreadName, THREAD_NAME_LENGTH_MAX - 1);
@@ -564,7 +576,7 @@ bool CThreadManager::UnRegisterThirdPartyThread(const char* sThreadName, ...)
 
     // Format thread name
     char strThreadName[THREAD_NAME_LENGTH_MAX];
-    const int cNumCharsNeeded = vsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
+    const int cNumCharsNeeded = azvsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
     if (cNumCharsNeeded > THREAD_NAME_LENGTH_MAX - 1)
     {
         CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_WARNING, "<ThreadInfo>: ThreadName \"%s\" has been truncated. Max characters allowed: %i. ", strThreadName, THREAD_NAME_LENGTH_MAX - 1);
@@ -606,7 +618,7 @@ threadID CThreadManager::GetThreadId(const char* sThreadName, ...)
 
     // Format thread name
     char strThreadName[THREAD_NAME_LENGTH_MAX];
-    const int cNumCharsNeeded = vsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
+    const int cNumCharsNeeded = azvsnprintf(strThreadName, CRY_ARRAY_COUNT(strThreadName), sThreadName, args);
     if (cNumCharsNeeded > THREAD_NAME_LENGTH_MAX - 1)
     {
         CryWarning(VALIDATOR_MODULE_SYSTEM, VALIDATOR_WARNING, "<ThreadInfo>: ThreadName \"%s\" has been truncated. Max characters allowed: %i. ", strThreadName, THREAD_NAME_LENGTH_MAX - 1);

@@ -17,7 +17,7 @@
 #include "Util.h"
 #include <AzCore/IO/SystemFile.h> // for AZ_MAX_PATH_LEN
 
-#if defined(AZ_PLATFORM_APPLE)
+#if AZ_TRAIT_OS_PLATFORM_APPLE
 #include <mach-o/dyld.h>  // Needed for _NSGetExecutablePath
 #endif
 
@@ -413,7 +413,8 @@ namespace {
     {
         int i, j;
         Vec3 n;
-        FILE* f = fopen(fname, "wt");
+        FILE* f = nullptr; 
+        azfopen(&f, fname, "wt");
         if (!f)
         {
             return 0;
@@ -441,7 +442,8 @@ namespace {
     int LoadNetgenTetrahedrization(const char* fname, Vec3*& pVtx, int& nVtx, int*& pTets, int& nTets)
     {
         int i, j, nj;
-        FILE* f = fopen(fname, "rt");
+        FILE* f = nullptr; 
+        azfopen(&f, fname, "rt");
         char buf[65536], * pbuf = buf, * str;
 
         pVtx = 0;
@@ -500,7 +502,7 @@ void CPhysicsInterface::ProcessBreakablePhysics(CContentCGF* pCompiledCGF, CCont
         return;
     }
     strcpy(ch, "\\netgen\\");
-#elif defined(AZ_PLATFORM_APPLE)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE
     
     if (_NSGetExecutablePath(path,&pathLength))
     {
@@ -653,7 +655,7 @@ void CPhysicsInterface::ProcessBreakablePhysics(CContentCGF* pCompiledCGF, CCont
     {
         return;
     }
-#elif defined(AZ_PLATFORM_APPLE)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE
     //Needs cross platform support
     CRY_ASSERT(0);
 #endif

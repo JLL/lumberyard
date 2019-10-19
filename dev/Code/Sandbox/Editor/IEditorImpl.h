@@ -25,6 +25,7 @@
 #include <QApplication>
 #include <AzToolsFramework/Entity/EditorEntityContextBus.h>
 #include <AzToolsFramework/Thumbnails/ThumbnailerBus.h>
+#include <AzCore/std/string/string.h>
 
 class QMenu;
 
@@ -324,6 +325,7 @@ public:
     void RecordUndo(IUndoObject* obj);
     bool FlushUndo(bool isShowMessage = false);
     bool ClearLastUndoSteps(int steps);
+    bool ClearRedoStack();
     //! Retrieve current animation context.
     CAnimationContext* GetAnimation();
     CTrackViewSequenceManager* GetSequenceManager() override;
@@ -390,7 +392,10 @@ public:
 
     virtual bool ToProjectConfigurator(const QString& msg, const QString& caption, const QString& location) override;
 
+#ifdef DEPRECATED_QML_SUPPORT
     virtual QQmlEngine* GetQMLEngine() const;
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
     void UnloadPlugins(bool shuttingDown = false) override;
     void LoadPlugins() override;
 
@@ -401,13 +406,15 @@ public:
     bool IsLegacyUIEnabled() override;
     void SetLegacyUIEnabled(bool enabled) override;
 
+    bool IsNewViewportInteractionModelEnabled() const override;
+
 protected:
 
     //////////////////////////////////////////////////////////////////////////
     // EditorEntityContextNotificationBus implementation
     void OnStartPlayInEditor() override;
     //////////////////////////////////////////////////////////////////////////
-
+    AZStd::string LoadProjectIdFromProjectData();
     void InitMetrics();
 
     void DetectVersion();
@@ -546,5 +553,6 @@ protected:
     static const char* m_crashLogFileName;
 
     bool m_isLegacyUIEnabled;
+    bool m_isNewViewportInteractionModelEnabled = false;
 };
 

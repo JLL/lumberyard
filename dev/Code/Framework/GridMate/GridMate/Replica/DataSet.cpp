@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <GridMate/Replica/Replica.h>
 #include <GridMate/Replica/ReplicaChunkDescriptor.h>
@@ -25,6 +24,7 @@ namespace GridMate
         , m_lastUpdateTime(0)
         , m_isDefaultValue(true)
         , m_revision(0)  //null stamp
+        , m_override(nullptr)
     {
         ReplicaChunkInitContext* initContext = ReplicaChunkDescriptorTable::Get().GetCurrentReplicaChunkInitContext();
         AZ_Assert(initContext, "Replica's context was NOT pushed on the stack! Call Replica::Descriptor::Push() before construction!");
@@ -55,5 +55,3 @@ namespace GridMate
         return m_replicaChunk ? m_replicaChunk->IsMaster() : true;
     }
 }
-
-#endif // #ifndef AZ_UNITY_BUILD

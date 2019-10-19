@@ -17,18 +17,19 @@
 #include "Actor.h"
 #include <MCore/Source/Compare.h>
 #include "Node.h"
+#include <EMotionFX/Source/Allocators.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(TransformData, TransformDataAllocator, 0)
+
     // default constructor
     TransformData::TransformData()
         : BaseObject()
     {
-        mGlobalMatrices     = nullptr;
-        mLocalMatrices      = nullptr;
+        mSkinningMatrices   = nullptr;
         mBindPose           = nullptr;
-        mFlags              = nullptr;
         mNumTransforms      = 0;
         mHasUniqueBindPose  = false;
     }
@@ -44,16 +45,14 @@ namespace EMotionFX
     // create
     TransformData* TransformData::Create()
     {
-        return new TransformData();
+        return aznew TransformData();
     }
 
 
     // get rid of all allocated data
     void TransformData::Release()
     {
-        MCore::AlignedFree(mGlobalMatrices);
-        MCore::AlignedFree(mLocalMatrices);
-        MCore::AlignedFree(mFlags);
+        MCore::AlignedFree(mSkinningMatrices);
 
         if (mHasUniqueBindPose)
         {
@@ -61,9 +60,7 @@ namespace EMotionFX
         }
 
         mPose.Clear();
-        mFlags          = nullptr;
-        mGlobalMatrices = nullptr;
-        mLocalMatrices  = nullptr;
+        mSkinningMatrices = nullptr;
         mBindPose       = nullptr;
         mNumTransforms  = 0;
     }
@@ -85,9 +82,7 @@ namespace EMotionFX
             return;
         }
 
-        mGlobalMatrices         = (MCore::Matrix*)MCore::AlignedAllocate(sizeof(MCore::Matrix) * numNodes, 16, EMFX_MEMCATEGORY_TRANSFORMDATA);
-        mLocalMatrices          = (MCore::Matrix*)MCore::AlignedAllocate(sizeof(MCore::Matrix) * numNodes, 16, EMFX_MEMCATEGORY_TRANSFORMDATA);
-        mFlags                  = (ENodeFlags*)MCore::AlignedAllocate(sizeof(ENodeFlags) * numNodes, 16, EMFX_MEMCATEGORY_TRANSFORMDATA);
+        mSkinningMatrices       = (MCore::Matrix*)MCore::AlignedAllocate(sizeof(MCore::Matrix) * numNodes, 16, EMFX_MEMCATEGORY_TRANSFORMDATA);
         mNumTransforms          = numNodes;
 
         if (mHasUniqueBindPose)
@@ -103,19 +98,8 @@ namespace EMotionFX
         // now initialize the data with the actor transforms
         for (uint32 i = 0; i < numNodes; ++i)
         {
-            mLocalMatrices[i].Identity();       // only reset when cloned?
-            mGlobalMatrices[i].Identity();
-
-            // use all flags
-            uint32 flag = 0;
-            flag |= FLAG_HASSCALE;
-            //flag |= FLAG_NEEDLOCALTMUPDATE;
-            //flag |= FLAG_HASSCALEROTATION;
-            mFlags[i] = (ENodeFlags)flag;
+            mSkinningMatrices[i].Identity();
         }
-
-        // reset the flags
-        //ResetFlags();
     }
 
 
@@ -138,7 +122,7 @@ namespace EMotionFX
     EMFX_SCALECODE
     (
         // set the scaling value for the node and all child nodes
-        void TransformData::SetBindPoseLocalScaleInherit(uint32 nodeIndex, const AZ::Vector3 & scale)
+        void TransformData::SetBindPoseLocalScaleInherit(uint32 nodeIndex, const AZ::Vector3& scale)
         {
             ActorInstance*  actorInstance   = mPose.GetActorInstance();
             Actor*          actor           = actorInstance->GetActor();
@@ -158,48 +142,13 @@ namespace EMotionFX
         }
 
         // update the local space scale
-        void TransformData::SetBindPoseLocalScale(uint32 nodeIndex, const AZ::Vector3 & scale)
+        void TransformData::SetBindPoseLocalScale(uint32 nodeIndex, const AZ::Vector3& scale)
         {
-            Transform newTransform = mBindPose->GetLocalTransform(nodeIndex);
+            Transform newTransform = mBindPose->GetLocalSpaceTransform(nodeIndex);
             newTransform.mScale = scale;
-            mBindPose->SetLocalTransform(nodeIndex, newTransform);
+            mBindPose->SetLocalSpaceTransform(nodeIndex, newTransform);
         }
     ) // EMFX_SCALECODE
-
-
-
-    // update the flags
-    void TransformData::UpdateNodeFlags()
-    {
-    #if !defined(EMFX_SCALE_DISABLED)
-        ActorInstance* actorInstance = mPose.GetActorInstance();
-        const uint32 numNodes = actorInstance->GetNumEnabledNodes();
-        for (uint32 i = 0; i < numNodes; ++i)
-        {
-            const uint32 nodeIndex = actorInstance->GetEnabledNode(i);
-            const Transform& transform = mPose.GetLocalTransform(nodeIndex);
-
-            /*      #if defined(MCORE_SSE_ENABLED)
-                        __m128 oneVec   = _mm_set_ps(1.0f, 1.0f, 1.0f, 1.0f);
-                        __m128 scaleVec = _mm_set_ps(transform.mScale.x, transform.mScale.y, transform.mScale.z, 1.0f);
-                        __m128 result   = _mm_cmpneq_ps(scaleVec, oneVec);
-                        int mask        = _mm_movemask_ps(result);
-                        if (mask != 0)
-                            SetFlag( nodeIndex, FLAG_HASSCALE, true );
-                        //if (mask != 0)
-                            //MCore::LogInfo("Mask is %d (0x%x) for scale (%f, %f, %f)", mask, mask, transform.mScale.x, transform.mScale.y, transform.mScale.z);
-                    #else*/
-            if (!MCore::Compare<float>::CheckIfIsClose(transform.mScale.GetX(), 1.0f, MCore::Math::epsilon) ||
-                !MCore::Compare<float>::CheckIfIsClose(transform.mScale.GetY(), 1.0f, MCore::Math::epsilon) ||
-                !MCore::Compare<float>::CheckIfIsClose(transform.mScale.GetZ(), 1.0f, MCore::Math::epsilon))
-            {
-                SetNodeFlag(nodeIndex, FLAG_HASSCALE, true);
-            }
-            //#endif
-        }
-    #endif
-    }
-
 
     // set the number of morph weights
     void TransformData::SetNumMorphWeights(uint32 numMorphWeights)

@@ -12,6 +12,7 @@
 
 from botocore.exceptions import ClientError
 from errors import HandledError
+from resource_manager_common import constant
 
 import os
 import imp
@@ -31,7 +32,6 @@ class HookContext(object):
     def load_modules(self, module_name):
 
         module_hooks = []
-        gems_seen = set()
 
         project_module_path = os.path.join(self.context.config.aws_directory_path, module_name)
         if os.path.isfile(project_module_path):
@@ -42,19 +42,15 @@ class HookContext(object):
             resource_group_module_path = os.path.join(resource_group_directory_path, module_name)
             if os.path.isfile(resource_group_module_path):
                 module_hooks.append(HookModule(self.context, resource_group_module_path, resource_group = resource_group))
-            if resource_group.gem:
-                gems_seen.add(resource_group.gem)
 
-        for gem in self.context.gem.enabled_gems:
-            if gem in gems_seen:
-                continue
+        for gem in self.context.gem.enabled_gems:            
             gem_module_path = os.path.join(gem.aws_directory_path, module_name)
             if os.path.isfile(gem_module_path):
-                module_hooks.append(HookModule(self.context, gem_module_path, gem = gem))
+                module_hooks.append(HookModule(self.context, gem_module_path, gem = gem))            
 
         self.__hook_modules[module_name] = module_hooks
 
-    def call_single_module_handler(self, module_name, handler_name, resource_group_name, args=(), kwargs={}, deprecated=False):
+    def call_single_module_handler(self, module_name, handler_name, resource_group_name, args=(), kwargs={}, deprecated=False, disabled=False):
         '''Calls a function in a hook module for a specified resource group.
 
         Args:
@@ -80,10 +76,12 @@ class HookContext(object):
         resource_group = self.context.resource_groups.get(resource_group_name)
 
         for hook_module in hook_modules:
+            if not disabled and hook_module.is_disabled:
+                continue
             if hook_module.resource_group == resource_group:
                 hook_module.call_handler(handler_name, args = args, kwargs = kwargs, deprecated = deprecated)
 
-    def call_module_handlers(self, module_name, handler_name, args=(), kwargs={}, deprecated=None):
+    def call_module_handlers(self, module_name, handler_name, args=(), kwargs={}, deprecated=None, disabled=False):
         '''Calls a function in a hook module.
 
         Args:
@@ -106,6 +104,8 @@ class HookContext(object):
         hook_modules = self.__hook_modules[module_name]
 
         for hook_module in hook_modules:
+            if not disabled and hook_module.is_disabled:
+                continue
             hook_module.call_handler(handler_name, args = args, kwargs = kwargs, deprecated = deprecated)
 
 
@@ -171,7 +171,8 @@ class HookModule(object):
 
     def __remove_plugin_paths(self, added_paths):
         for added_path in added_paths: 
-            sys.path.remove(added_path)
+            if added_path in sys.path:
+                sys.path.remove(added_path)
    
     @property
     def context(self):
@@ -208,6 +209,17 @@ class HookModule(object):
     def hook_path(self):
         '''Path to the resource group or Gem directory where the hook is defined.'''
         return self.__module_directory
+
+    @property
+    def is_disabled(self):
+        '''If a hook belongs to a resource group, check if it is enabled'''
+        if self.__resource_group:
+            return self.__resource_group.is_enabled == False
+
+        if self.__gem:
+            if self.__gem.name in self.__context.config.local_project_settings.get(constant.DISABLED_RESOURCE_GROUPS_KEY, []):
+                return True
+        return False
 
 class MultiImportModuleLoader(object):
 

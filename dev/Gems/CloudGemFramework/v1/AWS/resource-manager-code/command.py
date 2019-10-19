@@ -28,7 +28,7 @@ import swagger_processor
 import cloud_gem_portal
 
 def add_cli_commands(hook, subparsers, add_common_args, **kwargs):
-    subparser = subparsers.add_parser("cloud-gem-framework", help="Commands to manage CloudGems and CloudGem Portal")
+    subparser = subparsers.add_parser("cloud-gem-framework", help="Commands to manage CloudGems and CloudGem Portal", aliases=['cgf'])
     subparser.register('action', 'parsers', resource_manager.cli.AliasedSubParsersAction)
     cgf_subparsers = subparser.add_subparsers(dest = 'subparser_name', metavar='COMMAND')
 
@@ -43,6 +43,7 @@ def add_cli_commands(hook, subparsers, add_common_args, **kwargs):
                            help='The path where the component client code will be written. Defaults to the '
                                 'Code\{game}\AWS\{group}\ServiceAPI directory, or the Gem\Code\AWS\ServiceAPI '
                                 'directory if the resource group is defined by a Gem.')
+    subparser.add_argument('--language', required=False, default='cpp', help='Language to generate for - options cpp, csharp')
     add_common_args(subparser)
     subparser.set_defaults(func=__generate_service_api_code)
 
@@ -94,7 +95,10 @@ def __generate_service_api_code(context, args):
     else:
         namespace_name = resource_group.name
 
-    waf_files_updates = __generate_component_client(context, base_code_path, destination_code_path, namespace_name, jinja, swagger, gem)
+    if args.language == 'csharp':
+        waf_files_updates = __generate_cs_client(context, base_code_path, destination_code_path, namespace_name, jinja, swagger, gem)
+    else:
+        waf_files_updates = __generate_component_client(context, base_code_path, destination_code_path, namespace_name, jinja, swagger, gem)
 
     waf_files_updated = False
     if args.update_waf_files and gem:
@@ -143,24 +147,35 @@ def __merge_waf_file_updates(dst, src):
 
 
 def __initialize_jinja(context):
+    third_party_json_path = os.path.join(context.config.root_directory_path, "BinTemp", "3rdParty.json")
 
-    jinja_path = os.path.join(context.config.root_directory_path, 'Code', 'SDKs', 'jinja2', 'x64')
-    if not os.path.isdir(jinja_path):
-        raise HandledError('The jinja2 Python library was not found at {}. You must select the "Compile the game code" option in SetupAssistant before you can generate service API code.'.format(jinja_path))
-    sys.path.append(jinja_path)
+    if not os.path.isfile(third_party_json_path):
+        raise HandledError("The file 3rdParty.json was not found at {}. You must run lmbr_waf configure before you can generate service API code.".format(os.path.dirname(third_party_json_path)))
 
-    markupsafe_path = os.path.join(context.config.root_directory_path, 'Code', 'SDKs', 'markupsafe', 'x64')
-    if not os.path.isdir(markupsafe_path):
-        raise HandledError('The markupsafe Python library was not found at {}. You must select the "Complile the game code" option in SetupAssistant before you can generate service API code.'.format(markupsafe_path))
+    with open(third_party_json_path, "r") as fp:
+        third_party_json = json.load(fp)
 
-    sys.path.append(markupsafe_path)
+    third_party_root = third_party_json['3rdPartyRoot']
+    sdks = third_party_json['SDKs']
+    sdk_paths = {}
 
-    loaders_module = module_utils.load_module('loaders', os.path.join(jinja_path, 'jinja2'))
+    for sdk_name in ('jinja2', 'markupsafe'):
+        sdk_info = sdks.get(sdk_name, None)
+
+        if not sdk_info:
+            raise HandledError('The {} Python library was not found at {}. You must select the "Compile the game code" option in SetupAssistant before you can generate service API code.'.format(sdk_name, third_party_root))
+
+        sdk_path = os.path.join(third_party_root, sdk_info['base_source'], 'x64')
+        sdk_paths[sdk_name] = sdk_path
+        sys.path.append(sdk_path)
+
+    jinja_path = os.path.join(sdk_paths['jinja2'], 'jinja2')
+    loaders_module = module_utils.load_module('loaders', jinja_path)
     template_path = os.path.join(os.path.dirname(__file__), 'templates')
     print 'template_path', template_path
     loader = loaders_module.FileSystemLoader(template_path)
 
-    environment_module = module_utils.load_module('environment', os.path.join(jinja_path, 'jinja2'))
+    environment_module = module_utils.load_module('environment', jinja_path)
     environment = environment_module.Environment(loader=loader)
 
     return environment
@@ -210,6 +225,23 @@ def __generate_component_client(context, base_code_path, destination_code_path, 
         }
     }
 
+def __generate_cs_client(context, base_code_path, destination_code_path, namespace_name, jinja, swagger, gem):
+
+    if not os.path.exists(destination_code_path):
+        print 'Making directory {}'.format(destination_code_path)
+        os.makedirs(destination_code_path)
+
+    template_cs = jinja.get_template('component-client/component_template.cs')
+    out_path_cs = os.path.join(destination_code_path, '{}Requests.cs'.format(namespace_name).replace('CloudGem','CloudCanvas'))
+    jinja_json_cs = component_gen_utils.generate_cs_json(namespace_name, swagger)
+
+    __write_file(template_cs, jinja_json_cs, out_path_cs)
+
+    return {
+        'auto': {
+            'Source': [ __make_wscript_relative_path(base_code_path, out_path_cs) ]
+        }
+    }
 
 def __make_wscript_relative_path(base_path, file_path):
     return os.path.relpath(file_path, base_path).replace(os.sep, '/')

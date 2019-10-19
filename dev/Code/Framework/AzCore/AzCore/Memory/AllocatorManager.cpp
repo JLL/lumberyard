@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Memory/AllocatorManager.h>
 #include <AzCore/Memory/Memory.h>
@@ -21,9 +20,29 @@
 
 using namespace AZ;
 
+static AZ::EnvironmentVariable<AllocatorManager> s_allocManager = nullptr;
+
+//////////////////////////////////////////////////////////////////////////
+bool AllocatorManager::IsReady()
+{
+    return s_allocManager != nullptr;
+}
+//////////////////////////////////////////////////////////////////////////
+void AllocatorManager::Destroy()
+{
+    s_allocManager.Reset();
+}
+
 //////////////////////////////////////////////////////////////////////////
 // The only allocator manager instance.
-AZ::AllocatorManager AZ::AllocatorManager::g_allocMgr;
+AllocatorManager& AllocatorManager::Instance()
+{
+    if (!s_allocManager)
+    {
+        s_allocManager = AZ::Environment::CreateVariable<AllocatorManager>(AZ_CRC("AZ::AllocatorManager::s_allocManager", 0x6bdd908c));
+    }
+    return *s_allocManager;
+}
 //////////////////////////////////////////////////////////////////////////
 
 //=========================================================================
@@ -43,11 +62,6 @@ AllocatorManager::AllocatorManager()
 //=========================================================================
 AllocatorManager::~AllocatorManager()
 {
-    // one exception is the debug allocator we close it automatically if the user has not.
-    if (m_numAllocators == 1 && AllocatorInstance<OSAllocator>::IsReady())
-    {
-        AllocatorInstance<OSAllocator>::Destroy();
-    }
     if (!m_isAllocatorLeaking)
     {
         AZ_Assert(m_numAllocators == 0, "There are still %d registered allocators!", m_numAllocators);
@@ -232,5 +246,3 @@ AllocatorManager::DebugBreak(void* address, const Debug::AllocationInfo& info)
         }
     }
 }
-
-#endif // #ifndef AZ_UNITY_BUILD

@@ -14,6 +14,7 @@
 #include "CollisionMeshesSetupWindow.h"
 #include "EMotionFX/Source/ActorManager.h"
 #include "../../../../EMStudioSDK/Source/EMStudioManager.h"
+#include <MCore/Source/StringConversions.h>
 #include <MCore/Source/LogManager.h>
 #include <EMotionFX/Source/Mesh.h>
 #include <QLabel>
@@ -53,9 +54,9 @@ namespace EMStudio
         setLayout(layout);
 
         // connect the buttons
-        connect(mOKButton, SIGNAL(clicked()), this, SLOT(accept()));
-        connect(mCancelButton, SIGNAL(clicked()), this, SLOT(reject()));
-        connect(this, SIGNAL(accepted()), this, SLOT(OnAccept()));
+        connect(mOKButton, &QPushButton::clicked, this, &CollisionMeshesSetupWindow::accept);
+        connect(mCancelButton, &QPushButton::clicked, this, &CollisionMeshesSetupWindow::reject);
+        connect(this, &CollisionMeshesSetupWindow::accepted, this, &CollisionMeshesSetupWindow::OnAccept);
     }
 
 

@@ -37,7 +37,8 @@ namespace LmbrCentral
         virtual bool IsMaterialOwnerReady() { return true; }
 
         //! Sets the component's current material. This MaterialHandle version provides support for BehaviorContext reflection.
-        virtual void SetMaterialHandle(MaterialHandle) {};
+        //! \param materialHandle       New material handle
+        virtual void SetMaterialHandle(const MaterialHandle& /*materialHandle*/) {};
         //! Gets the component's current material. This MaterialHandle version provides support for BehaviorContext reflection.
         virtual MaterialHandle GetMaterialHandle() { return MaterialHandle(); }
 
@@ -91,7 +92,7 @@ namespace LmbrCentral
     };
 
     using MaterialOwnerRequestBus = AZ::EBus<MaterialOwnerRequests>;
-    
+
     /*!
      * Messages sent by components that support materials (e.g. Mesh, Decal).
      * We specifically chose the name "MaterialOwnerNotificationBus" rather than just "MaterialNotificationBus" to communicate
@@ -126,7 +127,6 @@ namespace LmbrCentral
 
                 if (readyResult)
                 {
-                    typename Bus::template CallstackEntryIterator<typename Bus::InterfaceType**> callstack(nullptr, &id); // Workaround for GetCurrentBusId in callee
                     handler->OnMaterialOwnerReady();
                 }
             }

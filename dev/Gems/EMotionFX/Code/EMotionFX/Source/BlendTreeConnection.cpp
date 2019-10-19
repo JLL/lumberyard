@@ -10,55 +10,81 @@
 *
 */
 
-// include required headers
-#include "EMotionFXConfig.h"
-#include "BlendTreeConnection.h"
-#include <MCore/Source/IDGenerator.h>
-#include "AnimGraphNode.h"
-#include "AnimGraph.h"
+#include <AzCore/Serialization/SerializeContext.h>
+#include <EMotionFX/Source/AnimGraph.h>
+#include <EMotionFX/Source/AnimGraphNode.h>
+#include <EMotionFX/Source/BlendTreeConnection.h>
 
 
 namespace EMotionFX
 {
-    // default constructor
+    AZ_CLASS_ALLOCATOR_IMPL(BlendTreeConnection, AnimGraphAllocator, 0)
+
     BlendTreeConnection::BlendTreeConnection()
+        : m_animGraph(nullptr)
+        , m_sourceNode(nullptr)
+        , m_id(AnimGraphConnectionId::Create())
+        , mSourcePort(MCORE_INVALIDINDEX16)
+        , mTargetPort(MCORE_INVALIDINDEX16)
+        , mVisited(false)
     {
-        mBlendNode      = nullptr;
-        mSourcePort     = MCORE_INVALIDINDEX16;
-        mTargetPort     = MCORE_INVALIDINDEX16;
-        mID             = MCore::GetIDGenerator().GenerateID();
-
-    #ifdef EMFX_EMSTUDIOBUILD
-        mVisited        = false;
-    #endif
     }
 
-
-    // extended constructor
-    BlendTreeConnection::BlendTreeConnection(AnimGraphNode* sourceNode, uint16 sourcePort, uint16 targetPort)
+    BlendTreeConnection::BlendTreeConnection(AnimGraphNode* sourceNode, AZ::u16 sourcePort, AZ::u16 targetPort)
+        : BlendTreeConnection()
     {
-        mBlendNode      = sourceNode;
-        mSourcePort     = sourcePort;
-        mTargetPort     = targetPort;
-        mID             = MCore::GetIDGenerator().GenerateID();
+        if (sourceNode)
+        {
+            m_animGraph = sourceNode->GetAnimGraph();
+        }
 
-    #ifdef EMFX_EMSTUDIOBUILD
-        mVisited        = false;
-    #endif
+        mSourcePort = sourcePort;
+        mTargetPort = targetPort;
+
+        SetSourceNode(sourceNode);
     }
 
-
-    // destructor
     BlendTreeConnection::~BlendTreeConnection()
     {
     }
 
+    void BlendTreeConnection::Reinit()
+    {
+        if (!m_animGraph)
+        {
+            return;
+        }
 
-    // check if this connection is valid
+        m_sourceNode = m_animGraph->RecursiveFindNodeById(GetSourceNodeId());
+        AZ_Error("EMotionFX", m_sourceNode, "Could not find node for id %s.", GetSourceNodeId().ToString().c_str());
+    }
+
+    bool BlendTreeConnection::InitAfterLoading(AnimGraph* animGraph)
+    {
+        if (!animGraph)
+        {
+            return false;
+        }
+
+        m_animGraph = animGraph;
+        Reinit();
+        return true;
+    }
+
+    void BlendTreeConnection::SetSourceNode(AnimGraphNode* node)
+    {
+        m_sourceNode = node;
+
+        if (m_sourceNode)
+        {
+            m_sourceNodeId = m_sourceNode->GetId();
+        }
+    }
+
     bool BlendTreeConnection::GetIsValid() const
     {
         // make sure the node and input numbers are valid
-        if (mBlendNode == nullptr || mSourcePort == MCORE_INVALIDINDEX16 || mTargetPort == MCORE_INVALIDINDEX16)
+        if (!m_sourceNode || mSourcePort == MCORE_INVALIDINDEX16 || mTargetPort == MCORE_INVALIDINDEX16)
         {
             return false;
         }
@@ -67,23 +93,19 @@ namespace EMotionFX
         return true;
     }
 
-
-    // clone the blend tree connection
-    BlendTreeConnection* BlendTreeConnection::Clone(AnimGraph* animGraph)
+    void BlendTreeConnection::Reflect(AZ::ReflectContext* context)
     {
-        BlendTreeConnection* result = new BlendTreeConnection();
-
-        if (mBlendNode)
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
         {
-            result->mBlendNode  = animGraph->RecursiveFindNodeByID(mBlendNode->GetID());
-            MCORE_ASSERT(result->mBlendNode);
+            return;
         }
 
-        result->mSourcePort = mSourcePort;
-        result->mTargetPort = mTargetPort;
-
-        // mVisited doesn't need to be cloned
-        return result;
+        serializeContext->Class<BlendTreeConnection>()
+            ->Version(2)
+            ->Field("id", &BlendTreeConnection::m_id)
+            ->Field("sourceNodeId", &BlendTreeConnection::m_sourceNodeId)
+            ->Field("sourcePortNr", &BlendTreeConnection::mSourcePort)
+            ->Field("targetPortNr", &BlendTreeConnection::mTargetPort);
     }
-}   // namespace EMotionFX
-
+} // namespace EMotionFX

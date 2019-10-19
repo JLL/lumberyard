@@ -33,6 +33,9 @@
 #include "QViewportSettings.h"
 #include "Serialization.h"
 
+#include <AzCore/Jobs/JobContext.h>
+#include <AzCore/Jobs/JobManager.h>
+
 #include <AzQtComponents/Utilities/QtWindowUtilities.h>
 
 struct QViewport::SPreviousContext
@@ -162,7 +165,7 @@ struct QViewport::SPrivate
     CDLight m_sun;
 };
 
-QViewport::QViewport(QWidget* parent)
+QViewport::QViewport(QWidget* parent, StartupMode startupMode)
     : QWidget(parent)
     , m_renderContextCreated(false)
     , m_updating(false)
@@ -185,7 +188,8 @@ QViewport::QViewport(QWidget* parent)
     , m_private(new SPrivate())
     , m_cameraControlMode(CameraControlMode::NONE)
 {
-    Startup();
+    if (startupMode & StartupMode_Immediate)
+        Startup();
 }
 
 void QViewport::Startup()
@@ -904,7 +908,8 @@ void QViewport::RenderInternal()
 
         // I'm not sure if this criteria is right. It might not be restrictive enough, but it's at least strict enough to prevent
         // the crash we encountered.
-        const bool isValidThread = JobManager::IsWorkerThread() || mainThread == currentThreadId || renderThread == currentThreadId;
+        const uint32 workerThreadId = AZ::JobContext::GetGlobalContext()->GetJobManager().GetWorkerThreadId();
+        const bool isValidThread = (workerThreadId != AZ::JobManager::InvalidWorkerThreadId) || mainThread == currentThreadId || renderThread == currentThreadId;
 
         if (!isValidThread)
         {

@@ -11,6 +11,7 @@
 */
 
 // include required headers
+#include <AzCore/PlatformDef.h>
 #include "EMStudioManager.h"
 #include <MysticQt/Source/MysticQtConfig.h>
 #include "PluginManager.h"
@@ -25,10 +26,11 @@
 #include <QApplication>
 
 // include MCore related
+#include <MCore/Source/StringConversions.h>
 #include <MCore/Source/LogManager.h>
 
 // include mac reladed
-#ifdef MCORE_PLATFORM_POSIX
+#if !defined(AZ_PLATFORM_WINDOWS)
     #include <dlfcn.h>
 #endif
 
@@ -79,10 +81,12 @@ namespace EMStudio
         QApplication::processEvents();
 
         // delete all plugins
-        for (EMStudioPlugin* plugin : mPlugins)
-        {
-            delete plugin;
-        }
+        // The plugins stored in mPlugins do not have Init() called, but the
+        // destructors are written assuming Init() was called.
+        //for (EMStudioPlugin* plugin : mPlugins)
+        //{
+        //    delete plugin;
+        //}
         mPlugins.clear();
 
         // delete all active plugins
@@ -111,7 +115,7 @@ namespace EMStudio
         const uint32 numLibs = static_cast<int32>(mPluginLibs.size());
         for (uint32 l = 0; l < numLibs; ++l)
         {
-    #if defined(MCORE_PLATFORM_WINDOWS)
+    #if defined(AZ_PLATFORM_WINDOWS)
             FreeLibrary(mPluginLibs[l]);
     #else
             dlclose(mPluginLibs[l]);
@@ -170,7 +174,7 @@ namespace EMStudio
         //----------------------------------------
         // Windows
         //----------------------------------------
-    #ifdef MCORE_PLATFORM_WINDOWS
+    #if defined(AZ_PLATFORM_WINDOWS)
         // load this DLL into our address space
         HMODULE dllHandle = ::LoadLibraryA(filename);
         if (dllHandle == nullptr)

@@ -9,19 +9,16 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
-
 #include <GridMate/Session/Session.h>
 #include <AzCore/std/string/conversions.h>
 #include <AzCore/std/parallel/lock.h>
+#include <AzCore/Platform.h>
 
 #include <GridMate/Carrier/Utils.h>
 
 #include <GridMate/VoiceChat/VoiceChatServiceBus.h>
 
-#ifdef AZ_PLATFORM_WINDOWS
-#   include <AzCore/PlatformIncl.h>
-#endif
+#include <GridMate/Session/Session_Platform.h>
 
 namespace GridMate
 {
@@ -1024,7 +1021,7 @@ GridSession::RemoveMember(const MemberID& id)
         if (member->GetId() == id)
         {
             // Removing member from voice chat
-            EBUS_EVENT_ID(m_gridMate, VoiceChatServiceBus, RegisterMember, member);
+            EBUS_EVENT_ID(m_gridMate, VoiceChatServiceBus, UnregisterMember, member);
 
             // The only ones that can get a remove member call
             // without having lost that connection are the non-hosts.
@@ -2077,7 +2074,9 @@ GridMember::OnReplicaChangeOwnership(const ReplicaContext& rc)
 bool
 GridMember::OnKick(AZ::u8 reason, const RpcContext& rc)
 {
-    if (rc.m_sourcePeer == m_session->GetHost()->GetIdCompact())    //Only the host can kick
+    //  Null check m_session and m_session->GetHost(). 
+    //  2 Kick messages in quick succession can cause this to crash otherwise.
+    if (m_session && m_session->GetHost() && rc.m_sourcePeer == m_session->GetHost()->GetIdCompact())    //Only the host can kick
     {
         EBUS_DBG_EVENT(Debug::SessionDrillerBus, OnMemberKicked, m_session, this);
         EBUS_EVENT_ID(m_session->GetGridMate(), SessionEventBus, OnMemberKicked, m_session, this, reason);
@@ -2090,7 +2089,6 @@ GridMember::OnKick(AZ::u8 reason, const RpcContext& rc)
         return true; // this is called only on the master
     }
     return false;
-
 }
 
 //=========================================================================
@@ -2291,9 +2289,7 @@ GridMemberStateReplica::GridMemberStateReplica(GridMember* member)
     m_platformId.Set(AZ::g_currentPlatform);
     m_machineName.Set(Utils::GetMachineAddress((m_member) ? m_member->GetSession()->GetCarrierDesc().m_familyType : 0));
     SetPriority(k_replicaPriorityRealTime);
-#if defined(AZ_PLATFORM_WINDOWS)
-    m_processId.Set(GetCurrentProcessId());
-#endif
+    m_processId.Set(AZ::Platform::GetCurrentProcessId());
 }
 
 //=========================================================================
@@ -2544,46 +2540,79 @@ SessionService::Update()
 //=========================================================================
 // ReleaseGridSearch
 //=========================================================================
-void
-SessionService::AddGridSeach(GridSearch* search)
+void SessionService::AddGridSeach(GridSearch* search)
 {
-    AZ_Assert(AZStd::find(m_activeSearches.begin(), m_activeSearches.end(), search) == m_activeSearches.end(), "This search %p is already in the active searches list!", search);
-    AZ_Assert(AZStd::find(m_completedSearches.begin(), m_completedSearches.end(), search) == m_completedSearches.end(), "This search %p is already in the complete searches list!", search);
-
-    if (search->IsDone())
+    if (search != nullptr)
     {
-        m_completedSearches.push_back(search);
-    }
-    else
-    {
-        m_activeSearches.push_back(search);
-    }
+        if( AZStd::find(m_activeSearches.begin(), m_activeSearches.end(), search) != m_activeSearches.end() )
+        {
+            AZ_Error("SessionService", false, "This search %p is already in the active searches list!", search);
+        }
+        else if( AZStd::find(m_completedSearches.begin(), m_completedSearches.end(), search) != m_completedSearches.end() )
+        {
+            AZ_Error("SessionService", false, "This search %p is already in the complete searches list!", search);
+        }
+        else
+        {
+            if (search->IsDone())
+            {
+                m_completedSearches.push_back(search);
+            }
+            else
+            {
+                m_activeSearches.push_back(search);
+            }
 
-    EBUS_EVENT_ID(m_gridMate, SessionEventBus, OnGridSearchStart, search);
+            EBUS_EVENT_ID(m_gridMate, SessionEventBus, OnGridSearchStart, search);
+        }
+    }
 }
 
 //=========================================================================
 // ReleaseGridSearch
 //=========================================================================
-void
-SessionService::ReleaseGridSearch(GridSearch* search)
+void SessionService::ReleaseGridSearch(GridSearch* search)
 {
-    EBUS_EVENT_ID(m_gridMate, SessionEventBus, OnGridSearchRelease, search);
-
-    if (search->IsDone())
+    if (search != nullptr)
     {
-        SearchArrayType::iterator it = AZStd::find(m_completedSearches.begin(), m_completedSearches.end(), search);
-        AZ_Assert(it != m_completedSearches.end(), "Completed search %p was NOT found in the complete list!", search);
-        m_completedSearches.erase(it);
-    }
-    else
-    {
-        SearchArrayType::iterator it = AZStd::find(m_activeSearches.begin(), m_activeSearches.end(), search);
-        AZ_Assert(it != m_activeSearches.end(), "Active search %p was NOT found in the active list!", search);
-        m_activeSearches.erase(it);
-    }
+        bool released = false;
 
-    delete search;
+        if (search->IsDone() && !m_completedSearches.empty())
+        {
+            SearchArrayType::iterator it = AZStd::find(m_completedSearches.begin(), m_completedSearches.end(), search);
+
+            if (it != m_completedSearches.end() )
+            {
+                m_completedSearches.erase(it);
+                released = true;
+            }
+            else
+            {
+                AZ_Error("SessionService", false, "Completed search %p was NOT found in the complete list!", search);
+            }
+        }
+        else if (!m_activeSearches.empty())
+        {
+            SearchArrayType::iterator it = AZStd::find(m_activeSearches.begin(), m_activeSearches.end(), search);
+
+            if( it != m_activeSearches.end() )
+            {
+                m_activeSearches.erase(it);
+                released = true;
+            }
+            else
+            {
+                AZ_Error("SessionService", false, "Active search %p was NOT found in the active list!", search);
+            }
+        }
+
+        if (released)
+        {
+            EBUS_EVENT_ID(m_gridMate, SessionEventBus, OnGridSearchRelease, search);
+        }
+
+        delete search;
+    }
 }
 
 //=========================================================================
@@ -2591,20 +2620,31 @@ SessionService::ReleaseGridSearch(GridSearch* search)
 //=========================================================================
 void SessionService::AddSession(GridSession* session)
 {
-    AZ_Assert(AZStd::find(m_sessions.begin(), m_sessions.end(), session) == m_sessions.end(), "Session %p has already been added!", session);
-    m_sessions.push_back(session);
+    if(session != nullptr)
+    {
+        if( AZStd::find(m_sessions.begin(), m_sessions.end(), session) == m_sessions.end() )
+        {
+            m_sessions.push_back(session);
+        }
+        else
+        {
+            AZ_Error("SessionService", false, "Session %p has already been added!", session);
+        }
+    }
 }
 
 //=========================================================================
 // RemoveSession
 //=========================================================================
-void
-SessionService::RemoveSession(GridSession* session)
+void SessionService::RemoveSession(GridSession* session)
 {
-    SessionArrayType::iterator it = AZStd::find(m_sessions.begin(), m_sessions.end(), session);
-    if (it != m_sessions.end())
+    if (session != nullptr)
     {
-        m_sessions.erase(it);
+        SessionArrayType::iterator it = AZStd::find(m_sessions.begin(), m_sessions.end(), session);
+        if (it != m_sessions.end())
+        {
+            m_sessions.erase(it);
+        }
     }
 }
 
@@ -2642,7 +2682,7 @@ void GridSessionHandshake::OnInitiate(ConnectionID id, WriteBuffer& wb)
     wb.Write(m_version);
 
     if (!m_userData.empty())
-    {
+    {   
         wb.WriteRaw(m_userData.data(), m_userData.size());
     }
 }
@@ -2852,5 +2892,3 @@ void GridSessionHandshake::ReleaseNewConnections()
 {
     m_dataLock.unlock();
 }
-
-#endif // #ifndef AZ_UNITY_BUILD

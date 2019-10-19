@@ -15,6 +15,7 @@
 #include <AzCore/Math/Vector2.h>
 #include <AzCore/Math/Matrix4x4.h>
 #include <AzFramework/Input/Channels/InputChannelDigitalWithSharedModifierKeyStates.h>
+#include <AzFramework/Input/User/LocalUserId.h>
 #include <LyShine/UiBase.h>
 
 // Forward declarations
@@ -26,9 +27,6 @@ class UiCanvasInterface
 {
 public: // types
 
-    typedef unsigned int CanvasId;
-    typedef CryStringT<char> ActionName;
-
     enum class ErrorCode
     {
         NoError,
@@ -39,17 +37,6 @@ public: // member functions
 
     //! Deleting a canvas will delete all its child elements recursively and all of their components
     virtual ~UiCanvasInterface() {}
-
-    //! Update the canvas, called during frame update cycle
-    //! \param deltaTime the amount of time in seconds since the last call to this function
-    //! \param isInGame, true if canvas being updated in game (or preview), false if being render in edit mode
-    virtual void UpdateCanvas(float deltaTime, bool isInGame) = 0;
-
-    //! Render the canvas, called at the point in the frame where this canvas should render
-    //! \param isInGame, true if canvas being rendered in game (or preview), false if being render in edit mode
-    //! \param viewportSize, this is the size of the viewport that the canvas is being rendered to
-    //! \param displayBounds, when true, a debug display of every element's bounds will be displayed also
-    virtual void RenderCanvas(bool isInGame, AZ::Vector2 viewportSize, bool displayBounds) = 0;
 
     //! Get the asset ID path name of this canvas. If not loaded or saved yet this will be ""
     virtual const string& GetPathname() = 0;
@@ -111,7 +98,7 @@ public: // member functions
     virtual AZ::Entity* FindElementByHierarchicalName(const LyShine::NameType& name) = 0;
 
     //! Find all elements on this canvas matching the predicate
-    virtual void FindElements(std::function<bool(const AZ::Entity*)> predicate, LyShine::EntityArray& result) = 0;
+    virtual void FindElements(AZStd::function<bool(const AZ::Entity*)> predicate, LyShine::EntityArray& result) = 0;
 
     //! Get the front-most element whose bounds include the given point in canvas space
     //! \return nullptr if no match
@@ -223,15 +210,21 @@ public: // member functions
     //! When running in game in full screen mode the target canvas size should be set to the viewport size
     virtual void SetTargetCanvasSize(bool isInGame, const AZ::Vector2& targetCanvasSize) = 0;
 
-    //! Get uniform scale to adjust for the difference between canvas size (authored size)
-    //! and the viewport size when running on current device
-    virtual float GetUniformDeviceScale() = 0;
+    //! Get scale to adjust for the difference between canvas size (authored size)
+    //! and the viewport size (target canvas size) when running on current device
+    virtual AZ::Vector2 GetDeviceScale() = 0;
 
     //! Get flag that indicates whether visual element's vertices should snap to the nearest pixel
     virtual bool GetIsPixelAligned() = 0;
 
     //! Set flag that indicates whether visual element's vertices should snap to the nearest pixel
     virtual void SetIsPixelAligned(bool isPixelAligned) = 0;
+
+    //! Get flag that indicates whether text should snap to the nearest pixel
+    virtual bool GetIsTextPixelAligned() = 0;
+
+    //! Set flag that indicates whether text should snap to the nearest pixel
+    virtual void SetIsTextPixelAligned(bool isTextPixelAligned) = 0;
 
     //! Get the animation system for this canvas
     virtual IUiAnimationSystem* GetAnimationSystem() = 0;
@@ -282,6 +275,30 @@ public: // member functions
     //! Set flag that controls whether this canvas automatically handles navigation input (via keyboard/gamepad)
     virtual void SetIsNavigationSupported(bool isSupported) = 0;
 
+    //! Get the analog (eg. thumb-stick) input value that must be exceeded before a navigation command will be processed
+    virtual float GetNavigationThreshold() = 0;
+
+    //! Set the analog (eg. thumb-stick) input value that must be exceeded before a navigation command will be processed
+    virtual void SetNavigationThreshold(float navigationThreshold) = 0;
+
+    //! Get the delay (milliseconds) before a held navigation command will begin repeating
+    virtual AZ::u64 GetNavigationRepeatDelay() = 0;
+
+    //! Set the delay (milliseconds) before a held navigation command will begin repeating
+    virtual void SetNavigationRepeatDelay(AZ::u64 navigationRepeatDelay) = 0;
+
+    //! Get the delay (milliseconds) before a held navigation command will continue repeating
+    virtual AZ::u64 GetNavigationRepeatPeriod() = 0;
+
+    //! Set the delay (milliseconds) before a held navigation command will continue repeating
+    virtual void SetNavigationRepeatPeriod(AZ::u64 navigationRepeatPeriod) = 0;
+
+    //! Get the local user id that is being used to filter incoming input events
+    virtual AzFramework::LocalUserId GetLocalUserIdInputFilter() = 0;
+
+    //! Set the local user id that will be used to filter incoming input events
+    virtual void SetLocalUserIdInputFilter(AzFramework::LocalUserId localUserId) = 0;
+
     //! Handle an input event for the canvas
     virtual bool HandleInputEvent(const AzFramework::InputChannel::Snapshot& inputSnapshot,
         const AZ::Vector2* viewportPos = nullptr,
@@ -303,24 +320,6 @@ public: // member functions
     //! Set the element to be displayed when hovering over an interactable
     virtual void SetTooltipDisplayElement(AZ::EntityId entityId) = 0;
 
-    //! Get the snap state.
-    virtual bool GetIsSnapEnabled() = 0;
-
-    //! Set the snap state.
-    virtual void SetIsSnapEnabled(bool enabled) = 0;
-
-    //! Get the translation distance to snap to
-    virtual float GetSnapDistance() = 0;
-
-    //! Set the translation distance to snap to
-    virtual void SetSnapDistance(float distance) = 0;
-
-    //! Get the degrees of rotation to snap to
-    virtual float GetSnapRotationDegrees() = 0;
-
-    //! Set the degrees of rotation to snap to
-    virtual void SetSnapRotationDegrees(float degrees) = 0;
-
     //! Force the active interactable for the canvas to be the given one, this is intended for internal
     //! use by UI components
     virtual void ForceActiveInteractable(AZ::EntityId interactableId, bool shouldStayActive, AZ::Vector2 point) = 0;
@@ -333,19 +332,39 @@ public: // member functions
     //! wants to specify the new hover interactable
     virtual void ForceHoverInteractable(AZ::EntityId interactableId) = 0;
 
-    //! Clear all active and hover interactables, this is intended for internal use by UI components
+    //! Clear all active interactables, and all hover interactables if last input was positional (mouse/touch).
+    //! This is intended for internal use by UI components
     virtual void ClearAllInteractables() = 0;
-
-    //! Internal method used to tell the canvas that some elements need their transform recomputed
-    virtual void SetTransformsNeedRecomputeFlag() = 0;
 
 public: // static member data
 
-    //! Only one component on a entity can implement the events
+    //! Only one component on an entity can implement the events
     static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
 };
 
 typedef AZ::EBus<UiCanvasInterface> UiCanvasBus;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//! The canvas component implements this bus and it is provided for C++ implementations of 
+//! UI components to use to talk to the canvas
+class UiCanvasComponentImplementationInterface
+    : public AZ::ComponentBus
+{
+public: // member functions
+
+    virtual ~UiCanvasComponentImplementationInterface() {}
+
+    //! Mark the render graph for the canvas as dirty. This will cause the render graph to get
+    //! cleared and rebuilt on the next render.
+    virtual void MarkRenderGraphDirty() = 0;
+
+public: // static member data
+
+    //! Only one component on an entity can implement the events
+    static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+};
+
+typedef AZ::EBus<UiCanvasComponentImplementationInterface> UiCanvasComponentImplementationBus;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //! Interface class that listeners need to implement to be notified of canvas actions
@@ -390,6 +409,24 @@ public: // member functions
 typedef AZ::EBus<UiCanvasOrderNotification> UiCanvasOrderNotificationBus;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+//! Interface class that listeners need to implement to be notified when any canvas has been
+//! enabled or disabled
+class UiCanvasEnabledStateNotification
+    : public AZ::EBusTraits
+{
+public: // member functions
+
+    static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
+
+    virtual ~UiCanvasEnabledStateNotification() {}
+
+    //! Called when the canvas was enabled or disabled
+    virtual void OnCanvasEnabledStateChanged(AZ::EntityId canvasEntityId, bool enabled) = 0;
+};
+
+typedef AZ::EBus<UiCanvasEnabledStateNotification> UiCanvasEnabledStateNotificationBus;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 //! Interface class that listeners need to implement to be notified of canvas size or scale changes
 class UiCanvasSizeNotification
     : public AZ::EBusTraits
@@ -402,6 +439,24 @@ public:
 };
 
 typedef AZ::EBus<UiCanvasSizeNotification> UiCanvasSizeNotificationBus;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//! Interface class that listeners need to implement to be notified of changes to the canvas
+//! pixel alignment settings
+class UiCanvasPixelAlignmentNotification
+    : public AZ::ComponentBus
+{
+public:
+    virtual ~UiCanvasPixelAlignmentNotification() {}
+
+    //! Called when the pixel alignment setting for the canvas changes
+    virtual void OnCanvasPixelAlignmentChange() {}
+
+    //! Called when the text pixel alignment setting for the canvas changes
+    virtual void OnCanvasTextPixelAlignmentChange() {}
+};
+
+typedef AZ::EBus<UiCanvasPixelAlignmentNotification> UiCanvasPixelAlignmentNotificationBus;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //! Interface class that listeners need to implement to be notified of canvas input.

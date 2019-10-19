@@ -149,6 +149,7 @@ void UiDropdownOptionComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiDropdownOptionComponent>("DropdownOption", "An interactable component for DropdownOption behavior.");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiDropdownOption.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiDropdownOption.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -175,7 +176,6 @@ void UiDropdownOptionComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiDropdownOptionBus>("UiDropdownOptionBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetOwningDropdown", &UiDropdownOptionBus::Events::GetOwningDropdown)
             ->Event("SetOwningDropdown", &UiDropdownOptionBus::Events::SetOwningDropdown)
             ->Event("GetTextElement", &UiDropdownOptionBus::Events::GetTextElement)
@@ -184,7 +184,6 @@ void UiDropdownOptionComponent::Reflect(AZ::ReflectContext* context)
             ->Event("SetIconElement", &UiDropdownOptionBus::Events::SetIconElement);
 
         behaviorContext->EBus<UiDropdownOptionNotificationBus>("UiDropdownOptionNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiDropdownOptionNotificationBusBehaviorHandler>();
     }
 }

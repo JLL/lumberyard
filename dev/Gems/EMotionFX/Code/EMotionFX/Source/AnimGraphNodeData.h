@@ -15,8 +15,7 @@
 // include the required headers
 #include "EMotionFXConfig.h"
 #include "AnimGraphObjectData.h"
-#include "AnimGraphSyncTrack.h"
-
+#include <AzCore/Memory/Memory.h>
 
 namespace EMotionFX
 {
@@ -25,6 +24,7 @@ namespace EMotionFX
     class AnimGraphInstance;
     class AnimGraphNode;
     class AnimGraphRefCountedData;
+    class AnimGraphSyncTrack;
 
 
     /**
@@ -35,10 +35,11 @@ namespace EMotionFX
     class EMFX_API AnimGraphNodeData
         : public AnimGraphObjectData
     {
-        MCORE_MEMORYOBJECTCATEGORY(AnimGraphNodeData, MCore::MCORE_SIMD_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_OBJECTUNIQUEDATA);
         EMFX_ANIMGRAPHOBJECTDATA_IMPLEMENT_LOADSAVE
 
     public:
+        AZ_CLASS_ALLOCATOR_DECL
+
         enum
         {
             INHERITFLAGS_BACKWARD       = 1 << 0,
@@ -46,16 +47,14 @@ namespace EMotionFX
         };
 
         AnimGraphNodeData(AnimGraphNode* node, AnimGraphInstance* animGraphInstance);
-        virtual ~AnimGraphNodeData();
+        virtual ~AnimGraphNodeData() = default;
 
         static AnimGraphNodeData* Create(AnimGraphNode* node, AnimGraphInstance* animGraphInstance);
 
         void Clear();
-        virtual AnimGraphObjectData* Clone(void* destMem, AnimGraphObject* object, AnimGraphInstance* animGraphInstance) override;
 
         void Init(AnimGraphInstance* animGraphInstance, AnimGraphNode* node);
         void Init(AnimGraphNodeData* nodeData);
-        virtual uint32 GetClassSize() const override                            { return sizeof(AnimGraphNodeData); }
 
         MCORE_INLINE AnimGraphNode* GetNode() const                            { return reinterpret_cast<AnimGraphNode*>(mObject); }
         MCORE_INLINE void SetNode(AnimGraphNode* node)                         { mObject = reinterpret_cast<AnimGraphObject*>(node); }
@@ -103,9 +102,12 @@ namespace EMotionFX
         MCORE_INLINE void SetRefCountedData(AnimGraphRefCountedData* data)     { mRefCountedData = data; }
         MCORE_INLINE AnimGraphRefCountedData* GetRefCountedData() const        { return mRefCountedData; }
 
-        MCORE_INLINE const AnimGraphSyncTrack& GetSyncTrack() const            { return mSyncTrack; }
-        MCORE_INLINE AnimGraphSyncTrack& GetSyncTrack()                        { return mSyncTrack; }
-        MCORE_INLINE void SetSyncTrack(const AnimGraphSyncTrack& syncTrack)    { mSyncTrack = syncTrack; }
+        MCORE_INLINE const AnimGraphSyncTrack* GetSyncTrack() const            { return mSyncTrack; }
+        MCORE_INLINE AnimGraphSyncTrack* GetSyncTrack()                        { return mSyncTrack; }
+        MCORE_INLINE void SetSyncTrack(AnimGraphSyncTrack* syncTrack)          { mSyncTrack = syncTrack; }
+
+        bool GetIsMirrorMotion() const { return m_isMirrorMotion; }
+        void SetIsMirrorMotion(bool newValue) { m_isMirrorMotion = newValue; }
 
     protected:
         float       mDuration;
@@ -118,9 +120,31 @@ namespace EMotionFX
         uint8       mPoseRefCount;
         uint8       mRefDataRefCount;
         uint8       mInheritFlags;
+        bool        m_isMirrorMotion;
         AnimGraphRefCountedData*   mRefCountedData;
-        AnimGraphSyncTrack         mSyncTrack;
+        AnimGraphSyncTrack*        mSyncTrack;
 
-        virtual void Delete() override;
+
+        void Delete() override;
     };
-}   // namespace EMotionFX
+
+    /**
+     * This mixin can be used for unique datas on anim graph nodes that manually need to increase pose and data ref counts for nodes a hierarchy level up or
+     * neighbor nodes with a risk of the node not being output. An example would be the state machine where the active nodes can change within the update
+     * method due to ending or newly started transitions. We need some way to keep track of the nodes that increased the data and pose ref counts at a level
+     * up in the hierarchy.
+     */
+    class EMFX_API NodeDataAutoRefCountMixin
+    {
+    public:
+        void IncreaseDataRefCountForNode(AnimGraphNode* node, AnimGraphInstance* animGraphInstance);
+        void DecreaseDataRefCounts(AnimGraphInstance* animGraphInstance);
+
+        void IncreasePoseRefCountForNode(AnimGraphNode* node, AnimGraphInstance* animGraphInstance);
+        void DecreasePoseRefCounts(AnimGraphInstance* animGraphInstance);
+
+    protected:
+        AZStd::vector<AnimGraphNode*> m_dataRefCountIncreasedNodes;
+        AZStd::vector<AnimGraphNode*> m_poseRefCountIncreasedNodes;
+    };
+} // namespace EMotionFX

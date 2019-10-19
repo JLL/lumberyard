@@ -80,6 +80,9 @@ struct SurfaceTile
 
     void AssignMaps(uint16 size, uint16* heightmap, ITerrain::SurfaceWeight* weights)
     {
+        delete[] m_Heightmap;
+        delete[] m_Weightmap;
+
         m_Size = size;
         m_Heightmap = heightmap;
         m_Weightmap = weights;
@@ -377,7 +380,14 @@ struct STerrainNodeLeafData
         uint32 id;
     };
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // Use m_TextureParams for double buffering to prevent flickering due to threading issues
+    // Only level 0 was used before.
+    TextureParams m_TextureParams[RT_COMMAND_BUF_COUNT];
+#else
     TextureParams m_TextureParams[MAX_RECURSION_LEVELS];
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
 
     int m_SurfaceAxisIndexCount[SurfaceTile::MaxSurfaceCount][4];
     PodArray<CTerrainNode*> m_Neighbors;
@@ -414,6 +424,8 @@ public:
         , m_pProcObjPoolPtr(0)
         , m_nGSMFrameId(0)
         , m_pRNTmpData(0)
+        , m_nEditorDiffuseTex(0)
+        , m_nEditorDiffuseTexSize(0)
     {
         memset(&m_DistanceToCamera, 0, sizeof(m_DistanceToCamera));
     }
@@ -423,17 +435,17 @@ public:
 
     static void GetStaticMemoryUsage(ICrySizer* sizer);
 
-    static CProcVegetPoolMan* GetProcObjPoolMan() { return m_pProcObjPoolMan; }
+    static CProcVegetPoolMan* GetProcObjPoolMan() { return s_pProcObjPoolMan; }
 
-    static SProcObjChunkPool* GetProcObjChunkPool() { return m_pProcObjChunkPool; }
+    static SProcObjChunkPool* GetProcObjChunkPool() { return s_pProcObjChunkPool; }
 
-    static void SetProcObjPoolMan(CProcVegetPoolMan* pProcObjPoolMan) { m_pProcObjPoolMan = pProcObjPoolMan; }
+    static void SetProcObjPoolMan(CProcVegetPoolMan* pProcObjPoolMan) { s_pProcObjPoolMan = pProcObjPoolMan; }
 
-    static void SetProcObjChunkPool(SProcObjChunkPool* pProcObjChunkPool) { m_pProcObjChunkPool = pProcObjChunkPool; }
+    static void SetProcObjChunkPool(SProcObjChunkPool* pProcObjChunkPool) { s_pProcObjChunkPool = pProcObjChunkPool; }
 
     bool CheckVis(bool bAllIN, bool bAllowRenderIntoCBuffer, const SRenderingPassInfo& passInfo);
 
-    void SetSectorTexture(unsigned int textureId);
+    void SetSectorTexture(unsigned int textureId, unsigned int textureSizeX, unsigned int textureSizeY);
 
     void CheckNodeGeomUnload(const SRenderingPassInfo& passInfo);
 
@@ -469,6 +481,8 @@ public:
     void ResetHeightMapGeometry(bool bRecursive = false, const AABB* pBox = NULL);
     int GetSecIndex();
 
+    void GetMaterials(AZStd::vector<_smart_ptr<IMaterial>>& materials);
+
     uint32 GetLastTimeUsed() { return m_nLastTimeUsed; }
 
     const float GetDistance(const SRenderingPassInfo& passInfo);
@@ -498,6 +512,7 @@ public:
     uint8 m_QueuedLOD, m_CurrentLOD, m_TextureLOD;
     uint8 m_nTreeLevel;
 
+    uint16 m_nEditorDiffuseTexSize;
     uint32 m_nEditorDiffuseTex;
 
     uint16 m_nOriginX, m_nOriginY;
@@ -575,15 +590,14 @@ private:
 
     BuildMeshData* m_MeshData;
 
-    static PodArray<vtx_idx> m_SurfaceIndices[SurfaceTile::MaxSurfaceCount][4];
-    static CProcVegetPoolMan* m_pProcObjPoolMan;
-    static SProcObjChunkPool* m_pProcObjChunkPool;
+    static PodArray<vtx_idx> s_SurfaceIndices[SurfaceTile::MaxSurfaceCount][4];
+    static CProcVegetPoolMan* s_pProcObjPoolMan;
+    static SProcObjChunkPool* s_pProcObjChunkPool;
 
     static void SetupTexGenParams(SSurfaceType* pLayer, float* pOutParams, uint8 ucProjAxis, bool bOutdoor, float fTexGenScale = 1.f);
 
     static void GenerateIndicesForAllSurfaces(IRenderMesh * mesh, int surfaceAxisIndexCount[SurfaceTile::MaxSurfaceCount][4], BuildMeshData * meshData);
 };
-
 
 // Container to manager temp memory as well as running update jobs
 class CTerrainUpdateDispatcher

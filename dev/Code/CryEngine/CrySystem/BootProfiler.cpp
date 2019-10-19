@@ -23,7 +23,7 @@
 
 namespace
 {
-    CBootProfiler gProfilerInstance;
+    StaticInstance<CBootProfiler, AZStd::no_destruct<CBootProfiler>> gProfilerInstance;
     enum
     {
         eMAX_THREADS_TO_PROFILE = 32,
@@ -59,7 +59,8 @@ public:
     LARGE_INTEGER m_freq;
 
     CBootProfilerRecord* m_pParent;
-    std::vector<CBootProfilerRecord*> m_Childs;
+    typedef AZStd::vector<CBootProfilerRecord*> ChildVector;
+    ChildVector m_Childs;
 
     CryFixedStringT<256> m_args;
 
@@ -81,7 +82,7 @@ public:
         // childs are allocated via pool as well, the destructors of each child
         // is called explicitly, for the purpose of freeing memory occupied by
         // m_Child vector. Otherwise there will be a memory leak.
-        std::vector<CBootProfilerRecord*>::iterator it = m_Childs.begin();
+        ChildVector::iterator it = m_Childs.begin();
         while (it != m_Childs.end())
         {
             (*it)->~CBootProfilerRecord();
@@ -121,6 +122,7 @@ public:
                 m_args.replace(">", "&gt;");
                 m_args.replace("\"", "&quot;");
                 m_args.replace("'", "&apos;");
+                m_args.replace("%", "&#37;");
             }
 
             sprintf_s(buf, buf_size, "%s<block name=\"%s\" totalTimeMS=\"%f\" startTime=\"%" PRIu64 "\" stopTime=\"%" PRIu64 "\" args=\"%s\"> \n",
@@ -381,7 +383,7 @@ void CBootProfilerSession::CollectResults(const char* filename, const float time
     static const char* szTestResults = "@cache@\\TestResults";
     string filePath = string(szTestResults) + "\\" + "bp_" + filename + ".xml";
     char path[ICryPak::g_nMaxPath] = "";
-    gEnv->pCryPak->AdjustFileName(filePath.c_str(), path, ICryPak::FLAGS_PATH_REAL | ICryPak::FLAGS_FOR_WRITING);
+    gEnv->pCryPak->AdjustFileName(filePath.c_str(), path, AZ_ARRAY_SIZE(path), ICryPak::FLAGS_PATH_REAL | ICryPak::FLAGS_FOR_WRITING);
     gEnv->pCryPak->MakeDir(szTestResults);
 
     AZ::IO::HandleType fileHandle = AZ::IO::InvalidHandle;
@@ -389,7 +391,11 @@ void CBootProfilerSession::CollectResults(const char* filename, const float time
     if (fileHandle == AZ::IO::InvalidHandle)
     {
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(BootProfiler_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/BootProfiler_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/BootProfiler_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED

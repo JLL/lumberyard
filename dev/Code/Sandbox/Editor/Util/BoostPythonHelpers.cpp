@@ -47,6 +47,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QProcessEnvironment>
 
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 
@@ -393,7 +394,7 @@ PyGameSubMaterial::PyGameSubMaterial(void* pMat, int id)
     SInputShaderResources&      sr = pMaterial->GetShaderResources();
     for (auto &iter : sr.m_TexturesResourcesMap )
     {
-        SEfResTexture*  	pTextureRes = &(iter.second);
+        SEfResTexture* pTextureRes = &(iter.second);
         if (!pTextureRes->m_Name.empty())
         {
             ResourceSlotIndex  nSlot = iter.first;
@@ -497,7 +498,7 @@ void PyGameSubMaterial::UpdateSubMaterial()
 
             for (int j = 0; j < shdResources.m_ShaderParams.size(); j++)
             {
-                if (QString::compare(pVar->GetName(), shdResources.m_ShaderParams[j].m_Name) == 0)
+                if (QString::compare(pVar->GetName(), shdResources.m_ShaderParams[j].m_Name.c_str()) == 0)
                 {
                     pParam = &shdResources.m_ShaderParams[j];
 
@@ -1494,6 +1495,27 @@ namespace PyScript
 {
     CListenerSet<IPyScriptListener*> s_listeners(2);
 
+    class DefaultScriptListener : public IPyScriptListener
+    {
+        void OnStdOut(const char* message) override
+        {
+            if (message)
+            {
+                AZ_TracePrintf("Python", "%s", message);
+            }
+        }
+
+        void OnStdErr(const char* error) override
+        {
+            if (error)
+            {
+                AZ_Error("Python", false, "%s", error);
+            }
+        }
+    };
+
+    DefaultScriptListener s_defaultListener;
+
     template <typename T>
     T GetPyValue(const char* varName)
     {
@@ -2427,7 +2449,7 @@ namespace PyScript
         {
             modules[i].initFunc();  // RegisterFunctionsForModule() called here
             string importStatement;
-            importStatement.Format("import %s", modules[i].name.c_str());
+            importStatement.Format("import %s", modules[i].name);
             PyRun_SimpleString(importStatement.c_str());
         }
     }
@@ -2811,7 +2833,8 @@ namespace PyScript
         // Behavior for non-windows builds is still TBD, but using PYTHONHOME
         // from the envionment may work as a fallback.
 
-        QString pythonHome = getenv("LY_PYTHONHOME");
+        auto env = QProcessEnvironment::systemEnvironment();
+        QString pythonHome = env.value("LY_PYTHONHOME");
         if (pythonHome.isEmpty())
         {
 #ifdef WIN32
@@ -2819,7 +2842,7 @@ namespace PyScript
             pythonHome.replace('/', '\\');
             pythonHome.replace("@root@", rootEngineDir);
 #else
-            pythonHome = getenv("PYTHONHOME");
+            pythonHome = env.value("PYTHONHOME");
 #endif
         }
 
@@ -2844,6 +2867,8 @@ namespace PyScript
         InitCppModules();
         InitializePyConverters();
 
+        PyScript::RegisterListener(&s_defaultListener);
+
         PyScript::SetStdOutCallback(&PrintMessage);
         PyScript::SetStdErrCallback(&PrintError);
 
@@ -2858,6 +2883,8 @@ namespace PyScript
 
         PyScript::RemoveStdOutCallback();
         PyScript::RemoveStdErrCallback();
+
+        PyScript::RemoveListener(&s_defaultListener);
 
         Py_Finalize();
     }
@@ -2894,6 +2921,7 @@ namespace PyScript
     {
         s_listeners.Remove(pListener);
     }
+
 }
 
 // A place to declare python modules.
@@ -2909,4 +2937,6 @@ DECLARE_PYTHON_MODULE(lodtools);
 DECLARE_PYTHON_MODULE(prefab);
 DECLARE_PYTHON_MODULE(vegetation);
 DECLARE_PYTHON_MODULE(shape);
+DECLARE_PYTHON_MODULE(checkout_dialog);
+DECLARE_PYTHON_MODULE(settings);
 

@@ -28,18 +28,7 @@ namespace AZStd
 
     using std::initializer_list;
 
-#if defined(AZ_HAS_NULLPTR_T)
-#if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(base_h, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-    #else
     using std::nullptr_t;
-    #endif
-#else
-    typedef int nullptr_t;
-#endif
 
-    typedef AZ::u64 sys_time_t;
+    using sys_time_t = AZ::s64;
 }

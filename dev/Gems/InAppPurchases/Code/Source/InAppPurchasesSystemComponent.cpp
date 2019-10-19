@@ -51,7 +51,7 @@ namespace InAppPurchases
         {
             serialize->Class<SystemComponent, AZ::Component>()
                 ->Version(0)
-                ->SerializerForEmptyClass();
+                ;
 
             if (AZ::EditContext* ec = serialize->GetEditContext())
             {
@@ -261,7 +261,7 @@ namespace InAppPurchases
             InAppPurchasesInterface::GetInstance()->QueryPurchasedProducts();
         }
     }
-    
+
     void SystemComponent::RestorePurchasedProducts() const
     {
         if (InAppPurchasesInterface::GetInstance() != nullptr)
@@ -269,7 +269,7 @@ namespace InAppPurchases
             InAppPurchasesInterface::GetInstance()->RestorePurchasedProducts();
         }
     }
-    
+
     void SystemComponent::ConsumePurchase(const AZStd::string& purchaseToken) const
     {
         if (InAppPurchasesInterface::GetInstance() != nullptr)
@@ -277,7 +277,7 @@ namespace InAppPurchases
             InAppPurchasesInterface::GetInstance()->ConsumePurchase(purchaseToken);
         }
     }
-    
+
     void SystemComponent::FinishTransaction(const AZStd::string& transactionId, bool downloadHostedContent) const
     {
         if (InAppPurchasesInterface::GetInstance() != nullptr)
@@ -516,31 +516,34 @@ namespace InAppPurchases
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
 
+        AZStd::string date;
+
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             AZ::u64 time = purchasedProductDetails->at(m_purchasedProductInfoIndex)->GetPurchaseTime();
-#if defined(AZ_PLATFORM_ANDROID)
-            // On Android, the time is returned in milliseconds
-            time /= 1000;
-#endif
             time_t t = static_cast<time_t>(time);
-            return asctime(localtime(&t));
+            tm local;
+            azlocaltime(&t, &local);
+
+            date.resize(24); // 3 (day) + 3 (month) + 2 (date) + 8 (time) + 4 (year) + 4 (spaces)
+            strftime(date.data(), date.size(), "%a %b %d %H:%M:%S %Y", &local);
         }
 
-        return "";
+        return date;
     }
 
     AZStd::string SystemComponent::GetPurchaseSignature()
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_ANDROID)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsAndroid* purchasedProductsAndroid = azrtti_cast<const PurchasedProductDetailsAndroid*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsAndroid->GetPurchaseSignature();
+            if (purchasedProductsAndroid)
+            {
+                return purchasedProductsAndroid->GetPurchaseSignature();
+            }
         }
-#endif
 
         return "";
     }
@@ -549,13 +552,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_ANDROID)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsAndroid* purchasedProductsAndroid = azrtti_cast<const PurchasedProductDetailsAndroid*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsAndroid->GetPackageName();
+            if (purchasedProductsAndroid)
+            {
+                return purchasedProductsAndroid->GetPackageName();
+            }
         }
-#endif
 
         return "";
     }
@@ -564,13 +568,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_ANDROID)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsAndroid* purchasedProductsAndroid = azrtti_cast<const PurchasedProductDetailsAndroid*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsAndroid->GetPurchaseToken();
+            if (purchasedProductsAndroid)
+            {
+                return purchasedProductsAndroid->GetPurchaseToken();
+            }
         }
-#endif
 
         return "";
     }
@@ -579,13 +584,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_ANDROID)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsAndroid* purchasedProductsAndroid = azrtti_cast<const PurchasedProductDetailsAndroid*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsAndroid->GetIsAutoRenewing();
+            if (purchasedProductsAndroid)
+            {
+                return purchasedProductsAndroid->GetIsAutoRenewing();
+            }
         }
-#endif
 
         return false;
     }
@@ -594,13 +600,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_APPLE_IOS)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsApple* purchasedProductsApple = azrtti_cast<const PurchasedProductDetailsApple*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsApple->GetRestoredOrderId();
+            if (purchasedProductsApple)
+            {
+                return purchasedProductsApple->GetRestoredOrderId();
+            }
         }
-#endif
 
         return "";
     }
@@ -609,13 +616,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_APPLE_IOS)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsApple* purchasedProductsApple = azrtti_cast<const PurchasedProductDetailsApple*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsApple->GetSubscriptionExpirationTime();
+            if (purchasedProductsApple)
+            {
+                return purchasedProductsApple->GetSubscriptionExpirationTime();
+            }
         }
-#endif
 
         return 0;
     }
@@ -624,13 +632,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_APPLE_IOS)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsApple* purchasedProductsApple = azrtti_cast<const PurchasedProductDetailsApple*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsApple->GetRestoredPurchaseTime();
+            if (purchasedProductsApple)
+            {
+                return purchasedProductsApple->GetRestoredPurchaseTime();
+            }
         }
-#endif
 
         return 0;
     }
@@ -639,13 +648,14 @@ namespace InAppPurchases
     {
         const AZStd::vector<AZStd::unique_ptr<PurchasedProductDetails const> >* purchasedProductDetails = nullptr;
         EBUS_EVENT_RESULT(purchasedProductDetails, InAppPurchases::InAppPurchasesRequestBus, GetCachedPurchasedProductInfo);
-#if defined(AZ_PLATFORM_APPLE_IOS)
         if (purchasedProductDetails != nullptr && m_purchasedProductInfoIndex >= 0 && m_purchasedProductInfoIndex < purchasedProductDetails->size())
         {
             const PurchasedProductDetailsApple* purchasedProductsApple = azrtti_cast<const PurchasedProductDetailsApple*>(purchasedProductDetails->at(m_purchasedProductInfoIndex).get());
-            return purchasedProductsApple->GetHasDownloads();
+            if (purchasedProductsApple)
+            {
+                return purchasedProductsApple->GetHasDownloads();
+            }
         }
-#endif
 
         return false;
     }

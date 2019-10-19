@@ -194,6 +194,7 @@ void UiDynamicLayoutComponent::Reflect(AZ::ReflectContext* context)
                     "A component that clones the prototype element and resizes the layout. The first child element acts as the prototype element.");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiDynamicLayout.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiDynamicLayout.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -209,7 +210,6 @@ void UiDynamicLayoutComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiDynamicLayoutBus>("UiDynamicLayoutBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("SetNumChildElements", &UiDynamicLayoutBus::Events::SetNumChildElements);
     }
 }
@@ -270,11 +270,27 @@ void UiDynamicLayoutComponent::SetPrototypeElementActive(bool active)
         {
             if (active)
             {
-                child->Activate();
+                if (child->GetState() != AZ::Entity::ES_ACTIVE)
+                {
+                    child->Activate();
+                }
+                else
+                {
+                    AZ_Warning("UiDynamicLayoutComponent", false, "Entity %s [%s] is already activated, which is not expected. Make sure you are not calling SetNumChildElements from a Script Activate function.",
+                        child->GetName().c_str(), child->GetId().ToString().c_str());
+                }
             }
             else
             {
-                child->Deactivate();
+                if (child->GetState() == AZ::Entity::ES_ACTIVE)
+                {
+                    child->Deactivate();
+                }
+                else
+                {
+                    AZ_Warning("UiDynamicLayoutComponent", false, "Entity %s [%s] is already deactivated, which is not expected.",
+                        child->GetName().c_str(), child->GetId().ToString().c_str());
+                }
             }
         }
     }

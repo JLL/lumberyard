@@ -32,7 +32,7 @@ namespace AZ
             while (!m_trackedFiles.empty())
             {
                 HandleType fileHandle = m_trackedFiles.begin()->first;
-                AZ_Warning("File IO", "File handle still open while CryPakFileIO being closed: %s", m_trackedFiles.begin()->second.c_str());
+                AZ_Warning("File IO", false, "File handle still open while CryPakFileIO being closed: %s", m_trackedFiles.begin()->second.c_str());
                 Close(fileHandle);
             }
         }
@@ -499,7 +499,7 @@ namespace AZ
             if (fileIt != m_trackedFiles.end())
             {
                 CRY_ASSERT(filenameSize >= fileIt->second.length());
-                strncpy(filename, fileIt->second.c_str(), fileIt->second.length());
+                azstrncpy(filename, filenameSize, fileIt->second.c_str(), fileIt->second.length());
                 return true;
             }
 

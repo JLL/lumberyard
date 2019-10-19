@@ -12,125 +12,39 @@
 #pragma once
 
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#undef AZ_RESTRICTED_SECTION
-#define UNITTEST_H_SECTION_1 1
-#define UNITTEST_H_SECTION_2 2
-#define UNITTEST_H_SECTION_3 3
-#define UNITTEST_H_SECTION_4 4
+#if !defined(AZ_TESTS_ENABLED)
+#error UnitTest.h should not be included except when the unit tests are enabled (via compiling a _TEST configuration).
 #endif
 
-#if defined(AZ_TESTS_ENABLED)
 #include <AzTest/AzTest.h>
-#endif
 
-#include <stdio.h>
+#include <csignal>
 
-
+#include <AzCore/Memory/AllocatorManager.h>
 #include <AzCore/Memory/OSAllocator.h>
 #include <AzCore/base.h>
-#include <AzCore/std/typetraits/alignment_of.h>
 #include <AzCore/std/typetraits/has_member_function.h>
 #include <AzCore/Debug/Trace.h>
+#include <AzCore/Debug/TraceMessageBus.h>
 
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_LINUX) || defined(AZ_PLATFORM_ANDROID)
-#   include <malloc.h>
-#elif defined(AZ_PLATFORM_APPLE)
-#    include <malloc/malloc.h>
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION UNITTEST_H_SECTION_1
-#include AZ_RESTRICTED_FILE(UnitTest_h, AZ_RESTRICTED_PLATFORM)
-#endif
-
-//////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////
-// We need a debug allocator... to guarantee we will not call new or anything
-// because they might me overloaded
-namespace UnitTest
+ // FW declare some GTest internal symbol so we can add to the gtest output
+namespace testing
 {
-    void* DebugAlignAlloc(size_t byteSize, size_t alignment);
-    void DebugAlignFree(void* ptr);
-
-    template<class T>
-    class DebugAllocatorSTL
+    namespace internal
     {
-    public:
-        typedef T        value_type;
-        typedef T*       pointer;
-        typedef const T* const_pointer;
-        typedef T&       reference;
-        typedef const T& const_reference;
-
-        typedef std::size_t size_type;
-        typedef std::ptrdiff_t difference_type;
-
-        template<class Other>
-        struct rebind
-        {
-            typedef DebugAllocatorSTL<Other> other;
+        enum GTestColor {
+            COLOR_DEFAULT,
+            COLOR_RED,
+            COLOR_GREEN,
+            COLOR_YELLOW
         };
 
-        pointer address(reference value) const              { return (&value); }
-        const_pointer address(const_reference value) const  { return (&value); }
-        DebugAllocatorSTL() {}  // construct default allocator (do nothing)
-        DebugAllocatorSTL(const DebugAllocatorSTL<T>&)  {}
-
-        template<class Other>
-        DebugAllocatorSTL(const DebugAllocatorSTL<Other>&) {}
-
-        template<class Other>
-        DebugAllocatorSTL<T>& operator=(const DebugAllocatorSTL<Other>&) { return *this; }
-
-        pointer allocate(size_type count)
-        {
-            return (pointer)DebugAlignAlloc(count * sizeof(T), AZStd::alignment_of<T>::value);
-        }
-        void deallocate(pointer ptr, size_type)
-        {
-            DebugAlignFree(ptr);
-        }
-        pointer allocate(size_type count, const void*)  {   return allocate(count); }
-        void construct(pointer ptr, const T& value)     {   new(ptr)    T(value); }
-        void destroy(pointer ptr)                       {   (void)ptr; ptr->~T(); }
-        size_type max_size() const                      { return 1000000; }
-    };
-
-    template<class T>
-    AZ_FORCE_INLINE bool operator==(const DebugAllocatorSTL<T>& a, const DebugAllocatorSTL<T>& b)
-    {
-        (void)a;
-        (void)b;
-        return true;
-    }
-
-    template<class T>
-    AZ_FORCE_INLINE bool operator!=(const DebugAllocatorSTL<T>& a, const DebugAllocatorSTL<T>& b)
-    {
-        (void)a;
-        (void)b;
-        return false;
+        extern void ColoredPrintf(GTestColor color, const char* fmt, ...);
     }
 }
 
-#ifdef AZ_COMPILER_MSVC
-#   pragma warning( push )
-#   pragma warning( disable : 4275 ) // warning C4275: non dll-interface class 'stdext::exception' used as base for dll-interface class 'std::bad_cast'
-#   pragma warning( disable : 4530 ) // warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
-#endif
-#include <vector>
-#ifdef AZ_COMPILER_MSVC
-#   pragma warning( pop )
-#endif
-#define TESTS_CONTAINER(_Type) std::vector < _Type, UnitTest::DebugAllocatorSTL<_Type> >
-
 namespace UnitTest
 {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION UNITTEST_H_SECTION_2
-#include AZ_RESTRICTED_FILE(UnitTest_h, AZ_RESTRICTED_PLATFORM)
-#endif
-
-
     class TestRunner
     {
     public:
@@ -142,9 +56,7 @@ namespace UnitTest
 
         void ProcessAssert(const char* /*expression*/, const char* /*file*/, int /*line*/, bool expressionTest)
         {
-#if defined (AZ_TESTS_ENABLED)
             ASSERT_TRUE(m_isAssertTest);
-#endif
 
             if (m_isAssertTest)
             {
@@ -163,44 +75,14 @@ namespace UnitTest
         int  StopAssertTests()
         {
             m_isAssertTest = false;
-            return m_numAssertsFailed;
+            const int numAssertsFailed = m_numAssertsFailed;
+            m_numAssertsFailed = 0;
+            return numAssertsFailed;
         }
 
         bool m_isAssertTest;
         int  m_numAssertsFailed;
     };
-
-    inline void* DebugAlignAlloc(size_t byteSize, size_t alignment)
-    {
-#if AZ_TRAIT_SUPPORT_WINDOWS_ALIGNED_MALLOC
-        return _aligned_offset_malloc(byteSize, alignment, 0);
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION UNITTEST_H_SECTION_3
-#include AZ_RESTRICTED_FILE(UnitTest_h, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
-        return memalign(alignment, byteSize);
-#endif
-    }
-
-    inline void DebugAlignFree(void* ptr)
-    {
-#if AZ_TRAIT_SUPPORT_WINDOWS_ALIGNED_MALLOC
-        _aligned_free(ptr);
-#define AZ_RESTRICTED_SECTION_IMPLEMENTED
-#elif defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION UNITTEST_H_SECTION_4
-#include AZ_RESTRICTED_FILE(UnitTest_h, AZ_RESTRICTED_PLATFORM)
-#endif
-#if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
-#undef AZ_RESTRICTED_SECTION_IMPLEMENTED
-#else
-        free(ptr);
-#endif
-    }
 
     AZ_HAS_MEMBER(OperatorBool, operator bool, bool, ());
 
@@ -241,9 +123,115 @@ namespace UnitTest
             return t != nullptr;
         }
     };
+
+    // utility classes that you can derive from or contain, which suppress AZ_Asserts
+    // and AZ_Errors to the below macros (processAssert, etc)
+    // If TraceBusHook or TraceBusRedirector have been started in your unit tests, 
+    //  use AZ_TEST_START_TRACE_SUPPRESSION and AZ_TEST_STOP_TRACE_SUPPRESSION(numExpectedAsserts) macros to perform AZ_Assert and AZ_Error suppression
+    class TraceBusRedirector
+        : public AZ::Debug::TraceMessageBus::Handler
+    {
+        bool OnPreAssert(const char* file, int line, const char* /* func */, const char* message) override
+        {
+            if (UnitTest::TestRunner::Instance().m_isAssertTest)
+            {
+                UnitTest::TestRunner::Instance().ProcessAssert(message, file, line, false);
+            }
+            else
+            {
+                GTEST_TEST_BOOLEAN_(false, message, false, true, GTEST_NONFATAL_FAILURE_);
+            }
+            return true;
+        }
+        bool OnAssert(const char* /*message*/) override
+        {
+            return true; // stop processing
+        }
+        bool OnPreError(const char* /*window*/, const char* file, int line, const char* /*func*/, const char* message) override
+        {
+            if (UnitTest::TestRunner::Instance().m_isAssertTest)
+            {
+                UnitTest::TestRunner::Instance().ProcessAssert(message, file, line, false);
+                return true;
+            }
+            return false;
+        }
+        bool OnError(const char* /*window*/, const char* message) override
+        {
+            if (UnitTest::TestRunner::Instance().m_isAssertTest)
+            {
+                UnitTest::TestRunner::Instance().ProcessAssert(message, __FILE__, __LINE__, UnitTest::AssertionExpr(false));
+            }
+            else
+            {
+                GTEST_TEST_BOOLEAN_(false, message, false, true, GTEST_NONFATAL_FAILURE_);
+            }
+            return true; // stop processing
+        }
+        bool OnPreWarning(const char* /*window*/, const char* /*fileName*/, int /*line*/, const char* /*func*/, const char* /*message*/) override
+        {
+            return false;
+        }
+        bool OnWarning(const char* /*window*/, const char* /*message*/) override
+        {
+            return false;
+        }
+
+        bool OnOutput(const char* /*window*/, const char* /*message*/) override
+        {
+            return true;
+        }
+
+        bool OnPrintf(const char* window, const char* message) override
+        {
+            if (AZStd::string_view(window) == "Memory") // We want to print out the memory leak's stack traces
+            {
+                testing::internal::ColoredPrintf(testing::internal::COLOR_RED, "[  MEMORY  ] %s", message); 
+            }
+            return true; 
+        }
+    };
+
+    class TraceBusHook
+        : public AZ::Test::ITestEnvironment
+        , public TraceBusRedirector
+    {
+    public:
+        void SetupEnvironment() override
+        {
+            AZ::AllocatorInstance<AZ::OSAllocator>::Create(); // used by the bus
+
+            BusConnect();
+        }
+
+        void TeardownEnvironment() override
+        {
+            BusDisconnect();
+
+            AZ::AllocatorInstance<AZ::OSAllocator>::Destroy(); // used by the bus
+
+            // At this point, the AllocatorManager should not have any allocators left. If we happen to have any,
+            // we exit the test with an error code (this way the test process does not return 0 and the test run
+            // is considered a failure).
+            AZ::AllocatorManager& allocatorManager = AZ::AllocatorManager::Instance();
+            const int numAllocators = allocatorManager.GetNumAllocators();
+            if (numAllocators)
+            {
+                // Print the name of the allocators still in the AllocatorManager
+                testing::internal::ColoredPrintf(testing::internal::COLOR_RED, "[     FAIL ] There are still %d registered allocators:\n", numAllocators);
+                for (int i = 0; i < numAllocators; ++i)
+                {
+                    testing::internal::ColoredPrintf(testing::internal::COLOR_RED, "\t\t%s\n", allocatorManager.GetAllocator(i)->GetName());
+                }
+
+                // Force a death test
+                std::raise(SIGTERM);
+            }
+        }
+    };
+
 }
 
-#if defined(AZ_TESTS_ENABLED)
 
 #define AZ_TEST_ASSERT(exp) { \
     if (UnitTest::TestRunner::Instance().m_isAssertTest) \
@@ -255,25 +243,27 @@ namespace UnitTest
 
 #define AZ_TEST_STATIC_ASSERT(_Exp)                         AZ_STATIC_ASSERT(_Exp, "Test Static Assert")
 #ifdef AZ_ENABLE_TRACING
-#   define AZ_TEST_START_ASSERTTEST                         UnitTest::TestRunner::Instance().StartAssertTests()
-#   define AZ_TEST_STOP_ASSERTTEST(_NumTriggeredAsserts)    GTEST_ASSERT_EQ(_NumTriggeredAsserts, UnitTest::TestRunner::Instance().StopAssertTests())
+/*
+ * The AZ_TEST_START_ASSERTTEST and AZ_TEST_STOP_ASSERTTEST macros have been deprecated and will be removed in a future Lumberyard release.
+ * The AZ_TEST_START_TRACE_SUPPRESSION and AZ_TEST_STOP_TRACE_SUPPRESSION is the recommend macros
+ * The reason for the deprecation is that the AZ_TEST_(START|STOP)_ASSERTTEST implies that they should be used to for writing assert unit test
+ * where the asserts themselves are expected to cause the test process to terminate.
+ * In reality these macros are for suppression of the AZ_Error(and AZ_Assert for now) trace messages.
+ * For writing assert unit test the GTEST EXPECT/ASSERT_DEATH_TEST macro should be used instead
+*/
+#   define AZ_TEST_START_TRACE_SUPPRESSION                      UnitTest::TestRunner::Instance().StartAssertTests()
+#   define AZ_TEST_STOP_TRACE_SUPPRESSION(_NumTriggeredTraceMessages) GTEST_ASSERT_EQ(_NumTriggeredTraceMessages, UnitTest::TestRunner::Instance().StopAssertTests())
+#   define AZ_TEST_START_ASSERTTEST                             AZ_TEST_START_TRACE_SUPPRESSION
+#   define AZ_TEST_STOP_ASSERTTEST(_NumTriggeredTraceMessages)  AZ_TEST_STOP_TRACE_SUPPRESSION(_NumTriggeredTraceMessages)
 #else
 // we can't test asserts, since they are not enabled for non trace-enabled builds!
+#   define AZ_TEST_START_TRACE_SUPPRESSION
+#   define AZ_TEST_STOP_TRACE_SUPPRESSION(_NumTriggeredTraceMessages)
 #   define AZ_TEST_START_ASSERTTEST
-#   define AZ_TEST_STOP_ASSERTTEST(_NumTriggeredAsserts)
+#   define AZ_TEST_STOP_ASSERTTEST(_NumTriggeredTraceMessages)
 #endif
-
-#else
-
-#define AZ_TEST_ASSERT(...)
-#define AZ_TEST_ASSERT_CLOSE(...)
-#define AZ_TEST_ASSERT_FLOAT_CLOSE(...)
-#define AZ_TEST_STATIC_ASSERT(...)
-#define AZ_TEST_START_ASSERTTEST
-#define AZ_TEST_STOP_ASSERTTEST(...)
-
-#endif // AZ_TESTS_ENABLED
 
 #define AZ_TEST(...)
 #define AZ_TEST_SUITE(...)
 #define AZ_TEST_SUITE_END
+

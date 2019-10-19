@@ -15,6 +15,7 @@
 // include the required headers
 #include "EMotionFXConfig.h"
 #include "BaseObject.h"
+#include <MCore/Source/Array.h>
 
 
 namespace EMotionFX
@@ -43,7 +44,7 @@ namespace EMotionFX
     class EMFX_API SubMesh
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(SubMesh, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_GEOMETRY_MESHES);
+        AZ_CLASS_ALLOCATOR_DECL
 
     public:
         /**

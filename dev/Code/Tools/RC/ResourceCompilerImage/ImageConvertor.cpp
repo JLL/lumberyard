@@ -11,7 +11,7 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "IRCLog.h"
 #include "ImageConvertor.h"
@@ -119,11 +119,6 @@ void CImageConvertor::Init(const ConvertorInitContext& context)
 ICompiler* CImageConvertor::CreateCompiler()
 {
     return new CImageCompiler(m_presetAliases);
-}
-
-bool CImageConvertor::SupportsMultithreading() const
-{
-    return true;
 }
 
 const char* CImageConvertor::GetExt(int index) const

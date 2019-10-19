@@ -29,16 +29,15 @@ namespace EMotionFX
      * The group contains a list of node numbers, which index inside the actor where the groups belong to.
      * It is possible to enable and disable individual groups. Disabling a group will skip all calculations done on the nodes that are inside the group.
      * You can enable and disable individual groups per ActorInstance object.
-     * Skipped calculations include the calculation of local space matrices, forward kinematics to calculate global space matrices and blending.
+     * Skipped calculations include the calculation of local space matrices, forward kinematics to calculate world space matrices and blending.
      * It is important that you do not use the nodes that are disabled. For example if a given node is disabled and you try to get its transformation, then this transformation
      * might contain incorrect or even uninitialized data.
      */
     class EMFX_API NodeGroup
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(NodeGroup, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_NODESMISC);
-
     public:
+        AZ_CLASS_ALLOCATOR_DECL
         /**
          * The default creation method.
          * This does not assign a name and there will be nodes inside this group on default.
@@ -61,12 +60,6 @@ namespace EMotionFX
          * @param enabledOnDefault Set to true (default) when the nodes inside this group should be enabled on default.
          */
         static NodeGroup* Create(const char* groupName, uint16 numNodes, bool enabledOnDefault = true);
-
-        /**
-         * Clone the controller.
-         * @result A cloned version of this group. This group will contain the same nodes, same default enabled state and the same name.
-         */
-        NodeGroup* Clone();
 
         /**
          * Set the name of the group. Please keep in mind that group names must be unique inside the Actor objects. So you should not have two or more groups with the same name.
@@ -119,7 +112,7 @@ namespace EMotionFX
          * The reason why you specify an ActorInstance as parameter is because the node groups are stored inside the Actor objects, while you can enable and disable
          * nodes individually per ActorInstance.
          * Nodes that are enabled will be processed by fully inside the EMotion FX pipeline. This includes things like motion sampling, local space matrix construction,
-         * global space transformation calculations and blending operations. Disabled nodes will skip those calculations.
+         * world space transformation calculations and blending operations. Disabled nodes will skip those calculations.
          * @param targetActorInstance The actor instance object in which we will enable all the nodes that are inside this group.
          */
         void EnableNodes(ActorInstance* targetActorInstance);
@@ -129,7 +122,7 @@ namespace EMotionFX
          * The reason why you specify an ActorInstance as parameter is because the node groups are stored inside the Actor objects, while you can enable and disable
          * nodes individually per ActorInstance.
          * Nodes that are enabled will be processed by fully inside the EMotion FX pipeline. This includes things like motion sampling, local space matrix construction,
-         * global space transformation calculations and blending operations. Disabled nodes will skip those calculations.
+         * world space transformation calculations and blending operations. Disabled nodes will skip those calculations.
          * @param targetActorInstance The actor instance object in which we will enable all the nodes that are inside this group.
          */
         void DisableNodes(ActorInstance* targetActorInstance);
@@ -183,37 +176,40 @@ namespace EMotionFX
          */
         void SetIsEnabledOnDefault(bool enabledOnDefault);
 
+        /**
+        * The default constructor.
+        * This does not assign a name and there will be nodes inside this group on default.
+        * Also the default enabled state is set to true.
+        */
+        NodeGroup();
+
+        /**
+        * Extended constructor.
+        * @param groupName The name of the group. Please keep in mind that it is not allowed to have two groups with the same name inside an Actor.
+        * @param enabledOnDefault Set to true (default) when the nodes inside this group should be enabled on default.
+        */
+        NodeGroup(const char* groupName, bool enabledOnDefault = true);
+
+        /**
+        * Another extended constructor.
+        * @param groupName The name of the group. Please keep in mind that it is not allowed to have two groups with the same name inside an Actor.
+        * @param numNodes The number of nodes to create inside the group. This will have all uninitialized values for the node indices in the group, so be sure that you
+        *                 set them all to some valid node index using the NodeGroup::SetNode(...) method. This method automatically calls the SetNumNodes(...) method.
+        * @param enabledOnDefault Set to true (default) when the nodes inside this group should be enabled on default.
+        */
+        NodeGroup(const char* groupName, uint16 numNodes, bool enabledOnDefault = true);
+
+        /**
+        * The destructor.
+        */
+        ~NodeGroup();
+
+        NodeGroup(const NodeGroup& aOther);
+        NodeGroup& operator=(const NodeGroup& aOther);
+
     private:
         AZStd::string               mName;              /**< The name of the group. */
         MCore::SmallArray<uint16>   mNodes;             /**< The node index numbers that are inside this group. */
         bool                        mEnabledOnDefault;  /**< Specifies whether this group is enabled on default (true) or disabled (false). With on default we mean after directly after the actor instance using this group has been created. */
-
-        /**
-         * The default constructor.
-         * This does not assign a name and there will be nodes inside this group on default.
-         * Also the default enabled state is set to true.
-         */
-        NodeGroup();
-
-        /**
-         * Extended constructor.
-         * @param groupName The name of the group. Please keep in mind that it is not allowed to have two groups with the same name inside an Actor.
-         * @param enabledOnDefault Set to true (default) when the nodes inside this group should be enabled on default.
-         */
-        NodeGroup(const char* groupName, bool enabledOnDefault = true);
-
-        /**
-         * Another extended constructor.
-         * @param groupName The name of the group. Please keep in mind that it is not allowed to have two groups with the same name inside an Actor.
-         * @param numNodes The number of nodes to create inside the group. This will have all uninitialized values for the node indices in the group, so be sure that you
-         *                 set them all to some valid node index using the NodeGroup::SetNode(...) method. This method automatically calls the SetNumNodes(...) method.
-         * @param enabledOnDefault Set to true (default) when the nodes inside this group should be enabled on default.
-         */
-        NodeGroup(const char* groupName, uint16 numNodes, bool enabledOnDefault = true);
-
-        /**
-         * The destructor.
-         */
-        ~NodeGroup();
     };
 }   // namespace EMotionFX

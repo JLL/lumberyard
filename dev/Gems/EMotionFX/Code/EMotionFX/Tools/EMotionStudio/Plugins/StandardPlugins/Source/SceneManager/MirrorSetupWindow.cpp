@@ -12,8 +12,10 @@
 
 #include "MirrorSetupWindow.h"
 #include <AzCore/Casting/numeric_cast.h>
+#include <AzQtComponents/Components/FilteredSearchWidget.h>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QPushButton>
 #include <QListWidget>
 #include <QTableWidget>
@@ -31,9 +33,10 @@
 #include <EMotionFX/CommandSystem/Source/CommandManager.h>
 #include <MysticQt/Source/MysticQtManager.h>
 #include "SceneManagerPlugin.h"
-#include "../../../../EMStudioSDK/Source/NotificationWindow.h"
-#include "../../../../EMStudioSDK/Source/EMStudioManager.h"
-#include "../../../../EMStudioSDK/Source/MainWindow.h"
+#include <EMotionStudio/EMStudioSDK/Source/NotificationWindow.h>
+#include <EMotionStudio/EMStudioSDK/Source/EMStudioManager.h>
+#include <EMotionStudio/EMStudioSDK/Source/MainWindow.h>
+#include <EMotionStudio/EMStudioSDK/Source/FileManager.h>
 
 
 namespace EMStudio
@@ -74,17 +77,17 @@ namespace EMStudio
         mainLayout->addLayout(toolBarLayout);
         mButtonOpen = new QPushButton();
         EMStudioManager::MakeTransparentButton(mButtonOpen,    "/Images/Icons/Open.png",       "Load and apply a mapping template.");
-        connect(mButtonOpen, SIGNAL(clicked()), this, SLOT(OnLoadMapping()));
+        connect(mButtonOpen, &QPushButton::clicked, this, &MirrorSetupWindow::OnLoadMapping);
         mButtonSave = new QPushButton();
         EMStudioManager::MakeTransparentButton(mButtonSave,    "/Images/Menu/FileSave.png",    "Save the currently setup mapping as template.");
-        connect(mButtonSave, SIGNAL(clicked()), this, SLOT(OnSaveMapping()));
+        connect(mButtonSave, &QPushButton::clicked, this, &MirrorSetupWindow::OnSaveMapping);
         mButtonClear = new QPushButton();
         EMStudioManager::MakeTransparentButton(mButtonClear,   "/Images/Icons/Clear.png",      "Clear the currently setup mapping entirely.");
-        connect(mButtonClear, SIGNAL(clicked()), this, SLOT(OnClearMapping()));
+        connect(mButtonClear, &QPushButton::clicked, this, &MirrorSetupWindow::OnClearMapping);
 
         mButtonGuess = new QPushButton();
         EMStudioManager::MakeTransparentButton(mButtonGuess,   "/Images/Icons/Character.png",  "Perform name based mapping.");
-        connect(mButtonGuess, SIGNAL(clicked()), this, SLOT(OnBestGuess()));
+        connect(mButtonGuess, &QPushButton::clicked, this, &MirrorSetupWindow::OnBestGuess);
 
         toolBarLayout->addWidget(mButtonOpen, 0, Qt::AlignLeft);
         toolBarLayout->addWidget(mButtonSave, 0, Qt::AlignLeft);
@@ -134,10 +137,9 @@ namespace EMStudio
         QWidget* spacerWidget = new QWidget();
         spacerWidget->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
         curSearchLayout->addWidget(spacerWidget);
-        curSearchLayout->addWidget(new QLabel("Find:"), 0, Qt::AlignRight);
-        mCurrentSearchButton = new MysticQt::SearchButton(this, MysticQt::GetMysticQt()->FindIcon("Images/Icons/SearchClearButton2.png"));
-        connect(mCurrentSearchButton->GetSearchEdit(), SIGNAL(textChanged(const QString&)), this, SLOT(CurrentFilterStringChanged(const QString&)));
-        curSearchLayout->addWidget(mCurrentSearchButton);
+        m_searchWidgetCurrent = new AzQtComponents::FilteredSearchWidget(this);
+        connect(m_searchWidgetCurrent, &AzQtComponents::FilteredSearchWidget::TextFilterChanged, this, &MirrorSetupWindow::OnCurrentTextFilterChanged);
+        curSearchLayout->addWidget(m_searchWidgetCurrent);
         curSearchLayout->setSpacing(6);
         curSearchLayout->setMargin(0);
 
@@ -168,8 +170,8 @@ namespace EMStudio
         mCurrentList->horizontalHeader()->setStretchLastSection(true);
         mCurrentList->horizontalHeader()->setSortIndicatorShown(false);
         mCurrentList->horizontalHeader()->setSectionsClickable(false);
-        connect(mCurrentList, SIGNAL(itemSelectionChanged()), this, SLOT(OnCurrentListSelectionChanged()));
-        connect(mCurrentList, SIGNAL(itemDoubleClicked(QTableWidgetItem*)), this, SLOT(OnCurrentListDoubleClicked(QTableWidgetItem*)));
+        connect(mCurrentList, &QTableWidget::itemSelectionChanged, this, &MirrorSetupWindow::OnCurrentListSelectionChanged);
+        connect(mCurrentList, &QTableWidget::itemDoubleClicked, this, &MirrorSetupWindow::OnCurrentListDoubleClicked);
         leftListLayout->addWidget(mCurrentList);
 
         // add link button middle part
@@ -177,7 +179,7 @@ namespace EMStudio
         middleLayout->setMargin(0);
         topPartLayout->addLayout(middleLayout);
         QPushButton* linkButton = new QPushButton("link");
-        connect(linkButton, SIGNAL(clicked()), this, SLOT(OnLinkPressed()));
+        connect(linkButton, &QPushButton::clicked, this, &MirrorSetupWindow::OnLinkPressed);
         middleLayout->addWidget(linkButton);
 
         // right listbox part
@@ -199,10 +201,9 @@ namespace EMStudio
         spacerWidget = new QWidget();
         spacerWidget->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
         sourceSearchLayout->addWidget(spacerWidget);
-        sourceSearchLayout->addWidget(new QLabel("Find:"), 0, Qt::AlignRight);
-        mSourceSearchButton = new MysticQt::SearchButton(this, MysticQt::GetMysticQt()->FindIcon("Images/Icons/SearchClearButton2.png"));
-        connect(mSourceSearchButton->GetSearchEdit(), SIGNAL(textChanged(const QString&)), this, SLOT(SourceFilterStringChanged(const QString&)));
-        sourceSearchLayout->addWidget(mSourceSearchButton);
+        m_searchWidgetSource = new AzQtComponents::FilteredSearchWidget(this);
+        connect(m_searchWidgetSource, &AzQtComponents::FilteredSearchWidget::TextFilterChanged, this, &MirrorSetupWindow::OnSourceTextFilterChanged);
+        sourceSearchLayout->addWidget(m_searchWidgetSource);
         sourceSearchLayout->setSpacing(6);
         sourceSearchLayout->setMargin(0);
 
@@ -233,7 +234,7 @@ namespace EMStudio
         mSourceList->horizontalHeader()->setStretchLastSection(true);
         mSourceList->horizontalHeader()->setSortIndicatorShown(false);
         mSourceList->horizontalHeader()->setSectionsClickable(false);
-        connect(mSourceList, SIGNAL(itemSelectionChanged()), this, SLOT(OnSourceListSelectionChanged()));
+        connect(mSourceList, &QTableWidget::itemSelectionChanged, this, &MirrorSetupWindow::OnSourceListSelectionChanged);
         rightListLayout->addWidget(mSourceList);
 
         // create the mapping table
@@ -281,8 +282,8 @@ namespace EMStudio
         mMappingTable->horizontalHeader()->setStretchLastSection(true);
         mMappingTable->horizontalHeader()->setSortIndicatorShown(false);
         mMappingTable->horizontalHeader()->setSectionsClickable(false);
-        connect(mMappingTable, SIGNAL(itemDoubleClicked(QTableWidgetItem*)), this, SLOT(OnMappingTableDoubleClicked(QTableWidgetItem*)));
-        connect(mMappingTable, SIGNAL(itemSelectionChanged()), this, SLOT(OnMappingTableSelectionChanged()));
+        connect(mMappingTable, &QTableWidget::itemDoubleClicked, this, &MirrorSetupWindow::OnMappingTableDoubleClicked);
+        connect(mMappingTable, &QTableWidget::itemSelectionChanged, this, &MirrorSetupWindow::OnMappingTableSelectionChanged);
     }
 
 
@@ -312,7 +313,7 @@ namespace EMStudio
         // get the currently selected actor
         CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
         EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        if (!currentActor)
         {
             return;
         }
@@ -425,12 +426,11 @@ namespace EMStudio
     void MirrorSetupWindow::Reinit(bool reInitMap)
     {
         // clear the filter strings
-        mCurrentSearchButton->GetSearchEdit()->setText("");
-        mSourceSearchButton->GetSearchEdit()->setText("");
+        m_searchWidgetCurrent->ClearTextFilter();
+        m_searchWidgetSource->ClearTextFilter();
 
         // get the currently selected actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
 
         // extract the list of bones
         if (currentActor)
@@ -460,8 +460,8 @@ namespace EMStudio
         FillMappingTable(currentActor, currentActor);
 
         // enable or disable the filter fields
-        mCurrentSearchButton->setEnabled((currentActor));
-        mSourceSearchButton->setEnabled((currentActor));
+        m_searchWidgetCurrent->setEnabled((currentActor));
+        m_searchWidgetSource->setEnabled((currentActor));
 
         //
         UpdateToolBar();
@@ -469,27 +469,23 @@ namespace EMStudio
 
 
     // current actor filter change
-    void MirrorSetupWindow::CurrentFilterStringChanged(const QString& text)
+    void MirrorSetupWindow::OnCurrentTextFilterChanged(const QString& text)
     {
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        FillCurrentListWidget(currentActor, text);
+        FillCurrentListWidget(GetSelectedActor(), text);
     }
 
 
     // source actor filter change
-    void MirrorSetupWindow::SourceFilterStringChanged(const QString& text)
+    void MirrorSetupWindow::OnSourceTextFilterChanged(const QString& text)
     {
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        FillSourceListWidget(currentActor, text);
+        FillSourceListWidget(GetSelectedActor(), text);
     }
 
 
     // fill the current list widget
     void MirrorSetupWindow::FillCurrentListWidget(EMotionFX::Actor* actor, const QString& filterString)
     {
-        if (actor == nullptr)
+        if (!actor)
         {
             mCurrentList->setRowCount(0);
             return;
@@ -558,7 +554,7 @@ namespace EMStudio
     // fill the source list widget
     void MirrorSetupWindow::FillSourceListWidget(EMotionFX::Actor* actor, const QString& filterString)
     {
-        if (actor == nullptr)
+        if (!actor)
         {
             mSourceList->setRowCount(0);
             return;
@@ -627,7 +623,7 @@ namespace EMStudio
     // fill the mapping table
     void MirrorSetupWindow::FillMappingTable(EMotionFX::Actor* currentActor, EMotionFX::Actor* sourceActor)
     {
-        if (currentActor == nullptr)
+        if (!currentActor)
         {
             mMappingTable->setRowCount(0);
             return;
@@ -673,7 +669,7 @@ namespace EMStudio
         // get the names
         QTableWidgetItem* curItem = mCurrentList->currentItem();
         QTableWidgetItem* sourceItem = mSourceList->currentItem();
-        if (curItem == nullptr || sourceItem == nullptr)
+        if (!curItem || !sourceItem)
         {
             return;
         }
@@ -689,8 +685,7 @@ namespace EMStudio
         }
 
         // get the currently selected actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
         MCORE_ASSERT(currentActor);
 
         EMotionFX::Node* currentNode = currentActor->GetSkeleton()->FindNodeByName(currentNodeName.c_str());
@@ -704,8 +699,7 @@ namespace EMStudio
     // perform the mapping
     void MirrorSetupWindow::PerformMapping(uint32 currentNodeIndex, uint32 sourceNodeIndex)
     {
-        const CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
 
         // update the map
         const uint32 oldSourceIndex = mMap[currentNodeIndex];
@@ -721,7 +715,7 @@ namespace EMStudio
             //  continue;
 
             QTableWidgetItem* mappedItem = mCurrentList->item(rowIndex, 0);
-            if (mappedItem == nullptr)
+            if (!mappedItem)
             {
                 mappedItem = new QTableWidgetItem();
                 mCurrentList->setItem(rowIndex, 0, mappedItem);
@@ -750,7 +744,7 @@ namespace EMStudio
                 //  continue;
 
                 QTableWidgetItem* mappedItem = mSourceList->item(rowIndex, 0);
-                if (mappedItem == nullptr)
+                if (!mappedItem)
                 {
                     mappedItem = new QTableWidgetItem();
                     mSourceList->setItem(rowIndex, 0, mappedItem);
@@ -780,7 +774,7 @@ namespace EMStudio
                     //  continue;
 
                     QTableWidgetItem* mappedItem = mSourceList->item(rowIndex, 0);
-                    if (mappedItem == nullptr)
+                    if (!mappedItem)
                     {
                         mappedItem = new QTableWidgetItem();
                         mSourceList->setItem(rowIndex, 0, mappedItem);
@@ -800,7 +794,7 @@ namespace EMStudio
 
         // update the mapping table
         QTableWidgetItem* item = mMappingTable->item(currentNodeIndex, 1);
-        if (item == nullptr && sourceNodeIndex != MCORE_INVALIDINDEX32)
+        if (!item && sourceNodeIndex != MCORE_INVALIDINDEX32)
         {
             item = new QTableWidgetItem();
             mMappingTable->setItem(currentNodeIndex, 1, item);
@@ -865,9 +859,8 @@ namespace EMStudio
     void MirrorSetupWindow::OnLoadMapping()
     {
         // make sure we have both a current actor and source actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        EMotionFX::Actor* currentActor = GetSelectedActor();
+        if (!currentActor)
         {
             AZ_Warning("EMotionFX", false, "There is no current actor set, a mapping cannot be loaded, please select an actor first!");
             QMessageBox::critical(this, "Cannot Save!", "You need to select a current actor before you can load and apply this node map!", QMessageBox::Ok);
@@ -884,7 +877,7 @@ namespace EMStudio
         // load the node map file from disk
         MCore::LogInfo("Loading node map from file '%s'", filename.c_str());
         EMotionFX::NodeMap* nodeMap = EMotionFX::GetImporter().LoadNodeMap(filename.c_str());
-        if (nodeMap == nullptr)
+        if (!nodeMap)
         {
             AZ_Warning("EMotionFX", false, "Failed to load the node map!");
             QMessageBox::warning(this, "Failed Loading", "Loading of the node map file failed.", QMessageBox::Ok);
@@ -915,14 +908,14 @@ namespace EMStudio
         {
             // find the current node
             EMotionFX::Node* currentNode = currentActor->GetSkeleton()->FindNodeByName(nodeMap->GetFirstName(i));
-            if (currentNode == nullptr)
+            if (!currentNode)
             {
                 continue;
             }
 
             // find the source node
             EMotionFX::Node* sourceNode = currentActor->GetSkeleton()->FindNodeByName(nodeMap->GetSecondName(i));
-            if (sourceNode == nullptr)
+            if (!sourceNode)
             {
                 continue;
             }
@@ -946,9 +939,8 @@ namespace EMStudio
     void MirrorSetupWindow::OnSaveMapping()
     {
         // get the currently selected actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        EMotionFX::Actor* currentActor = GetSelectedActor();
+        if (!currentActor)
         {
             AZ_Warning("EMotionFX", false, "There is no current actor set, there is nothing to save!");
             QMessageBox::warning(this, "Nothing To Save!", "You need to select a current actor before you can save a map!", QMessageBox::Ok);
@@ -1018,8 +1010,7 @@ namespace EMStudio
             return;
         }
 
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
 
         // apply mirror changes
         const AZStd::string command = AZStd::string::format("AdjustActor -actorID %d -mirrorSetup \"\"", currentActor->GetID());
@@ -1038,10 +1029,9 @@ namespace EMStudio
     // check if the current map is empty
     bool MirrorSetupWindow::CheckIfIsMapEmpty() const
     {
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
 
-        if (currentActor == nullptr)
+        if (!currentActor)
         {
             return true;
         }
@@ -1062,8 +1052,7 @@ namespace EMStudio
     // update the toolbar icons
     void MirrorSetupWindow::UpdateToolBar()
     {
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        EMotionFX::Actor* currentActor = GetSelectedActor();
 
         // check which buttons have to be enabled/disabled
         const bool canOpen  = (currentActor);
@@ -1083,9 +1072,8 @@ namespace EMStudio
     void MirrorSetupWindow::OnBestGuess()
     {
         // get the current and source actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        EMotionFX::Actor* currentActor = GetSelectedActor();
+        if (!currentActor)
         {
             return;
         }
@@ -1158,9 +1146,8 @@ namespace EMStudio
     void MirrorSetupWindow::UpdateActorMotionSources()
     {
         // get the current and source actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        EMotionFX::Actor* currentActor = GetSelectedActor();
+        if (!currentActor)
         {
             return;
         }
@@ -1183,7 +1170,7 @@ namespace EMStudio
     // init the mapping table from a given actor
     void MirrorSetupWindow::InitMappingTableFromMotionSources(EMotionFX::Actor* actor)
     {
-        if (actor == nullptr)
+        if (!actor)
         {
             return;
         }
@@ -1215,9 +1202,8 @@ namespace EMStudio
     void MirrorSetupWindow::ApplyCurrentMapAsCommand()
     {
         // get the current and source actor
-        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::Actor* currentActor = selection.GetSingleActor();
-        if (currentActor == nullptr)
+        EMotionFX::Actor* currentActor = GetSelectedActor();
+        if (!currentActor)
         {
             return;
         }
@@ -1246,6 +1232,25 @@ namespace EMStudio
         FillMappingTable(currentActor, currentActor);
         UpdateToolBar();
     }
+
+    EMotionFX::Actor* MirrorSetupWindow::GetSelectedActor() const
+    {
+        CommandSystem::SelectionList& selection = CommandSystem::GetCommandManager()->GetCurrentSelection();
+        EMotionFX::Actor* currentActor = selection.GetSingleActor();
+        if (currentActor)
+        {
+            return currentActor;
+        }
+
+        EMotionFX::ActorInstance* currentActorInstance = selection.GetSingleActorInstance();
+        if (currentActorInstance)
+        {
+            return currentActorInstance->GetActor();
+        }
+
+        return nullptr;
+    }
+
 }   // namespace EMStudio
 
 #include <EMotionFX/Tools/EMotionStudio/Plugins/StandardPlugins/Source/SceneManager/MirrorSetupWindow.moc>

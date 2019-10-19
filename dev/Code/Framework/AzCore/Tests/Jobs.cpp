@@ -10,8 +10,6 @@
 *
 */
 
-#include "TestTypes.h"
-
 #include <AzCore/Jobs/Job.h>
 #include <AzCore/Jobs/JobCompletion.h>
 #include <AzCore/Jobs/JobCompletionSpin.h>
@@ -34,6 +32,7 @@
 
 #include <AzCore/std/time.h>
 #include <AzCore/std/parallel/thread.h>
+#include <AzCore/UnitTest/TestTypes.h>
 
 #if AZ_TRAIT_SUPPORTS_MICROSOFT_PPL
 // Enable this to test against Microsoft PPL, keep in mind you MUST have Exceptions enabled to use PPL
@@ -67,40 +66,31 @@ namespace UnitTest
     static AZStd::sys_time_t s_totalJobsTime = 0;
 
     class DefaultJobManagerSetupFixture
-        : public ::testing::Test
+        : public AllocatorsTestFixture
+
     {
     protected:
         JobManager* m_jobManager = nullptr;
         JobContext* m_jobContext = nullptr;
-        void* m_memBlock = nullptr;
-        const size_t m_memBlockSize;
         unsigned int m_numWorkerThreads;
     public:
-        DefaultJobManagerSetupFixture(const size_t memBlockSize = 15 * 1024 * 1024, unsigned int numWorkerThreads = 0)
-            : m_memBlockSize(memBlockSize)
-            , m_numWorkerThreads(numWorkerThreads)
+        DefaultJobManagerSetupFixture(unsigned int numWorkerThreads = 0)
+            : m_numWorkerThreads(numWorkerThreads)
         {
         }
 
         void SetUp() override
         {
-            SystemAllocator::Descriptor memDesc;
+            AllocatorsTestFixture::SetUp();
 
-            m_memBlock = DebugAlignAlloc(m_memBlockSize, memDesc.m_heap.m_memoryBlockAlignment);
-
-            memDesc.m_heap.m_numMemoryBlocks = 1;
-            memDesc.m_heap.m_memoryBlocksByteSize[0] = m_memBlockSize;
-            memDesc.m_heap.m_memoryBlocks[0] = m_memBlock;
-
-            AllocatorInstance<SystemAllocator>::Create(memDesc);
             AllocatorInstance<PoolAllocator>::Create();
             AllocatorInstance<ThreadPoolAllocator>::Create();
 
             JobManagerDesc desc;
             JobManagerThreadDesc threadDesc;
-#if !defined(AZ_PLATFORM_WINDOWS)
+#if AZ_TRAIT_SET_JOB_PROCESSOR_ID
             threadDesc.m_cpuId = 0; // Don't set processors IDs on windows
-#endif // AZ_PLATFORM_WINDOWS
+#endif // AZ_TRAIT_SET_JOB_PROCESSOR_ID
 
             if (m_numWorkerThreads == 0)
             {
@@ -110,9 +100,9 @@ namespace UnitTest
             for (unsigned int i = 0; i < m_numWorkerThreads; ++i)
             {
                 desc.m_workerThreads.push_back(threadDesc);
-#if !defined(AZ_PLATFORM_WINDOWS)
+#if AZ_TRAIT_SET_JOB_PROCESSOR_ID
                 threadDesc.m_cpuId++;
-#endif // #if !defined(AZ_PLATFORM_WINDOWS)
+#endif // AZ_TRAIT_SET_JOB_PROCESSOR_ID
             }
 
             m_jobManager = aznew JobManager(desc);
@@ -130,9 +120,8 @@ namespace UnitTest
 
             AllocatorInstance<ThreadPoolAllocator>::Destroy();
             AllocatorInstance<PoolAllocator>::Destroy();
-            AllocatorInstance<SystemAllocator>::Destroy();
 
-            DebugAlignFree(m_memBlock);
+            AllocatorsTestFixture::TearDown();
         }
     };
 
@@ -1159,7 +1148,7 @@ namespace UnitTest
 #endif
 
         PERF_JobParallelForOverheadTest()
-            : DefaultJobManagerSetupFixture((100 + (300 / numElementsScale)) * 1024 * 1024)
+            : DefaultJobManagerSetupFixture()
         {}
 
         void TearDown() override

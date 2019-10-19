@@ -11,7 +11,7 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "StdAfx.h"
+#include "stdafx.h"
 #include <assert.h>                         // assert()
 
 #include "../ImageCompiler.h"               // CImageCompiler
@@ -102,7 +102,7 @@ void CImageCompiler::CreateMipMaps(
         // Alpha coverage can't be maintained if not all of the image is calculated
         if (m_bInternalPreview && !m_Props.GetMaintainAlphaCoverage())
         {
-#if defined(AZ_PLATFORM_WINDOWS) || defined(AZ_PLATFORM_APPLE)
+#if defined(AZ_PLATFORM_WINDOWS) || AZ_TRAIT_OS_PLATFORM_APPLE
             // Preview-rectangle calculation is based on the original size of the image
             prvRect = m_pImageUserDialog->GetPreviewRectangle(dstMip + indwReduceResolution);
 #else

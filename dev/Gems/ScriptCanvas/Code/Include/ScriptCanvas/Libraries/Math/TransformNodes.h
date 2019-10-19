@@ -13,7 +13,6 @@
 #pragma once
 
 #include <AzCore/Math/Vector4.h>
-#include <AzFramework/Math/MathUtils.h>
 #include <ScriptCanvas/Core/NodeFunctionGeneric.h>
 #include <ScriptCanvas/Data/NumericData.h>
 #include <ScriptCanvas/Libraries/Math/MathNodeUtilities.h>
@@ -30,7 +29,7 @@ namespace ScriptCanvas
             auto scale(source.ExtractScale());
             return std::make_tuple( scale, source );
         }
-        SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE(ExtractScale, "Math/Transform", "{8DFE5247-0950-4CD1-87E6-0CAAD42F1637}", "returns a vector which is the lenght of the scale components, and a transform with the scale extracted ", "Source", "Scale", "Extracted");
+        SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE(ExtractScale, "Math/Transform", "{8DFE5247-0950-4CD1-87E6-0CAAD42F1637}", "returns a vector which is the length of the scale components, and a transform with the scale extracted ", "Source", "Scale", "Extracted");
         
         AZ_INLINE TransformType FromColumns(Vector3Type c0, Vector3Type c1, Vector3Type c2, Vector3Type c3)
         {
@@ -99,7 +98,7 @@ namespace ScriptCanvas
         SCRIPT_CANVAS_GENERIC_FUNCTION_NODE(GetColumn, "Math/Transform", "{B1B515E8-BAEC-4E82-8966-E91485385BCB}", "returns the column specified by the index, [0,3]", "Source", "Column");
 
         template<int t_Index>
-        AZ_INLINE void DefaultScale(Node& node) { Node::SetDefaultValuesByIndex<t_Index>::_(node, Data::One()); }
+        AZ_INLINE void DefaultScale(Node& node) { SetDefaultValuesByIndex<t_Index>::_(node, Data::One()); }
 
         AZ_INLINE Vector3Type GetRight(const TransformType& source, NumberType scale)
         {
@@ -191,7 +190,7 @@ namespace ScriptCanvas
         {
             return TransformType::CreateFromMatrix3x3AndTranslation(rotation, source.GetPosition());
         }
-        SCRIPT_CANVAS_GENERIC_FUNCTION_NODE(ModRotation, "Math/Transform", "{ECC408EB-32D7-4DA8-A907-3DB36E8E54A9}", "returns the transfrom with translation from Source, and rotation from Rotation", "Source", "Rotation");
+        SCRIPT_CANVAS_GENERIC_FUNCTION_NODE(ModRotation, "Math/Transform", "{ECC408EB-32D7-4DA8-A907-3DB36E8E54A9}", "returns the transform with translation from Source, and rotation from Rotation", "Source", "Rotation");
 
         AZ_INLINE TransformType ModTranslation(TransformType source, Vector3Type translation)
         {
@@ -217,7 +216,7 @@ namespace ScriptCanvas
         {
             return a * b;
         }
-        SCRIPT_CANVAS_GENERIC_FUNCTION_NODE(MultiplyByTransform, "Math/Transform", "{66C3FBB9-498E-4E96-8683-63843F28AFE9}", "returns A * B", "A", "B");
+        SCRIPT_CANVAS_GENERIC_FUNCTION_NODE_DEPRECATED(MultiplyByTransform, "Math/Transform", "{66C3FBB9-498E-4E96-8683-63843F28AFE9}", "This node is deprecated, use Multiply (*), it provides contextual type and slots", "A", "B");
 
         AZ_INLINE Vector3Type MultiplyByVector3(const TransformType& source, const Vector3Type multiplier)
         {

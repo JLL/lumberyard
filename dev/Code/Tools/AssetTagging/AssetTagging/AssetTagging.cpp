@@ -25,9 +25,7 @@
 #include <sstream>
 #include <cassert>
 
-#ifdef _WIN32
-#define snprintf _snprintf
-#endif
+#include <AzCore/base.h>
 
 IDBConnection* m_pConnection = NULL;
 IDBConnection* m_pReadConnection = NULL;
@@ -55,7 +53,12 @@ bool CreateDatabase(IDBConnection* pConn, const std::string& schemafile, int typ
         break;
     }
 
-    FILE* fp = fopen(fullfilename.c_str(), "r");
+    FILE* fp = nullptr;
+#ifdef _WIN32
+    fopen_s(&fp, fullfilename.c_str(), "r");
+#else
+    fp = fopen(fullfilename.c_str(), "r");
+#endif
     if (!fp)
     {
         return false;
@@ -73,6 +76,8 @@ bool CreateDatabase(IDBConnection* pConn, const std::string& schemafile, int typ
 
     if (sqlSchema[0] == '\0')
     {
+        delete[] sqlSchema;
+        sqlSchema = NULL;
         return false;
     }
 
@@ -627,7 +632,7 @@ ASSETTAGGING_API int AssetTagging_GetTagsForAsset(char** tags, int nTags, const 
                 {
                     if (pResultSet->GetStringByName("tag", strValue))
                     {
-                        snprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -673,7 +678,7 @@ ASSETTAGGING_API int AssetTagging_GetTagForAssetInCategory(char* tag, const char
                 {
                     if (pResultSet->GetStringByName("tag", strValue))
                     {
-                        snprintf(tag, m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(tag, m_AssetTagging_MaxStringLen, "%s", strValue);
                         count++;
                     }
                 }
@@ -755,7 +760,7 @@ ASSETTAGGING_API int AssetTagging_GetAssetsForTag(char** assets, int nAssets, co
 
                     if (pResultSet->GetStringByName("relpath", strValue))
                     {
-                        snprintf(assets[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(assets[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -838,7 +843,7 @@ ASSETTAGGING_API int AssetTagging_GetAssetsWithDescription(char** assets, int nA
 
                     if (pResultSet->GetStringByName("relpath", strValue))
                     {
-                        snprintf(assets[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(assets[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -920,7 +925,7 @@ ASSETTAGGING_API int AssetTagging_GetAllTags(char** tags, int nTags, const char*
 
                     if (pResultSet->GetStringByName("tag", strValue))
                     {
-                        snprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -1004,7 +1009,7 @@ ASSETTAGGING_API int AssetTagging_GetAllCategories(const char* project, char** c
 
                     if (pResultSet->GetStringByName("category", strValue))
                     {
-                        snprintf(categories[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(categories[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -1087,7 +1092,7 @@ ASSETTAGGING_API int AssetTagging_GetTagsForCategory(const char* category, const
 
                     if (pResultSet->GetStringByName("tag", strValue))
                     {
-                        snprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(tags[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -1171,7 +1176,7 @@ ASSETTAGGING_API int AssetTagging_GetProjects(char** projects, int nProjects)
 
                     if (pResultSet->GetStringByName("name", strValue))
                     {
-                        snprintf(projects[count], m_AssetTagging_MaxStringLen, "%s", strValue);
+                        azsnprintf(projects[count], m_AssetTagging_MaxStringLen, "%s", strValue);
                     }
 
                     retrieved = pResultSet->Next();
@@ -1351,7 +1356,7 @@ ASSETTAGGING_API int AssetTagging_CategoryExists(const char* category, const cha
 
 ASSETTAGGING_API int AssetTagging_GetErrorString(char* errorString, int nLen)
 {
-    snprintf(errorString, nLen, "%s", m_strError.c_str());
+    azsnprintf(errorString, nLen, "%s", m_strError.c_str());
     return m_strError.empty() ? 0 : 1;
 }
 
@@ -1380,7 +1385,7 @@ ASSETTAGGING_API bool AssetTagging_GetAssetDescription(const char* relpath, cons
                 {
                     if (pResultSet->GetStringByName("description", strValue))
                     {
-                        snprintf(description, nChars, "%s", strValue);
+                        azsnprintf(description, nChars, "%s", strValue);
                         done = true;
                     }
                 }
@@ -1472,7 +1477,7 @@ ASSETTAGGING_API bool AssetTagging_AutoCompleteDescription(const char* partdesc,
                 {
                     if (pResultSet->GetStringByName("description", strValue))
                     {
-                        snprintf(description, nChars, "%s", strValue);
+                        azsnprintf(description, nChars, "%s", strValue);
                         done = true;
                     }
                 }

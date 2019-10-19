@@ -9,12 +9,12 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "TestTypes.h"
 
 #include <AzCore/Script/ScriptContext.h>
 #include <AzCore/RTTI/BehaviorContext.h>
 #include <AzCore/Script/lua/lua.h>
 #include <AzCore/Script/ScriptContextDebug.h>
+#include <AzCore/UnitTest/TestTypes.h>
 
 #include <AzCore/Component/Entity.h>
 
@@ -38,7 +38,8 @@
 #include <AzCore/Script/ScriptSystemComponent.h>
 #include <AzCore/Asset/AssetManager.h>
 #include <AzCore/Asset/AssetManagerComponent.h>
-#include <AzCore/RTTI/AzStdReflectionComponent.h>
+
+#include <Tests/BehaviorContextFixture.h>
 
 namespace UnitTest
 {
@@ -59,6 +60,9 @@ namespace UnitTest
 
     int g_globalValue = 501;
     int g_globalData = 0;
+    int g_globalTestClassesConstructed = 0;
+    int g_globalTestClassesDestructed = 0;
+
     GlobalClassEnum globalClassEnumValue = GlobalClassEnum::Value3;
 
     int globalPropertyGetter()
@@ -134,6 +138,16 @@ namespace UnitTest
             , m_dataReadOnly(3)
         {
             g_globalData = 1020;
+            g_globalTestClassesConstructed++;
+        }
+
+        BehaviorTestClass(const BehaviorTestClass& other)
+            : m_data(other.m_data)
+            , m_data1(other.m_data1)
+            , m_dataReadOnly(other.m_dataReadOnly)
+        {
+            g_globalData = 1025;
+            g_globalTestClassesConstructed++;
         }
 
         BehaviorTestClass(int data)
@@ -142,11 +156,13 @@ namespace UnitTest
             , m_dataReadOnly(4)
         {
             g_globalData = 1030;
+            g_globalTestClassesConstructed++;
         }
 
         virtual ~BehaviorTestClass()
         {
             g_globalData = 1040;
+            g_globalTestClassesDestructed++;
         }
 
         enum MyEnum
@@ -298,6 +314,8 @@ namespace UnitTest
         virtual AZStd::string OnEventWithDefaultValueAndStringResult(AZStd::string_view view1, AZStd::string_view) { return AZStd::string::format("Default Value: %s", view1.data()); }
 
         virtual void OnEventConst() const {};
+
+        virtual BehaviorTestClass OnEventResultWithBehaviorClassParameter(BehaviorTestClass data) { return BehaviorTestClass(); };
     };
 
     typedef AZ::EBus<BehaviorTestBusEvents> BehaviorTestBus;
@@ -314,6 +332,7 @@ namespace UnitTest
             , OnEventWithStringResult
             , OnEventWithClassResult
             , OnEventWithDefaultValueAndStringResult
+            , OnEventResultWithBehaviorClassParameter
         );
         
         // User code
@@ -363,6 +382,13 @@ namespace UnitTest
         AZStd::string OnEventWithDefaultValueAndStringResult(AZStd::string_view view1, AZStd::string_view view2) override
         {
             return BehaviorTestBus::Handler::OnEventWithDefaultValueAndStringResult(view1, view2);
+        }
+
+
+        BehaviorTestClass OnEventResultWithBehaviorClassParameter(BehaviorTestClass data) override
+        {
+            BehaviorTestClass result = data;
+            return result;
         }
     };
 
@@ -558,13 +584,14 @@ namespace UnitTest
         AZ_TEST_ASSERT(false);
     }
 
-    class BehaviorContextTest : public AllocatorsFixture
+    class BehaviorContextTest 
+        : public BehaviorContextFixture
     {
     public:
 
-        void SetUp()
+        void SetUp() override
         {
-            AllocatorsFixture::SetUp();
+            BehaviorContextFixture::SetUp();
             ResetGlobalVars();
         }
 
@@ -577,49 +604,47 @@ namespace UnitTest
 
         void run()
         {
-            BehaviorContext behaviorContext;
-
             // Constants/Enum
-            behaviorContext.Constant("globalConstant", []() { return 3.14f; });
-            behaviorContext.Constant("globalConstantMacro", BehaviorConstant(3.14f));
+            m_behaviorContext->Constant("globalConstant", []() { return 3.14f; });
+            m_behaviorContext->Constant("globalConstantMacro", BehaviorConstant(3.14f));
 
-            behaviorContext.Enum<(int)GE_VALUE1>("GE_VALUE1");
+            m_behaviorContext->Enum<(int)GE_VALUE1>("GE_VALUE1");
 
-            behaviorContext.Enum<(int)GlobalClassEnum::Value1>("Value1");
-            behaviorContext.Enum<(int)GlobalClassEnum::Value2>("Value2");
+            m_behaviorContext->Enum<(int)GlobalClassEnum::Value1>("Value1");
+            m_behaviorContext->Enum<(int)GlobalClassEnum::Value2>("Value2");
 
             // Property
-            behaviorContext.Property("globalProperty", &globalPropertyGetter, &globalPropertySetter)
+            m_behaviorContext->Property("globalProperty", &globalPropertyGetter, &globalPropertySetter)
                     ->Attribute("GlobalPropAttr", 1);
-            behaviorContext.Property("globalPropertyLambda", []() { return g_globalValue; }, [](int v) { g_globalValue = v; });
-            behaviorContext.Property("globalPropertyMacro", BehaviorValueProperty(&g_globalValue));
-            behaviorContext.Property("globalPropertyReadOnly", BehaviorValueGetter(&g_globalValue), nullptr); // read only property
+            m_behaviorContext->Property("globalPropertyLambda", []() { return g_globalValue; }, [](int v) { g_globalValue = v; });
+            m_behaviorContext->Property("globalPropertyMacro", BehaviorValueProperty(&g_globalValue));
+            m_behaviorContext->Property("globalPropertyReadOnly", BehaviorValueGetter(&g_globalValue), nullptr); // read only property
             // Property by address???
 
 
             // Method
             const int defaultIntValue = 20;
-            behaviorContext.Method("globalMethod", &globalMethod, behaviorContext.MakeDefaultValues(555))
+            m_behaviorContext->Method("globalMethod", &globalMethod, m_behaviorContext->MakeDefaultValues(555))
                     ->Attribute("GlobalMethodAttr", 5);
-            behaviorContext.Method("globalMethod1", &globalMethod1);
-            behaviorContext.Method("globalMethod2WithDefaultArgument", &globalMethod2WithDefaultArgument, { {{"Value", "An Integer argument", behaviorContext.MakeDefaultValue(defaultIntValue)}} });
+            m_behaviorContext->Method("globalMethod1", &globalMethod1);
+            m_behaviorContext->Method("globalMethod2WithDefaultArgument", &globalMethod2WithDefaultArgument, { {{"Value", "An Integer argument", m_behaviorContext->MakeDefaultValue(defaultIntValue)}} });
 
-            behaviorContext.Method("globalMethodContainers", &globalMethodContainers);
-            behaviorContext.Method("globalMethodPair", &globalMethodPair);
+            m_behaviorContext->Method("globalMethodContainers", &globalMethodContainers);
+            m_behaviorContext->Method("globalMethodPair", &globalMethodPair);
 
-            behaviorContext.Method("globalMethodToOverride", &globalMethodToOverride)
+            m_behaviorContext->Method("globalMethodToOverride", &globalMethodToOverride)
                     ->Attribute(Script::Attributes::MethodOverride, &globalMethodOverride);
 
-            behaviorContext.Method("TestTemplatedOnDemandReflection", &BehaviorTestTemplatedOnDemandReflection);
-            behaviorContext.Method("IncrementTestSmartPtrSharedPtr", &IncrementBehaviorTestSmartPtrSharedPtr);
-            behaviorContext.Method("IncrementTestSmartPtrIntrusivePtr", &IncrementBehaviorTestSmartPtrIntrusivePtr);
+            m_behaviorContext->Method("TestTemplatedOnDemandReflection", &BehaviorTestTemplatedOnDemandReflection);
+            m_behaviorContext->Method("IncrementTestSmartPtrSharedPtr", &IncrementBehaviorTestSmartPtrSharedPtr);
+            m_behaviorContext->Method("IncrementTestSmartPtrIntrusivePtr", &IncrementBehaviorTestSmartPtrIntrusivePtr);
 
-            behaviorContext.Method("globalMethodGetClassEnum", &globalMethodGetClassEnum);
-            behaviorContext.Method("globalMethodSetClassEnum", &globalMethodSetClassEnum);
-            behaviorContext.Method("PointerIsNullptr", &PointerIsNullptr);
+            m_behaviorContext->Method("globalMethodGetClassEnum", &globalMethodGetClassEnum);
+            m_behaviorContext->Method("globalMethodSetClassEnum", &globalMethodSetClassEnum);
+            m_behaviorContext->Method("PointerIsNullptr", &PointerIsNullptr);
 
             // Class 
-            behaviorContext.Class<BehaviorTestClass>()->  
+            m_behaviorContext->Class<BehaviorTestClass>()->
                     Constructor<int>()->
                     Attribute("ClassAttr",10)->
                     Attribute(AZ::Script::Attributes::Storage,AZ::Script::Attributes::StorageType::Value)->
@@ -641,22 +666,22 @@ namespace UnitTest
                     Attribute(AZ::Script::Attributes::Operator,AZ::Script::Attributes::OperatorType::Add)->
                 Method("ToString", &BehaviorTestClass::ToString)->
                 Method("StaticMethod", &BehaviorTestClass::StaticMethod)->
-                Method("MemberWithDefaultValues", &BehaviorTestClass::BoundsCheckMethodWithDefaultValue, { {{"value", "Value which will be checked to be within the two bounds arguments"}, {"delta", "The epsilon value", behaviorContext.MakeDefaultValue(0.1f)},
-                    {"minBound", "The minimum bounds value,", behaviorContext.MakeDefaultValue(0.0f)}, {"maxBound", "The maximum bounds value", behaviorContext.MakeDefaultValue(1.0f)}} })->
+                Method("MemberWithDefaultValues", &BehaviorTestClass::BoundsCheckMethodWithDefaultValue, { {{"value", "Value which will be checked to be within the two bounds arguments"}, {"delta", "The epsilon value", m_behaviorContext->MakeDefaultValue(0.1f)},
+                    {"minBound", "The minimum bounds value,", m_behaviorContext->MakeDefaultValue(0.0f)}, {"maxBound", "The maximum bounds value", m_behaviorContext->MakeDefaultValue(1.0f)}} })->
                 Property("data", &BehaviorTestClass::GetData, &BehaviorTestClass::SetData)->
                     Attribute("PropAttr", 30)->
                 Property("data1", BehaviorValueProperty(&BehaviorTestClass::m_data1))->
                 Property("dataReadOnly", BehaviorValueGetter(&BehaviorTestClass::m_dataReadOnly), nullptr);
 
-            behaviorContext.Class<BehaviorDerivedTestClass>()->
+            m_behaviorContext->Class<BehaviorDerivedTestClass>()->
                 Property("derivedData", BehaviorValueProperty(&BehaviorDerivedTestClass::m_data));
 
-            behaviorContext.Class<BehaviorTestSmartPtr>()->
+            m_behaviorContext->Class<BehaviorTestSmartPtr>()->
                 Method("TestFunction", &BehaviorTestSmartPtr::TestFunction)->
                 Property("data", BehaviorValueProperty(&BehaviorTestSmartPtr::m_data));
 
             // Class Global Class enum wrapper
-            behaviorContext.Class<BehaviorGlobalClassEnumWrapper>()
+            m_behaviorContext->Class<BehaviorGlobalClassEnumWrapper>()
                 ->Constant("VALUE1", BehaviorConstant(GlobalClassEnum::Value1))
                 ->Constant("VALUE2", BehaviorConstant(GlobalClassEnum::Value2))
                 ;
@@ -664,8 +689,10 @@ namespace UnitTest
             // EBus
             const AZStd::string_view defaultStringViewValue = "DEFAULT!!!!";
             AZStd::string expectedDefaultValueAndStringResult = AZStd::string::format("Default Value: %s", defaultStringViewValue.data());
+            BehaviorDefaultValuePtr defaultStringViewBehaviorValue = aznew BehaviorDefaultValue(defaultStringViewValue);
+            BehaviorDefaultValuePtr superDefaultStringViewBehaviorValue = aznew BehaviorDefaultValue(AZStd::string_view("SUPER DEFAULT!!!!"));
 
-            behaviorContext.EBus<BehaviorTestBus>("TestBus")
+            m_behaviorContext->EBus<BehaviorTestBus>("TestBus")
                     ->Attribute("EBusAttr", 40)
                 ->Handler<BehaviorTestBusHandler>()
                     ->Attribute("HandlerAttr", 50)
@@ -675,14 +702,15 @@ namespace UnitTest
                 ->Event("OnEventWithResultContainer", &BehaviorTestBus::Events::OnEventWithResultContainer)
                 ->Event("OnEventWithClassEnumResult", &BehaviorTestBus::Events::OnEventWithClassEnumResult)
                 ->Event("OnEventWithStringResult", &BehaviorTestBus::Events::OnEventWithStringResult)
+                ->Event("OnEventResultWithBehaviorClassParameter", &BehaviorTestBus::Events::OnEventResultWithBehaviorClassParameter)
                 ->Event("OnEventWithDefaultValueAndStringResult", &BehaviorTestBus::Events::OnEventWithDefaultValueAndStringResult,
-                { {{"view1", "string_view without string trait", aznew BehaviorDefaultValue(defaultStringViewValue), AZ::BehaviorParameter::TR_NONE, AZ::BehaviorParameter::TR_STRING},
-                    {"view2", "string_view with string trait", aznew BehaviorDefaultValue(AZStd::string_view("SUPER DEFAULT!!!!"))}} }) // Remove string trait from parameter
+                { {{"view1", "string_view without string trait", defaultStringViewBehaviorValue, AZ::BehaviorParameter::TR_NONE, AZ::BehaviorParameter::TR_STRING},
+                    {"view2", "string_view with string trait", superDefaultStringViewBehaviorValue}} }) // Remove string trait from parameter
                 ->Event("OnEventConst", &BehaviorTestBus::Events::OnEventConst)
                 ;
 
             // Calls
-            BehaviorMethod* method = behaviorContext.m_methods.find("globalMethod")->second;
+            BehaviorMethod* method = m_behaviorContext->m_methods.find("globalMethod")->second;
             int result = 0;
             method->InvokeResult(result,3);
             AZ_TEST_ASSERT(result == 6);
@@ -698,20 +726,20 @@ namespace UnitTest
             (void)attrValue;
             AZ_Assert(attrValue == 5, "Data should be 5");
 
-            method = behaviorContext.m_methods.find("globalMethod1")->second;
+            method = m_behaviorContext->m_methods.find("globalMethod1")->second;
             method->Invoke();
 
-            method = behaviorContext.m_methods.find("globalMethod2WithDefaultArgument")->second;
+            method = m_behaviorContext->m_methods.find("globalMethod2WithDefaultArgument")->second;
             int defaultValueMethodResult = 0;
             method->InvokeResult(defaultValueMethodResult);
             EXPECT_EQ(defaultIntValue + 1, defaultValueMethodResult);
 
             AZStd::vector<int> values = { 10, 11, 12 };
-            method = behaviorContext.m_methods.find("globalMethodContainers")->second;
+            method = m_behaviorContext->m_methods.find("globalMethodContainers")->second;
             method->InvokeResult(result, values);
 
             // Global property
-            BehaviorProperty* prop = behaviorContext.m_properties.find("globalProperty")->second;
+            BehaviorProperty* prop = m_behaviorContext->m_properties.find("globalProperty")->second;
             prop->m_setter->Invoke(3);
             prop->m_getter->InvokeResult(result);
             //  Check attr
@@ -722,26 +750,26 @@ namespace UnitTest
             AZ_Assert(attrValue == 1, "Data should be 1");
 
             // Global read only property
-            prop = behaviorContext.m_properties.find("globalPropertyReadOnly")->second;
+            prop = m_behaviorContext->m_properties.find("globalPropertyReadOnly")->second;
             AZ_Assert(prop->m_setter == nullptr, "This property should be read only!");
             prop->m_getter->InvokeResult(result);
 
             // Constant
-            prop = behaviorContext.m_properties.find("globalConstant")->second;
+            prop = m_behaviorContext->m_properties.find("globalConstant")->second;
             float fResult = 0.0f;
             prop->m_getter->InvokeResult(fResult);
 
             // Enum
             GlobalClassEnum enumResult = GlobalClassEnum::Value2;
-            method = behaviorContext.m_methods.find("globalMethodGetClassEnum")->second;
+            method = m_behaviorContext->m_methods.find("globalMethodGetClassEnum")->second;
             method->InvokeResult(enumResult);
             AZ_TEST_ASSERT(enumResult == GlobalClassEnum::Value1);
 
-            method = behaviorContext.m_methods.find("globalMethodSetClassEnum")->second;
+            method = m_behaviorContext->m_methods.find("globalMethodSetClassEnum")->second;
             method->Invoke(GlobalClassEnum::Value2);
 
             // Classes
-            BehaviorClass* behaviorClass = behaviorContext.m_classes.find("BehaviorTestClass")->second;
+            BehaviorClass* behaviorClass = m_behaviorContext->m_classes.find("BehaviorTestClass")->second;
             BehaviorObject classInstance = behaviorClass->Create();
             {
                 //  Check attr
@@ -821,7 +849,7 @@ namespace UnitTest
         
             // EBus - send events
             BehaviorTestBus::BusIdType testId = 1;
-            BehaviorEBus* behaviorEBus = behaviorContext.m_ebuses.find("TestBus")->second;
+            BehaviorEBus* behaviorEBus = m_behaviorContext->m_ebuses.find("TestBus")->second;
 
             {
                 //  Check attr
@@ -934,10 +962,10 @@ namespace UnitTest
 
             behaviorClass->Destroy(classInstance);
 
-            behaviorContext.Method("globalGenericMethod", &globalGenericMethod);
+            m_behaviorContext->Method("globalGenericMethod", &globalGenericMethod);
             {
                 ScriptContext sc;
-                sc.BindTo(&behaviorContext);
+                sc.BindTo(m_behaviorContext);
 
                 // global methods           
                 sc.Execute("value = globalMethod(12)");
@@ -947,12 +975,12 @@ namespace UnitTest
                 // global method with a vector (OnDemandReflection)
                 sc.Execute("intVector = vector_int()");
                 sc.Execute("intVector:push_back(74)"); 
-                AZ_TEST_START_ASSERTTEST;
+                AZ_TEST_START_TRACE_SUPPRESSION;
                 ScriptContext::ErrorHook oldHook = sc.GetErrorHook();
                 sc.SetErrorHook(ScriptErrorAssertCB);
                 sc.Execute("intVector.push_back(74)"); // missing self pointer
                 sc.SetErrorHook(oldHook);
-                AZ_TEST_STOP_ASSERTTEST(1);
+                AZ_TEST_STOP_TRACE_SUPPRESSION(1);
 
                 // test index operators
                 sc.Execute("globalProperty = intVector[1]"); // read a value using custom operator
@@ -990,13 +1018,13 @@ namespace UnitTest
                 sc.Execute("BehaviorTestClass.StaticMethod(1090)");
                 EXPECT_EQ(1090, g_globalData);
 
-                AZ_TEST_START_ASSERTTEST;
+                AZ_TEST_START_TRACE_SUPPRESSION;
                 sc.Execute("testClass:StaticMethod(1090)");
-                AZ_TEST_STOP_ASSERTTEST(1);
+                AZ_TEST_STOP_TRACE_SUPPRESSION(1);
 
-                AZ_TEST_START_ASSERTTEST;
+                AZ_TEST_START_TRACE_SUPPRESSION;
                 sc.Execute("BehaviorTestClass.Method1(nil)");
-                AZ_TEST_STOP_ASSERTTEST(1);
+                AZ_TEST_STOP_TRACE_SUPPRESSION(1);
 
                 // class properties
                 sc.Execute("value = testClass.data");
@@ -1073,30 +1101,52 @@ namespace UnitTest
                 sc.Execute("globalMethodSetClassEnum(result2)");
                 AZ_TEST_ASSERT(globalClassEnumValue == GlobalClassEnum::Value1);
 
+                // collect garbage before running next test so any destructors get called
+                sc.Execute(R"LUA(
+                    collectgarbage()
+                )LUA");
+
+                g_globalTestClassesConstructed = 0;
+                g_globalTestClassesDestructed = 0;
+
+                // test whether the behavior parameters that are passed by value have their
+                // constructors/destructors called equally
+                sc.Execute(R"LUA(
+                    local behaviorParameter = BehaviorTestClass();
+                    local result = TestBus.Broadcast.OnEventResultWithBehaviorClassParameter(behaviorParameter);
+                    behaviorParameter = nil;
+                    result = nil;
+                    collectgarbage();
+                )LUA");
+
+                AZ_TEST_ASSERT(g_globalTestClassesConstructed > 0);
+                AZ_TEST_ASSERT(g_globalTestClassesDestructed > 0);
+                AZ_TEST_ASSERT(g_globalTestClassesConstructed == g_globalTestClassesDestructed);
+
                 myTestBusHandler1.BusDisconnect();
                 myTestBusHandler2.BusDisconnect();
                 //////////////////////////////////////////////////////////////////////////
 
                 // create handler
                 sc.Execute(R"LUA(
-testBusHandler = {}
-function testBusHandler:OnEvent(data)
-    globalProperty = data
-    globalProperty = TestBus.GetCurrentBusId()
-end
-function testBusHandler:OnEventWithClassEnumResult()
-    return BehaviorGlobalClassEnumWrapper.VALUE2
-end
-function testBusHandler:OnEventWithStringResult()
-    return 'success';
-end
-function testBusHandler:OnEventWithClassResult()
-    local result = BehaviorTestClass(100);
-    result.data = 100;
-    return result;
-end
-testBusHandler = TestBus.Connect(testBusHandler,1)
-)LUA");
+                    testBusHandler = {}
+                    function testBusHandler:OnEvent(data)
+                        globalProperty = data
+                        globalProperty = TestBus.GetCurrentBusId()
+                    end
+                    function testBusHandler:OnEventWithClassEnumResult()
+                        return BehaviorGlobalClassEnumWrapper.VALUE2
+                    end
+                    function testBusHandler:OnEventWithStringResult()
+                        return 'success';
+                    end
+                    function testBusHandler:OnEventWithClassResult()
+                        local result = BehaviorTestClass(100);
+                        result.data = 100;
+                        return result;
+                    end
+                    testBusHandler = TestBus.Connect(testBusHandler,1)
+                )LUA");
 
                 // check if we can handle event 
                 BehaviorTestBus::Broadcast(&BehaviorTestBus::Events::OnEvent, 101);
@@ -1122,13 +1172,13 @@ testBusHandler = TestBus.Connect(testBusHandler,1)
 
                 ////////////////////////////////////////////////////////////////////////// 
                 // Test reflecting after the bind
-                behaviorContext.Method("BehaviorGlobalMethodAfterBind", &BehaviorGlobalMethodAfterBind);
+                m_behaviorContext->Method("BehaviorGlobalMethodAfterBind", &BehaviorGlobalMethodAfterBind);
                 sc.Execute("afterBindValue = BehaviorGlobalMethodAfterBind()");
-                behaviorContext.Property("globalPropertyAfterBind", &BehaviorGlobalPropertyGetAfterBind, &BehaviorGlobalPropertySetAfterBind);
+                m_behaviorContext->Property("globalPropertyAfterBind", &BehaviorGlobalPropertyGetAfterBind, &BehaviorGlobalPropertySetAfterBind);
                 sc.Execute("globalPropertyAfterBind = afterBindValue");
                 AZ_TEST_ASSERT(g_globalData == 3030);
 
-                behaviorContext.Class<BehaviorClassAfterBind>()->
+                m_behaviorContext->Class<BehaviorClassAfterBind>()->
                     Property("data", BehaviorValueProperty(&BehaviorClassAfterBind::m_data));
 
                 sc.Execute("classAfterBind = BehaviorClassAfterBind() classAfterBind.data = 1012 globalPropertyAfterBind = classAfterBind.data");
@@ -1137,30 +1187,30 @@ testBusHandler = TestBus.Connect(testBusHandler,1)
 
                 //////////////////////////////////////////////////////////////////////////
                 // Classes using EBuses for communication and virtual ebus properties
-                behaviorContext.Class<ClassInteractingWithEBus>()->
+                m_behaviorContext->Class<ClassInteractingWithEBus>()->
                     RequestBus("ClassRequestEBus");
                 
-                behaviorContext.EBus<ClassRequestEBus>("ClassRequestEBus")->
+                m_behaviorContext->EBus<ClassRequestEBus>("ClassRequestEBus")->
                     Attribute(AZ::Script::Attributes::DisallowBroadcast, true)->
                     Event("GetData", &ClassRequestEBus::Events::GetData)->
                     Event("SetData", &ClassRequestEBus::Events::SetData)->
                     VirtualProperty("data", "GetData", "SetData");
 
-                BehaviorClass* classInteractingWithEBus = behaviorContext.m_classes.find("ClassInteractingWithEBus")->second;
+                BehaviorClass* classInteractingWithEBus = m_behaviorContext->m_classes.find("ClassInteractingWithEBus")->second;
                 AZ_TEST_ASSERT(classInteractingWithEBus->m_requestBuses.size() == 1);
                 AZ_TEST_ASSERT(classInteractingWithEBus->m_requestBuses.find("ClassRequestEBus") != classInteractingWithEBus->m_requestBuses.end());
                 
-                BehaviorEBus* classRequestBus = behaviorContext.m_ebuses.find("ClassRequestEBus")->second;
+                BehaviorEBus* classRequestBus = m_behaviorContext->m_ebuses.find("ClassRequestEBus")->second;
                 AZ_TEST_ASSERT(classRequestBus->m_virtualProperties.size() == 1);
                 const BehaviorEBus::VirtualProperty& virtualEBusProperty = classRequestBus->m_virtualProperties.find("data")->second;
 
-                AZ_TEST_START_ASSERTTEST;
+                AZ_TEST_START_TRACE_SUPPRESSION;
                 sc.Execute("ClassRequestEBus.Broadcast.GetData()");
-                AZ_TEST_STOP_ASSERTTEST(1);
+                AZ_TEST_STOP_TRACE_SUPPRESSION(1);
 
                 {
-                    ClassInteractingWithEBus classInstance; // setup a listener, otherwise property value can't be stored
-                    classInstance.m_data = 1010;
+                    ClassInteractingWithEBus listenerClassInstance; // setup a listener, otherwise property value can't be stored
+                    listenerClassInstance.m_data = 1010;
 
                     // get the value of the ebus property. In practice those request buses use ID to identify a single handler, then we just use m_event instead of m_broadcast
                     int data = 0;
@@ -1169,7 +1219,7 @@ testBusHandler = TestBus.Connect(testBusHandler,1)
 
                     // set the value of the ebus property.
                     virtualEBusProperty.m_setter->m_broadcast->Invoke(3030);
-                    AZ_TEST_ASSERT(classInstance.m_data == 3030);
+                    AZ_TEST_ASSERT(listenerClassInstance.m_data == 3030);
                 }
                 //////////////////////////////////////////////////////////////////////////
             }
@@ -1300,7 +1350,7 @@ namespace UnitTest
     class ScriptClass5;
 
     class ScriptBindTest
-        : public AllocatorsFixture
+        : public BehaviorContextFixture
     {
         static ScriptBindTest* s_scriptBindInstance;
     public:
@@ -1770,7 +1820,7 @@ namespace UnitTest
     
     void ScriptBindTest::SetUp()
     {
-        AllocatorsFixture::SetUp();
+        BehaviorContextFixture::SetUp();
         ResetGlobalVars();
         s_scriptBindInstance = this;
         s_scriptMemberShared = AZStd::shared_ptr<ScriptClass4>(aznew ScriptClass4(10));
@@ -1781,9 +1831,9 @@ namespace UnitTest
     {
         s_scriptMemberShared.reset();
         s_scriptMemberIntrusive.reset();
-        s_scriptBindInstance = nullptr;
+        s_scriptBindInstance = nullptr;        
 
-        AllocatorsFixture::TearDown();
+        BehaviorContextFixture::TearDown();
     }
 
     void ScriptBindTest::ResetGlobalVars()
@@ -1848,53 +1898,51 @@ namespace UnitTest
 
     void ScriptBindTest::run()
     {
-        BehaviorContext behaviorContext;
-
         AZ::Uuid ch = AzTypeInfo<char>::Uuid();
         AZ::Uuid ch1 = AzTypeInfo<const char*>::Uuid();
         (void)ch; (void)ch1;
 
         // enum
-        behaviorContext.Enum<GE_VALUE1>("GE_VALUE1")->
+        m_behaviorContext->Enum<GE_VALUE1>("GE_VALUE1")->
             Enum<GE_VALUE2>("GE_VALUE2");
 
         // constant
-        behaviorContext.Constant("PI", BehaviorConstant(3.14f));
+        m_behaviorContext->Constant("PI", BehaviorConstant(3.14f));
 
         // property
-        behaviorContext.Property("globalVar", &GlobalVarGet, &GlobalVarSet);
-        behaviorContext.Property("globalVar1", BehaviorValueProperty(&s_globalVar1));
-        behaviorContext.Property("globalVarBool", BehaviorValueProperty(&s_globalVarBool));
-        behaviorContext.Property("globalVar2", BehaviorValueGetter(&s_globalVar2ReadOnly), nullptr);
-        behaviorContext.Property("globalVar3", nullptr, BehaviorValueSetter(&s_globalVar3WriteOnly));
-        behaviorContext.Property("globalVarString", &GlobalVarStringGet, &GlobalVarStringSet);
-
-        // field
-        behaviorContext.Property("globalField", BehaviorValueProperty(&s_globalField));
-        behaviorContext.Property("globalField1", BehaviorValueGetter(&s_globalField1), nullptr);
-        behaviorContext.Property("globalField2", nullptr, BehaviorValueSetter(&s_globalField2));
-        behaviorContext.Property("globalIncomplete", BehaviorValueProperty(&s_globalIncompletePtr)); // unregistered type (passed as light userdata)
-        behaviorContext.Property("globalIncomplete1", BehaviorValueProperty(&s_globalIncompletePtr1)); // unregistered type (passed as light userdata)
+        m_behaviorContext->Property("globalVar", &GlobalVarGet, &GlobalVarSet);
+        m_behaviorContext->Property("globalVar1", BehaviorValueProperty(&s_globalVar1));
+        m_behaviorContext->Property("globalVarBool", BehaviorValueProperty(&s_globalVarBool));
+        m_behaviorContext->Property("globalVar2", BehaviorValueGetter(&s_globalVar2ReadOnly), nullptr);
+        m_behaviorContext->Property("globalVar3", nullptr, BehaviorValueSetter(&s_globalVar3WriteOnly));
+        m_behaviorContext->Property("globalVarString", &GlobalVarStringGet, &GlobalVarStringSet);
+                         
+        // field         
+        m_behaviorContext->Property("globalField", BehaviorValueProperty(&s_globalField));
+        m_behaviorContext->Property("globalField1", BehaviorValueGetter(&s_globalField1), nullptr);
+        m_behaviorContext->Property("globalField2", nullptr, BehaviorValueSetter(&s_globalField2));
+        m_behaviorContext->Property("globalIncomplete", BehaviorValueProperty(&s_globalIncompletePtr)); // unregistered type (passed as light userdata)
+        m_behaviorContext->Property("globalIncomplete1", BehaviorValueProperty(&s_globalIncompletePtr1)); // unregistered type (passed as light userdata)
 
         // method
-        behaviorContext.Method("GlobalFunc0", &GlobalFunc0);
-        behaviorContext.Method("GlobalFunc1", &GlobalFunc1);
-        behaviorContext.Method("GlobalFunc2", &GlobalFunc2);
-        behaviorContext.Method("GlobalFunc3", &GlobalFunc3);
-        behaviorContext.Method("GlobalFunc4", &GlobalFunc4);
-        behaviorContext.Method("GlobalFunc5", &GlobalFunc5, nullptr, "int NumberArguments (int intValue,float floatValue,bool Value,int intValue2,float floatValue2");
-        behaviorContext.Method("GlobalVoidFunc0", &GlobalVoidFunc0);
-        behaviorContext.Method("GlobalVoidFunc1", &GlobalVoidFunc1);
-        behaviorContext.Method("GlobalVoidFunc2", &GlobalVoidFunc2);
-        behaviorContext.Method("GlobalVoidFunc3", &GlobalVoidFunc3);
-        behaviorContext.Method("GlobalVoidFunc4", &GlobalVoidFunc4);
-        behaviorContext.Method("GlobalVoidFunc5", &GlobalVoidFunc5);
-        behaviorContext.Method("GlobalEnumFunc", &GlobalEnumFunc);
-        behaviorContext.Method("GlobalCheckString", &GlobalCheckString);
-        behaviorContext.Method("GlobalCheckStringRef", &GlobalCheckStringRef);
+        m_behaviorContext->Method("GlobalFunc0", &GlobalFunc0);
+        m_behaviorContext->Method("GlobalFunc1", &GlobalFunc1);
+        m_behaviorContext->Method("GlobalFunc2", &GlobalFunc2);
+        m_behaviorContext->Method("GlobalFunc3", &GlobalFunc3);
+        m_behaviorContext->Method("GlobalFunc4", &GlobalFunc4);
+        m_behaviorContext->Method("GlobalFunc5", &GlobalFunc5, nullptr, "int NumberArguments (int intValue,float floatValue,bool Value,int intValue2,float floatValue2");
+        m_behaviorContext->Method("GlobalVoidFunc0", &GlobalVoidFunc0);
+        m_behaviorContext->Method("GlobalVoidFunc1", &GlobalVoidFunc1);
+        m_behaviorContext->Method("GlobalVoidFunc2", &GlobalVoidFunc2);
+        m_behaviorContext->Method("GlobalVoidFunc3", &GlobalVoidFunc3);
+        m_behaviorContext->Method("GlobalVoidFunc4", &GlobalVoidFunc4);
+        m_behaviorContext->Method("GlobalVoidFunc5", &GlobalVoidFunc5);
+        m_behaviorContext->Method("GlobalEnumFunc", &GlobalEnumFunc);
+        m_behaviorContext->Method("GlobalCheckString", &GlobalCheckString);
+        m_behaviorContext->Method("GlobalCheckStringRef", &GlobalCheckStringRef);
 
         // clases
-        behaviorContext.Class<ScriptClass>()->
+        m_behaviorContext->Class<ScriptClass>()->
             Allocator(&ScriptClassAllocate, &ScriptClassFree)->
             Enum<ScriptClass::SC_ET_VALUE2>("SC_ET_VALUE2")->
             Enum<ScriptClass::SC_ET_VALUE3>("SC_ET_VALUE3")->
@@ -1920,7 +1968,7 @@ namespace UnitTest
         //  Field("data",&ScriptClass::ScriptClassNested::m_data)->
         //ClassEnd();
 
-        behaviorContext.Class<ScriptClass2>()->
+        m_behaviorContext->Class<ScriptClass2>()->
             Constructor<int>()->
             Method("Add", &ScriptClass2::ScriptAdd)->
             Attribute(AZ::Script::Attributes::Operator, AZ::Script::Attributes::OperatorType::Add)->
@@ -1951,68 +1999,68 @@ namespace UnitTest
             Method("Forward", &ScriptClass2::Forward)->
             Property("data", BehaviorValueProperty(&ScriptClass2::m_data));
 
-        behaviorContext.Class<ScriptClass3>()->
+        m_behaviorContext->Class<ScriptClass3>()->
             Constructor<ScriptDataContext&>()->
             Property("boolData", BehaviorValueProperty(&ScriptClass3::m_bool))->
             Property("intData", BehaviorValueProperty(&ScriptClass3::m_intData))->
             Property("floatData", BehaviorValueProperty(&ScriptClass3::m_floatData))->
             Property("scriptClass2", BehaviorValueProperty(&ScriptClass3::m_scriptClass2));
 
-        behaviorContext.Class<ScriptClass4>()->
+        m_behaviorContext->Class<ScriptClass4>()->
             Constructor<int>()->
             Method("CopyData", &ScriptClass4::CopyData)->
             Property("data", BehaviorValueProperty(&ScriptClass4::m_data));
 
-        behaviorContext.Property("scriptClass4Member", BehaviorValueProperty(&s_scriptMemberShared));
-        behaviorContext.Method("HoldScriptClass4", &ScriptClass4::HoldInstance);
+        m_behaviorContext->Property("scriptClass4Member", BehaviorValueProperty(&s_scriptMemberShared));
+        m_behaviorContext->Method("HoldScriptClass4", &ScriptClass4::HoldInstance);
 
-        behaviorContext.Class<ScriptClass5>()->
+        m_behaviorContext->Class<ScriptClass5>()->
             Constructor<int>()->
             Method("CopyData", &ScriptClass5::CopyData)->
             Property("data", BehaviorValueProperty(&ScriptClass5::m_data));
 
-        behaviorContext.Property("scriptClass5Member", BehaviorValueProperty(&s_scriptMemberIntrusive));
-        behaviorContext.Method("HoldScriptClass5", &ScriptClass5::HoldInstance);
+        m_behaviorContext->Property("scriptClass5Member", BehaviorValueProperty(&s_scriptMemberIntrusive));
+        m_behaviorContext->Method("HoldScriptClass5", &ScriptClass5::HoldInstance);
 
         // Variadic method
-        behaviorContext.Method("VariadicFunc", &VariadicFunc);
+        m_behaviorContext->Method("VariadicFunc", &VariadicFunc);
 
         // Check nested classes
-        behaviorContext.Class<ScriptValueClass>()->
+        m_behaviorContext->Class<ScriptValueClass>()->
             Property("data", BehaviorValueProperty(&ScriptValueClass::m_data));
 
-        behaviorContext.Class<ScriptValueHolder>()->
+        m_behaviorContext->Class<ScriptValueHolder>()->
             Property("value", BehaviorValueProperty(&ScriptValueHolder::m_value));
 
         // test class pointer casting for unregistered classes
-        behaviorContext.Property("globalUnregBaseClass", BehaviorValueProperty(&s_globalUnregBaseClass));
-        behaviorContext.Property("globalUnregDerivedClass", BehaviorValueProperty(&s_globalUnregDerivedClass));
+        m_behaviorContext->Property("globalUnregBaseClass", BehaviorValueProperty(&s_globalUnregBaseClass));
+        m_behaviorContext->Property("globalUnregDerivedClass", BehaviorValueProperty(&s_globalUnregDerivedClass));
 
-        behaviorContext.Method("GetUnregisteredScriptBaseData", &GetUnregisteredScriptBaseData);
-        behaviorContext.Method("GetUnregisteredScriptDerivedData", &GetUnregisteredScriptDerivedData);
+        m_behaviorContext->Method("GetUnregisteredScriptBaseData", &GetUnregisteredScriptBaseData);
+        m_behaviorContext->Method("GetUnregisteredScriptDerivedData", &GetUnregisteredScriptDerivedData);
 
         // register a base and derived class test
-        behaviorContext.Class<ScriptRegisteredBaseClass>()->
+        m_behaviorContext->Class<ScriptRegisteredBaseClass>()->
             Property("baseData", BehaviorValueProperty(&ScriptRegisteredBaseClass::m_baseData))->
             Method("VirtualFunction", &ScriptRegisteredBaseClass::VirtualFunction);
 
         // when using AZ_RTTI the bind will discover the 'ScriptRegisteredBaseClass' and import it's bindings
         // into 'ScriptRegisteredDerivedClass' class so we access it (like in C++)
-        behaviorContext.Class<ScriptRegisteredDerivedClass>()->
+        m_behaviorContext->Class<ScriptRegisteredDerivedClass>()->
             Property("derivedData", BehaviorValueProperty(&ScriptRegisteredDerivedClass::m_derivedData));
 
         // add a function that makes a derived class (can change at runtime) and return pointer to a base class.
-        behaviorContext.Property("globalRegisteredBaseClass", BehaviorValueProperty(&s_globalRegisteredBaseClass));
+        m_behaviorContext->Property("globalRegisteredBaseClass", BehaviorValueProperty(&s_globalRegisteredBaseClass));
 
         // abstract classes
-        behaviorContext.Class<AbstractClass>()->
+        m_behaviorContext->Class<AbstractClass>()->
             Method("PureCall", &AbstractClass::PureCall);
 
-        behaviorContext.Class<AbstractImplementation>();
+        m_behaviorContext->Class<AbstractImplementation>();
 
         // create the lua script context and Bind it the behavior
         ScriptContext script;
-        script.BindTo(&behaviorContext);
+        script.BindTo(m_behaviorContext);
 
         // test globalVar with functions get and set
         AZ_TEST_ASSERT(s_globalVar == 0);
@@ -2564,7 +2612,6 @@ namespace UnitTest
         script.Execute("abstract = nil");
 
         s_globalVarString.set_capacity(0); // free all memory
-
     }
 
     TEST_F(ScriptBindTest, Test)
@@ -3564,70 +3611,70 @@ namespace UnitTest
 
             // Test sending messages from C++ to LUA handler
             script.Execute("handler = TestBus.Connect(MyBusHandlerMetaTable1)");
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, Set);
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             EBUS_EVENT(TestBus, SetNotImplemented); // nothing should happen here
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, SetSum1, 1);
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, SetSum2, 1, 2);
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, SetSum3, 1, 2, 3);
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, SetSum4, 1, 2, 3, 4);
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT(TestBus, SetSum5, 1, 2, 3, 4, 5);
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             script.Execute("handler:Disconnect()");
 
             script.Execute("handler = TestBus.Connect(MyBusHandlerMetaTable2)");
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.Set()");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetNotImplemented()");
-            AZ_TEST_STOP_ASSERTTEST(0);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(0);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetSum1(1)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetSum2(1, 2)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetSum3(1, 2, 3)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetSum4(1, 2, 3, 4)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestBus.Broadcast.SetSum5(1, 2, 3, 4, 5)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.Get() == -2)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetNotImplemented() == -1)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetSum1(1) == 1)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetSum2(1, 2) == 3)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetSum3(1, 2, 3) == 6)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetSum4(1, 2, 3, 4) == 10)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestBus.Broadcast.GetSum5(1, 2, 3, 4, 5) == 15)");
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             script.Execute("handler:Disconnect()\
                             handler = nil");
         }
@@ -3636,6 +3683,143 @@ namespace UnitTest
     TEST_F(ScriptedBusTest, Test)
     {
         run();
+    }
+
+    // RamenRequests 
+    class RamenRequests
+        : public AZ::EBusTraits
+    {
+    public:
+        typedef unsigned int BusIdType;
+        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+
+        virtual void AddPepper() = 0;
+    };
+    using RamenRequestBus = AZ::EBus<RamenRequests>;
+
+    class RamenRequestHandler
+        : public RamenRequestBus::Handler
+    {
+    public:
+        void AddPepper() override {  };
+    };
+
+    class RamenRequestBehaviorHandler
+        : public RamenRequestBus::Handler
+        , public BehaviorEBusHandler
+    {
+    public:
+        AZ_EBUS_BEHAVIOR_BINDER(RamenRequestBehaviorHandler, "{EB4E043B-AD1A-4745-A725-91100E191517}", AZ::SystemAllocator, AddPepper);
+
+        void AddPepper() override 
+        {  
+            Call(FN_AddPepper);
+        }
+    };
+    // RamenRequests 
+
+    // RamenShopNotifications
+    class RamenShopNotifications
+        : public AZ::EBusTraits
+    {
+    public:
+        typedef unsigned int BusIdType;
+        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+
+        virtual void OnOrderCancelled(int id) = 0;
+    };
+    using RamenShopNotificationBus = AZ::EBus<RamenShopNotifications>;
+
+    class RamenShopNotificationHandler
+        : public RamenShopNotificationBus::MultiHandler
+    {
+    public:
+        void OnOrderCancelled(int /*id*/) override {};
+    };
+
+    class RamenShopNotificationBehaviorHandler
+        : public RamenShopNotificationBus::MultiHandler
+        , public BehaviorEBusHandler
+    {
+    public:
+        AZ_EBUS_BEHAVIOR_BINDER(RamenShopNotificationBehaviorHandler, "{98A0C1B1-0B81-4563-886A-03204DDBE146}", AZ::SystemAllocator, OnOrderCancelled);
+
+        void OnOrderCancelled(int id) override 
+        {
+            Call(FN_OnOrderCancelled, id);
+        }
+    };
+    // RamenShopNotifications
+
+    class ScriptBehaviorHandlerIsConnectedTest
+        : public AllocatorsFixture
+    {
+    public:
+        static void TestAssert(bool check)
+        {
+            AZ_Assert(check, "Script Test assert");
+        }
+
+        void SetUp() override
+        {
+            AllocatorsFixture::SetUp();
+
+            m_behaviorContext = aznew BehaviorContext();
+            m_behaviorContext->Method("TestAssert", &ScriptBehaviorHandlerIsConnectedTest::TestAssert);
+
+            m_behaviorContext->EBus<RamenRequestBus>("RamenRequestBus")->
+                Handler<RamenRequestBehaviorHandler>()->
+                    Event("AddPepper", &RamenRequestBus::Events::AddPepper);
+
+            m_behaviorContext->EBus<RamenShopNotificationBus>("RamenShopNotificationBus")->
+                Handler<RamenShopNotificationBehaviorHandler>()->
+                    Event("OnOrderCancelled", &RamenShopNotificationBus::Events::OnOrderCancelled);
+
+            m_scriptContext = aznew ScriptContext();
+            m_scriptContext->BindTo(m_behaviorContext);
+
+        }
+
+        void TearDown() override
+        {
+            delete m_scriptContext;
+            delete m_behaviorContext;
+
+            AllocatorsFixture::TearDown();
+        }
+
+        ScriptContext* m_scriptContext;
+        BehaviorContext* m_behaviorContext;
+    };
+
+    TEST_F(ScriptBehaviorHandlerIsConnectedTest, IsConnected_UberTest)
+    {
+            const char luaCode[] = R"(
+ramen = {
+    handler1 = nil,
+    handler2 = nil
+}
+ramen.handler1 = RamenRequestBus.Connect(ramen, 1)
+ramen.handler2 = RamenRequestBus.Connect(ramen, 2)
+
+ramenShop = {
+    handler = nil
+}
+ramenShop.handler = RamenShopNotificationBus.CreateHandler(ramenShop)
+ramenShop.handler:Connect(3);
+ramenShop.handler:Connect(4);
+)";
+        m_scriptContext->Execute(luaCode);
+
+        m_scriptContext->Execute("TestAssert(ramen.handler1:IsConnected())");
+        m_scriptContext->Execute("TestAssert(ramen.handler1:IsConnectedId(1))");
+        m_scriptContext->Execute("TestAssert(ramen.handler2:IsConnectedId(2))");
+
+        m_scriptContext->Execute("TestAssert(ramenShop.handler:IsConnected())");
+        m_scriptContext->Execute("TestAssert(ramenShop.handler:IsConnectedId(3))");
+        m_scriptContext->Execute("TestAssert(ramenShop.handler:IsConnectedId(4))");
     }
 
     //-----------------------------------------------------------------------------
@@ -3731,12 +3915,12 @@ namespace UnitTest
             script.Execute(luaCode);
 
             // Test sending messages from C++ to two LUA handlers on different bus ids
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT_ID(1, TestIdBus, VoidFunc0);
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             EBUS_EVENT_ID(2, TestIdBus, VoidFunc0);
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             float ret = 0.f;
             EBUS_EVENT_ID_RESULT(ret, 1, TestIdBus, Pick, 1.f, 2.f, 3.f);
             AZ_TEST_ASSERT(ret == 1.f);
@@ -3750,27 +3934,27 @@ namespace UnitTest
             script.Execute("handler = TestIdBus.Connect(MyBusHandlerMetaTable1, 1)");
             TestIdBusCPPHandler cppHandler;
             cppHandler.BusConnect(3);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestIdBus.Event.VoidFunc0(1)"); // send even on id=1
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestIdBus.Event.Pick(1, 1.0, 2.0, 3.0) == 1.0)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestIdBus.Event.VoidFunc0(3)");
-            AZ_TEST_STOP_ASSERTTEST(1);
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("TestAssert(TestIdBus.Event.Pick(3, 1.0, 2.0, 3.0) == 3.0)");
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             script.Execute("handler:Disconnect()");
 
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("handler:Connect('my fake bus id')");
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
 
-            AZ_TEST_START_ASSERTTEST;
+            AZ_TEST_START_TRACE_SUPPRESSION;
             script.Execute("handler = TestIdBus.Connect({ }, 'my fake bus id')");
-            AZ_TEST_STOP_ASSERTTEST(1);
+            AZ_TEST_STOP_TRACE_SUPPRESSION(1);
             script.Execute("TestAssert(handler == nil)");
         }
     };
@@ -3817,7 +4001,6 @@ namespace UnitTest
             s_wasCalled = false;
 
             m_behavior = aznew BehaviorContext();
-            AzStdReflectionComponent::Reflect(m_behavior);
 
             m_behavior->Class<DataContainer>("DataContainer")
                 ->Constructor<int>()
@@ -3844,7 +4027,7 @@ namespace UnitTest
     };
     bool AnyScriptBindTest::s_wasCalled = false;
 
-    TEST_F(AnyScriptBindTest, ScriptContextAny_AnyToLua)
+    TEST_F(AnyScriptBindTest, ScriptContextAny_AnyFromLua)
     {
         m_script->Execute("TestThatDataIs10(DataContainer(10))");
         EXPECT_TRUE(s_wasCalled);
@@ -4130,7 +4313,7 @@ namespace UnitTest
     }
 
     class UnregisteredSharedPointerTest
-        : public AllocatorsFixture
+        : public BehaviorContextFixture
     {
     public:
         struct UnregisteredType
@@ -4151,27 +4334,23 @@ namespace UnitTest
 
         void SetUp() override
         {
-            AllocatorsFixture::SetUp();
+            BehaviorContextFixture::SetUp();
 
-            m_behavior = aznew BehaviorContext();
-
-            m_behavior->Method("AZTestAssert", &AZTestAssert);
-            m_behavior->Method("GetPtr", &GetPtr);
-            m_behavior->Method("TestIsPtrNullptr", &TestIsPtrNullptr);
+            m_behaviorContext->Method("AZTestAssert", &AZTestAssert);
+            m_behaviorContext->Method("GetPtr", &GetPtr);
+            m_behaviorContext->Method("TestIsPtrNullptr", &TestIsPtrNullptr);
 
             m_script = aznew ScriptContext();
-            m_script->BindTo(m_behavior);
+            m_script->BindTo(m_behaviorContext);
         }
 
         void TearDown() override
         {
-            delete m_script;
-            delete m_behavior;
+            delete m_script;            
 
-            AllocatorsFixture::TearDown();
+            BehaviorContextFixture::TearDown();
         }
-
-        BehaviorContext* m_behavior = nullptr;
+        
         ScriptContext* m_script = nullptr;
     };
 

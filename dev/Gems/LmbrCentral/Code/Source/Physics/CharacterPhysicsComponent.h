@@ -37,7 +37,6 @@ namespace AZ
 
 namespace LmbrCentral
 {
-
     /*!
      * In-game physics component for characters.
      * An entity with a character physics component can be used for players, bots or other complicated entities
@@ -258,12 +257,17 @@ namespace LmbrCentral
         {
             provided.push_back(AZ_CRC("PhysicsService", 0xa7350d22));
             provided.push_back(AZ_CRC("CharacterPhysicsService", 0x3cd4f075));
+            provided.push_back(AZ_CRC("LegacyCryPhysicsService", 0xbb370351));
         }
 
         static void GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
         {
             incompatible.push_back(AZ_CRC("PhysicsService", 0xa7350d22));
             incompatible.push_back(AZ_CRC("CharacterPhysicsService", 0x3cd4f075));
+        }
+        static void GetDependentServices(AZ::ComponentDescriptor::DependencyArrayType& dependent)
+        {
+            AZ_UNUSED(dependent);
         }
 
         static void GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
@@ -324,6 +328,7 @@ namespace LmbrCentral
         ////////////////////////////////////////////////////////////////////////
         // CharacterPhysicsRequestBus
         void RequestVelocity(const AZ::Vector3& velocity, int jump) override;
+        bool IsCryCharacterControllerPresent() const override { return true; }
         ////////////////////////////////////////////////////////////////////////
 
         //////////////////////////////////////////////////////////////////////////
@@ -333,11 +338,10 @@ namespace LmbrCentral
 
         //////////////////////////////////////////////////////////////////////////
         // Non reflected data
-        IPhysicalEntity* m_physicalEntity = nullptr;
+        AZStd::shared_ptr<IPhysicalEntity> m_physicalEntity;
         bool m_isApplyingPhysicsToEntityTransform = false;
         SProximityElement* m_proximityTriggerProxy = nullptr;
         AZ::Transform m_previousEntityTransform = AZ::Transform::CreateIdentity();
         //////////////////////////////////////////////////////////////////////////
-
     };
 } // namespace LmbrCentral

@@ -22,7 +22,6 @@
 #if defined(LINUX) || defined(APPLE)
   #include <platform.h>
 #endif
-#include <CryEngineAPI.h>
 
 #include "smartptr.h"
 #include <IFlares.h> // <> required for Interfuscator
@@ -61,7 +60,7 @@ struct IAnimNode;
 struct SSkinningData;
 struct SSTexSamplerFX;
 struct SShaderTextureSlot;
-
+struct IRenderElement;
 
 namespace AZ
 {
@@ -212,18 +211,20 @@ union UParamVal
 //   if you don't like it, please write a substitute for all string within the project and use them everywhere.
 struct SShaderParam
 {
-    char m_Name[32];
-    EParamType m_Type;
+    AZStd::string m_Name;
+    AZStd::string m_Script;
     UParamVal m_Value;
-    string m_Script;
+    EParamType m_Type;
     uint8 m_eSemantic;
+    uint8 m_Pad[3] = { 0 };
 
     inline void Construct()
     {
         memset(&m_Value, 0, sizeof(m_Value));
         m_Type = eType_UNKNOWN;
         m_eSemantic = 0;
-        m_Name[0] = 0;
+        m_Name.clear();
+        m_Script.clear();
     }
     inline SShaderParam()
     {
@@ -261,7 +262,7 @@ struct SShaderParam
     }
     inline SShaderParam (const SShaderParam& src)
     {
-        memcpy(m_Name, src.m_Name, sizeof(m_Name));
+        m_Name = src.m_Name;
         m_Script = src.m_Script;
         m_Type = src.m_Type;
         m_eSemantic = src.m_eSemantic;
@@ -293,7 +294,7 @@ struct SShaderParam
             {
                 continue;
             }
-            if (!azstricmp(sp->m_Name, name))
+            if (azstricmp(sp->m_Name.c_str(), name) == 0)
             {
                 if (sp->m_Type == eType_STRING)
                 {
@@ -501,6 +502,11 @@ class CTexture;
 #define MDV_WIND               0x800
 #define MDV_DEPTH_OFFSET       0x2000
 
+// Does the vertex shader require position-invariant compilation?
+// This would be true of shaders rendering multiple times with different vertex shaders - for example during zprepass and the gbuffer pass
+// Note this is different than the technique flag FHF_POSITION_INVARIANT as that does custom behavior for terrain
+#define MDV_POSITION_INVARIANT 0x4000
+
 // Summary:
 //   Deformations/Morphing types.
 enum EDeformType
@@ -632,33 +638,22 @@ struct SDeformInfo
 {
     EDeformType m_eType;
     SWaveForm2 m_WaveX;
-    SWaveForm2 m_WaveY;
-    SWaveForm2 m_WaveZ;
-    SWaveForm2 m_WaveW;
     float m_fDividerX;
-    float m_fDividerY;
-    float m_fDividerZ;
-    float m_fDividerW;
     Vec3 m_vNoiseScale;
 
     SDeformInfo()
     {
         m_eType = eDT_Unknown;
         m_fDividerX = 0.01f;
-        m_fDividerY = 0.01f;
-        m_fDividerZ = 0.01f;
-        m_fDividerW = 0.01f;
         m_vNoiseScale = Vec3(1, 1, 1);
     }
 
     inline bool operator == (const SDeformInfo& m)
     {
         if (m_eType == m.m_eType &&
-            m_WaveX == m.m_WaveX && m_WaveY == m.m_WaveY &&
-            m_WaveZ == m.m_WaveZ && m_WaveW == m.m_WaveW &&
+            m_WaveX == m.m_WaveX &&
             m_vNoiseScale == m.m_vNoiseScale &&
-            m_fDividerX != m.m_fDividerX && m_fDividerY != m.m_fDividerY &&
-            m_fDividerZ != m.m_fDividerZ && m_fDividerW != m.m_fDividerW)
+            m_fDividerX == m.m_fDividerX)
         {
             return true;
         }
@@ -783,24 +778,16 @@ struct SRenderObjData
 {
     uintptr_t m_uniqueObjectId;
 
-    CRendElementBase* m_pRE;
     SSkinningData* m_pSkinningData;
-    TArray<Vec4>    m_Constants;
 
     float   m_fTempVars[10];                                    // Different useful vars (ObjVal component in shaders)
 
     // using a pointer, the client code has to ensure that the data stays valid
     const DynArray<SShaderParam>* m_pShaderParams;
 
-    uint16 m_nLightID;
-
     uint32  m_nHUDSilhouetteParams;
 
-    uint32  m_pLayerEffectParams; // only used for layer effects
-
     uint64 m_nSubObjHideMask;
-
-    uint64 m_ShadowCasters;          // Mask of shadow casters.
 
     union
     {
@@ -810,16 +797,9 @@ struct SRenderObjData
 
     SBending* m_BendingPrev;
 
-    SSectorTextureSet* m_pTerrainSectorTextureInfo;
-
     uint16  m_FogVolumeContribIdx[2];
-
-    uint16  m_scissorX;
-    uint16  m_scissorY;
-
-    uint16  m_scissorWidth;
-    uint16  m_scissorHeight;
-
+    
+    uint16  m_nLightID;
     uint16  m_LightVolumeId;
 
     uint8 m_screenBounds[4];
@@ -835,23 +815,18 @@ struct SRenderObjData
     void Init()
     {
         m_nSubObjHideMask = 0;
-        m_Constants.Free();
         m_uniqueObjectId = 0;
-        m_pRE = NULL;
-        m_pLayerEffectParams = 0;
         m_nLightID = 0;
         m_LightVolumeId = 0;
         m_pSkinningData = NULL;
-        m_pTerrainSectorTextureInfo = nullptr;
-        m_scissorX = m_scissorY = m_scissorWidth = m_scissorHeight = 0;
         m_screenBounds[0] = m_screenBounds[1] = m_screenBounds[2] = m_screenBounds[3] = 0;
         m_nCustomData = 0;
         m_nCustomFlags = 0;
-        m_pLayerEffectParams = m_nHUDSilhouetteParams = 0;
-        m_ShadowCasters = 0;
+        m_nHUDSilhouetteParams = 0;
         m_pBending = nullptr;
         m_BendingPrev = nullptr;
         m_pShaderParams = nullptr;
+        m_FogVolumeContribIdx[0] = m_FogVolumeContribIdx[1] = static_cast<uint16>(-1);
 
         // The following should be changed to be something like 0xac to indicate invalid data so that by default 
         // data that was not set will break render features and will be traced (otherwise, default 0 just might pass)
@@ -865,7 +840,7 @@ struct SRenderObjData
 
     void GetMemoryUsage(ICrySizer* pSizer) const
     {
-        pSizer->AddObject(m_Constants);
+        AZ_UNUSED(pSizer);
     }
 } _ALIGN(16);
 
@@ -889,6 +864,8 @@ struct ShadowMapFrustum;
 _MS_ALIGN(16) class CRenderObject
 {
 public:
+    AZ_CLASS_ALLOCATOR(CRenderObject, AZ::LegacyAllocator, 0);
+
     struct SInstanceInfo
     {
         Matrix34 m_Matrix;
@@ -947,23 +924,19 @@ public:
     uint8                       m_DissolveRef;            //!< Dissolve value
     uint8                       m_RState;                 //!< Render state used for object
 
+    bool                        m_NoDecalReceiver;
+
     uint32                      m_nMaterialLayers;        //!< Which mtl layers active and how much to blend them
 
     IRenderNode*                m_pRenderNode;            //!< Will define instance id.
     _smart_ptr<IMaterial>       m_pCurrMaterial;          //!< Parent material used for render object.
-    CRendElementBase*           m_pRE;                    //!< RenderElement used by this CRenderObject
+    IRenderElement*             m_pRE;                    //!< RenderElement used by this CRenderObject
 
     PerInstanceConstantBufferKey m_PerInstanceConstantBufferKey;
-
-    // Common flags
-    uint32                     m_bWasDeleted : 1; //!< Object was deleted and in unusable state
-    uint32                     m_bHasShadowCasters : 1; //!< Has non-empty list of lights casting shadows in render object data
 
     //! Embedded SRenderObjData, optional data carried by CRenderObject
     SRenderObjData             m_data;
 
-private:
-    int16               m_nObjDataId;
 public:
 
     //////////////////////////////////////////////////////////////////////////
@@ -1011,10 +984,7 @@ public:
         m_nRTMask = 0;
         m_pRenderNode = NULL;
 
-        m_pNextSubObject = NULL;
-        m_bWasDeleted = false;
-        m_bHasShadowCasters = false;
-
+        m_NoDecalReceiver = false;
         m_data.Init();
     }
     void AssignId(uint32 id) { m_Id = id; }
@@ -1026,11 +996,10 @@ public:
         return &m_data;
     }
 
-    ILINE CRendElementBase* GetRE() const { return m_pRE; }
+    IRenderElement* GetRE() { return m_pRE; }
+    void SetRE(IRenderElement* re) { m_pRE = re; }
 
 protected:
-    // Next child sub object used for permanent objects
-    CRenderObject*              m_pNextSubObject;
 
     // Disallow copy (potential bugs with PERMANENT objects)
     // alwasy use IRendeer::EF_DuplicateRO if you want a copy
@@ -1039,9 +1008,7 @@ protected:
 
     void CloneObject(CRenderObject* srcObj)
     {
-        CRenderObject* prevObj = m_pNextSubObject;
         *this = *srcObj;
-        m_pNextSubObject = prevObj; // Prevent next render object pointer from copying
     }
 
     friend class CRenderer;
@@ -1056,6 +1023,7 @@ enum EResClassName
 // className: CTexture, CHWShader_VS, CHWShader_PS, CShader
 struct SResourceAsync
 {
+    AZ_CLASS_ALLOCATOR(SResourceAsync, AZ::LegacyAllocator, 0);
     int nReady;          // 0: Not ready; 1: Ready; -1: Error
     byte* pData;
     EResClassName eClassName;     // Resource class name
@@ -1195,6 +1163,7 @@ enum ETexGenType
 
 struct SEfTexModificator
 {
+    AZ_CLASS_ALLOCATOR(SEfTexModificator, AZ::LegacyAllocator, 0);
     bool SetMember(const char* szParamName, float fValue)
     {
         CASE_TEXMODBYTE(m_eTGType);
@@ -1362,55 +1331,32 @@ struct STexState
     bool m_bComparison;
     bool m_bSRGBLookup;
     byte m_bPAD;
+    // NOTE: There are 4 more pad bytes that exist here because m_pDeviceState is a 64-bit pointer.
+    uint32 m_PadBytes;
 
     STexState ()
     {
-        m_nMinFilter = 0;
-        m_nMagFilter = 0;
-        m_nMipFilter = 0;
-        m_nAnisotropy = 0;
-        m_nAddressU = 0;
-        m_nAddressV = 0;
-        m_nAddressW = 0;
-        m_dwBorderColor = 0;
-        m_MipBias = 0.0f;
-        padding = 0;
-        m_bSRGBLookup = false;
-        m_bActive = false;
-        m_bComparison = false;
-        m_pDeviceState = NULL;
-        m_bPAD = 0;
+        // Make sure we clear everything, including "invisible" pad bytes.
+        memset(this, 0, sizeof(*this));
     }
     STexState(int nFilter, bool bClamp)
     {
-        m_pDeviceState = NULL;
+        memset(this, 0, sizeof(*this));
         int nAddress = bClamp ? TADDR_CLAMP : TADDR_WRAP;
         SetFilterMode(nFilter);
         SetClampMode(nAddress, nAddress, nAddress);
         SetBorderColor(0);
-        m_MipBias = 0.0f;
-        m_bSRGBLookup = false;
-        m_bActive = false;
-        m_bComparison = false;
-        padding = 0;
-        m_bPAD = 0;
     }
     STexState(int nFilter, int nAddressU, int nAddressV, int nAddressW, unsigned int borderColor)
     {
-        m_pDeviceState = NULL;
+        memset(this, 0, sizeof(*this));
         SetFilterMode(nFilter);
         SetClampMode(nAddressU, nAddressV, nAddressW);
         SetBorderColor(borderColor);
-        m_MipBias = 0.0f;
-        m_bSRGBLookup = false;
-        m_bActive = false;
-        m_bComparison = false;
-        padding = 0;
-        m_bPAD = 0;
     }
 
-    ENGINE_API void Destroy();
-    ENGINE_API void Init(const STexState& src);
+    void Destroy();
+    void Init(const STexState& src);
 
     ~STexState() { Destroy(); }
     STexState(const STexState& src) { Init(src); }
@@ -1431,11 +1377,11 @@ struct STexState
         delete this;
     }
 
-    ENGINE_API bool SetFilterMode(int nFilter);
-    ENGINE_API bool SetClampMode(int nAddressU, int nAddressV, int nAddressW);
-    ENGINE_API void SetBorderColor(DWORD dwColor);
-    ENGINE_API void SetComparisonFilter(bool bEnable);
-    ENGINE_API void PostCreate();
+    bool SetFilterMode(int nFilter);
+    bool SetClampMode(int nAddressU, int nAddressV, int nAddressW);
+    void SetBorderColor(DWORD dwColor);
+    void SetComparisonFilter(bool bEnable);
+    void PostCreate();
 };
 
 
@@ -1574,6 +1520,11 @@ struct STexSamplerRT
 
     bool        m_bGlobal;
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // CRC of texture name if this is an engine texture
+    uint32_t m_nCrc;
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
     STexSamplerRT()
     {
         m_nTexState = -1;
@@ -1585,6 +1536,9 @@ struct STexSamplerRT
         m_nSamplerSlot = -1;
         m_nTextureSlot = -1;
         m_bGlobal = false;
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED       
+        m_nCrc = 0;
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
     }
     ~STexSamplerRT()
     {
@@ -1635,6 +1589,9 @@ struct STexSamplerRT
         m_nSamplerSlot = src.m_nSamplerSlot;
         m_nTextureSlot = src.m_nTextureSlot;
         m_bGlobal = src.m_bGlobal;
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+        m_nCrc = src.m_nCrc;
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
     }
     NO_INLINE STexSamplerRT& operator = (const STexSamplerRT& src)
     {
@@ -1657,6 +1614,9 @@ struct STexSamplerRT
         m_nSamplerSlot = -1;
         m_nTextureSlot = -1;
         m_bGlobal = (src.m_nTexFlags & FT_FROMIMAGE) != 0;
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+        m_nCrc = 0;
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
     }
     inline bool operator != (const STexSamplerRT& m) const
     {
@@ -1770,7 +1730,7 @@ struct SEfResTexture
     STexSamplerRT       m_Sampler;
     SEfResTextureExt    m_Ext;
 
-    void UpdateForCreate();
+    void UpdateForCreate(int nTSlot);
     void Update(int nTSlot);
     void UpdateWithModifier(int nTSlot);
 
@@ -2504,6 +2464,7 @@ enum ERenderListID
     EFSLIST_EYE_OVERLAY,                         // Eye overlay layer requires special processing
     EFSLIST_FOG_VOLUME,                          // Fog density injection passes.
     EFSLIST_GPU_PARTICLE_CUBEMAP_COLLISION,       // Cubemaps for GPU particle cubemap depth collision
+    EFSLIST_REFRACTIVE_SURFACE,                   // After decals, used for instance for the water surface that comes with water volumes.
 
     EFSLIST_NUM
 };
@@ -2646,6 +2607,12 @@ public:
     virtual bool FXSetCSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
     virtual bool FXSetVSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
     virtual bool FXSetGSFloat(const CCryNameR& NameParam, const Vec4 fParams[], int nParams) = 0;
+
+    virtual bool FXSetPSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetCSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetVSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+    virtual bool FXSetGSFloat(const char* NameParam, const Vec4 fParams[], int nParams) = 0;
+
     virtual bool FXBegin(uint32* uiPassCount, uint32 nFlags) = 0;
     virtual bool FXBeginPass(uint32 uiPass) = 0;
     virtual bool FXCommit(const uint32 nFlags) = 0;
@@ -2902,6 +2869,7 @@ struct SRenderLight
         m_nAttenFalloffMax = 255;
         m_fAttenuationBulbSize = 0.1f;
         m_fProbeAttenuation = 1.0f;
+        m_lightId = -1;
     }
 
     const Vec3& GetPosition() const
@@ -3062,6 +3030,7 @@ struct SRenderLight
     int16 m_sY;
     int16 m_sWidth;
     int16 m_sHeight;
+    int m_lightId;
 
     // Env. probes
     ITexture* m_pDiffuseCubemap;                    // Very small cubemap texture to make a lookup for diffuse.
@@ -3317,12 +3286,14 @@ struct SDeferredDecal
     {
         ZeroStruct(*this);
         rectTexture.w = rectTexture.h = 1.f;
+        angleAttenuation = 1.0f;
     }
 
     Matrix34 projMatrix; // defines where projection should be applied in the world
     _smart_ptr<IMaterial> pMaterial; // decal material
     float fAlpha; // transparency of decal, used mostly for distance fading
     float fGrowAlphaRef;
+    float angleAttenuation;
     RectF rectTexture; // subset of texture to render
     uint32 nFlags;
     uint8 nSortOrder; // user defined sort order

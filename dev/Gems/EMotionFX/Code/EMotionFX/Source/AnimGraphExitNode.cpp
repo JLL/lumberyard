@@ -10,7 +10,8 @@
 *
 */
 
-// include the required headers
+#include <AzCore/Serialization/SerializeContext.h>
+#include <AzCore/Serialization/EditContext.h>
 #include "EMotionFXConfig.h"
 #include "AnimGraphExitNode.h"
 #include "AnimGraphInstance.h"
@@ -18,91 +19,55 @@
 #include "AnimGraphStateMachine.h"
 #include "AnimGraphManager.h"
 #include "EMotionFXManager.h"
+#include <EMotionFX/Source/AnimGraph.h>
 
 
 namespace EMotionFX
 {
-    // constructor
-    AnimGraphExitNode::AnimGraphExitNode(AnimGraph* animGraph)
-        : AnimGraphNode(animGraph, nullptr, TYPE_ID)
-    {
-        // allocate space for the variables
-        CreateAttributeValues();
-        RegisterPorts();
-        InitInternalAttributesForAllInstances();
-    }
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphExitNode, AnimGraphAllocator, 0)
+    AZ_CLASS_ALLOCATOR_IMPL(AnimGraphExitNode::UniqueData, AnimGraphObjectUniqueDataAllocator, 0)
 
-
-    // destructor
-    AnimGraphExitNode::~AnimGraphExitNode()
-    {
-    }
-
-
-    // create
-    AnimGraphExitNode* AnimGraphExitNode::Create(AnimGraph* animGraph)
-    {
-        return new AnimGraphExitNode(animGraph);
-    }
-
-
-    AnimGraphObjectData* AnimGraphExitNode::CreateObjectData()
-    {
-        return new UniqueData(this, nullptr);
-    }
-
-
-    // register the ports
-    void AnimGraphExitNode::RegisterPorts()
+    AnimGraphExitNode::AnimGraphExitNode()
+        : AnimGraphNode()
     {
         // setup the output ports
         InitOutputPorts(1);
         SetupOutputPortAsPose("Output", OUTPUTPORT_RESULT, PORTID_OUTPUT_POSE);
     }
 
-
-    // register the parameters
-    void AnimGraphExitNode::RegisterAttributes()
+    AnimGraphExitNode::~AnimGraphExitNode()
     {
     }
 
+    bool AnimGraphExitNode::InitAfterLoading(AnimGraph* animGraph)
+    {
+        if (!AnimGraphNode::InitAfterLoading(animGraph))
+        {
+            return false;
+        }
 
-    // get the palette name
+        InitInternalAttributesForAllInstances();
+
+        Reinit();
+        return true;
+    }
+
     const char* AnimGraphExitNode::GetPaletteName() const
     {
         return "Exit Node";
     }
 
-
-    // get the category
     AnimGraphObject::ECategory AnimGraphExitNode::GetPaletteCategory() const
     {
         return AnimGraphObject::CATEGORY_SOURCES;
     }
 
-
-    // create a clone of this node
-    AnimGraphObject* AnimGraphExitNode::Clone(AnimGraph* animGraph)
-    {
-        // create the clone
-        AnimGraphExitNode* clone = new AnimGraphExitNode(animGraph);
-
-        // copy base class settings such as parameter values to the new clone
-        CopyBaseObjectTo(clone);
-
-        // return a pointer to the clone
-        return clone;
-    }
-
-
-    // pre-create unique data object
     void AnimGraphExitNode::OnUpdateUniqueData(AnimGraphInstance* animGraphInstance)
     {
         UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
         if (uniqueData == nullptr)
         {
-            //uniqueData = new UniqueData(this, animGraphInstance);
-            uniqueData = (UniqueData*)GetEMotionFX().GetAnimGraphManager()->GetObjectDataPool().RequestNew(TYPE_ID, this, animGraphInstance);
+            uniqueData = aznew AnimGraphExitNode::UniqueData(this, animGraphInstance);
             animGraphInstance->RegisterUniqueObjectData(uniqueData);
         }
         else
@@ -112,10 +77,10 @@ namespace EMotionFX
                 uniqueData->mPreviousNode = nullptr;
             }
         }
+
+        OnUpdateTriggerActionsUniqueData(animGraphInstance);
     }
 
-
-    // when entering this state/node
     void AnimGraphExitNode::OnStateEntering(AnimGraphInstance* animGraphInstance, AnimGraphNode* previousState, AnimGraphStateTransition* usedTransition)
     {
         MCORE_UNUSED(usedTransition);
@@ -123,16 +88,12 @@ namespace EMotionFX
         uniqueData->mPreviousNode = previousState;
     }
 
-
-    // rewind the node
     void AnimGraphExitNode::Rewind(AnimGraphInstance* animGraphInstance)
     {
         UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
         uniqueData->mPreviousNode = nullptr;
     }
 
-
-    // update
     void AnimGraphExitNode::Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds)
     {
         // if the previous node is not set, do nothing
@@ -143,15 +104,21 @@ namespace EMotionFX
             return;
         }
 
-        //
         UpdateIncomingNode(animGraphInstance, uniqueData->mPreviousNode, timePassedInSeconds);
-        uniqueData->mPreviousNode->IncreasePoseRefCount(animGraphInstance);
-        uniqueData->mPreviousNode->IncreaseRefDataRefCount(animGraphInstance);
+
+        AnimGraphStateMachine* parentStateMachine = azdynamic_cast<AnimGraphStateMachine*>(GetParentNode());
+        if (parentStateMachine)
+        {
+            // The exit node evaluates and outputs the transforms from the previous node. Transfer ref counting ownership to the
+            // parent state machine to make sure it will be decreased properly even though we're fully blended into the exit node.
+            AnimGraphStateMachine::UniqueData* parentUniqueData = static_cast<AnimGraphStateMachine::UniqueData*>(parentStateMachine->FindUniqueNodeData(animGraphInstance));
+            parentUniqueData->IncreasePoseRefCountForNode(uniqueData->mPreviousNode, animGraphInstance);
+            parentUniqueData->IncreaseDataRefCountForNode(uniqueData->mPreviousNode, animGraphInstance);
+        }
+
         uniqueData->Init(animGraphInstance, uniqueData->mPreviousNode);
     }
 
-
-    // perform the calculations / actions
     void AnimGraphExitNode::Output(AnimGraphInstance* animGraphInstance)
     {
         AnimGraphPose* outputPose;
@@ -166,12 +133,10 @@ namespace EMotionFX
             outputPose->InitFromBindPose(actorInstance);
 
             // visualize it
-        #ifdef EMFX_EMSTUDIOBUILD
-            if (GetCanVisualize(animGraphInstance))
+            if (GetEMotionFX().GetIsInEditorMode() && GetCanVisualize(animGraphInstance))
             {
                 actorInstance->DrawSkeleton(outputPose->GetPose(), mVisualizeColor);
             }
-        #endif
 
             return;
         }
@@ -191,19 +156,17 @@ namespace EMotionFX
             outputPose->InitFromBindPose(actorInstance);
         }
 
-        uniqueData->mPreviousNode->DecreaseRef(animGraphInstance);
+        // We moved ownership of decreasing the ref to the parent parent state machine as it might happen that within one of the multiple
+        // passes the state machine is doing, the entry node is transitioned over while we never reach the decrease ref point.
+        //uniqueData->mPreviousNode->DecreaseRef(animGraphInstance);
 
         // visualize it
-    #ifdef EMFX_EMSTUDIOBUILD
-        if (GetCanVisualize(animGraphInstance))
+        if (GetEMotionFX().GetIsInEditorMode() && GetCanVisualize(animGraphInstance))
         {
             actorInstance->DrawSkeleton(outputPose->GetPose(), mVisualizeColor);
         }
-    #endif
     }
 
-
-    // top down update
     void AnimGraphExitNode::TopDownUpdate(AnimGraphInstance* animGraphInstance, float timePassedInSeconds)
     {
         // if there is no previous node, do nothing
@@ -220,8 +183,6 @@ namespace EMotionFX
         uniqueData->mPreviousNode->PerformTopDownUpdate(animGraphInstance, timePassedInSeconds);
     }
 
-
-    // post update
     void AnimGraphExitNode::PostUpdate(AnimGraphInstance* animGraphInstance, float timePassedInSeconds)
     {
         // if there is no previous node, do nothing
@@ -249,15 +210,6 @@ namespace EMotionFX
         uniqueData->mPreviousNode->DecreaseRefDataRef(animGraphInstance);
     }
 
-
-    // get the blend node type string
-    const char* AnimGraphExitNode::GetTypeString() const
-    {
-        return "AnimGraphExitNode";
-    }
-
-
-    // reset flags
     void AnimGraphExitNode::RecursiveResetFlags(AnimGraphInstance* animGraphInstance, uint32 flagsToDisable)
     {
         UniqueData* uniqueData = static_cast<UniqueData*>(animGraphInstance->FindUniqueObjectData(this));
@@ -269,5 +221,29 @@ namespace EMotionFX
             uniqueData->mPreviousNode->RecursiveResetFlags(animGraphInstance, flagsToDisable);
         }
     }
-}   // namespace EMotionFX
 
+    void AnimGraphExitNode::Reflect(AZ::ReflectContext* context)
+    {
+        AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
+        if (!serializeContext)
+        {
+            return;
+        }
+
+        serializeContext->Class<AnimGraphExitNode, AnimGraphNode>()
+            ->Version(1);
+
+
+        AZ::EditContext* editContext = serializeContext->GetEditContext();
+        if (!editContext)
+        {
+            return;
+        }
+
+        editContext->Class<AnimGraphExitNode>("Exit Node", "Exit node attributes")
+            ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+            ->Attribute(AZ::Edit::Attributes::AutoExpand, "")
+            ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
+            ;
+    }
+} // namespace EMotionFX

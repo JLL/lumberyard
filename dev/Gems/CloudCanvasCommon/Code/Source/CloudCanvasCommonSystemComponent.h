@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 */
 
@@ -21,13 +21,20 @@
 #include <CloudCanvas/ICloudCanvas.h>
 #include <CrySystemBus.h>
 
+#include <PresignedURL/PresignedURL.h>
+#include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/Jobs/JobManager.h>
+#include <AzCore/Jobs/JobContext.h>
+#include <AzCore/Jobs/JobCancelGroup.h>
+
 namespace CloudCanvasCommon
 {
     class CloudCanvasCommonSystemComponent
         : public AZ::Component
         , protected CloudCanvasCommonRequestBus::Handler
-        , protected CloudCanvas::AwsApiInitRequestBus::Handler,
-          public CrySystemEventBus::Handler
+        , protected CloudCanvas::AwsApiInitRequestBus::Handler
+        , public CrySystemEventBus::Handler
+        , public CloudCanvas::PresignedURLManager
     {
     public:
 
@@ -67,18 +74,21 @@ namespace CloudCanvasCommon
 
         // Some platforms (Android) need to point the http client at the certificate bundle to avoid SSL errors
         virtual CloudCanvas::RequestRootCAFileResult RequestRootCAFile(AZStd::string& resultPath) override;
+        // Skips over platform checks - called by RequestRootCAFile
+        virtual CloudCanvas::RequestRootCAFileResult GetUserRootCAFile(AZStd::string& resultPath) override;
 
         virtual CloudCanvas::RequestRootCAFileResult LmbrRequestRootCAFile(AZStd::string& resultPath) override;
+
+        virtual int GetEndpointHttpResponseCode(const AZStd::string& endPoint) override;
 
         ////////////////////////////////////////////////////////////////////////
         // CrySystemEvents
         void OnCrySystemInitialized(ISystem&, const SSystemInitParams&) override;
         void OnCrySystemShutdown(ISystem&) override;
+
+        AZ::JobContext* GetDefaultJobContext() override;
     private:
         CloudCanvasCommonSystemComponent(const CloudCanvasCommonSystemComponent&) = delete;
-        // Return the resolved path of the RootCA file accessible to the ClientConfig, if it exists, otherwise empty string
-        // Entry point for handling our EBUS requests
-        CloudCanvas::RequestRootCAFileResult GetRootCAFile(AZStd::string& resultPat);
 
         // Early out for platforms which don't need RootCA File in the ClientConfig
         static bool DoesPlatformUseRootCAFile();
@@ -92,9 +102,20 @@ namespace CloudCanvasCommon
         void InitAwsApi();
         void ShutdownAwsApi();
         AZStd::string m_resolvedCertPath;
-        AZStd::atomic<bool> m_resolvedCert;
+        AZStd::atomic<bool> m_resolvedCert{ false };
         AZStd::mutex m_certPathMutex;
         mutable AZStd::mutex m_resolveUserPathMutex;
         AZStd::mutex m_certCopyMutex;
+
+        int m_threadCount{ 2 };
+        int m_firstThreadCPU{ -1 };
+        int m_threadPriority{ 0 };
+        int m_threadStackSize{ -1 };
+
+        // Order here is of importance. To be correct, JobContext needs to 
+        // destruct before the JobManager and the JobCancelGroup.
+        AZStd::unique_ptr<AZ::JobCancelGroup> m_jobCancelGroup{ nullptr };
+        AZStd::unique_ptr<AZ::JobManager> m_jobManager{ nullptr };
+        AZStd::unique_ptr<AZ::JobContext> m_jobContext{ nullptr };
     };
 }

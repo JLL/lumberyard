@@ -10,8 +10,8 @@
 *
 */
 
-#include <Tests/TestTypes.h>
 #include <AzCore/Outcome/Outcome.h>
+#include <AzCore/UnitTest/TestTypes.h>
 
 namespace AzFramework
 {
@@ -26,20 +26,8 @@ namespace AzFramework
 }
 
 using namespace UnitTest;
-class FileFuncTest
-    : public AllocatorsFixture
-{
-public:
-    FileFuncTest()
-        : AllocatorsFixture(15, false)
-    {
-    }
 
-    ~FileFuncTest()
-    {
-    }
-};
-
+using FileFuncTest = AllocatorsFixture;
 
 TEST_F(FileFuncTest, UpdateCfgContents_InValidInput_Fail)
 {

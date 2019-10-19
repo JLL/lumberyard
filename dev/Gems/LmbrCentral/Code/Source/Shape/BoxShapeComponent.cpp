@@ -21,6 +21,23 @@
 
 namespace LmbrCentral
 {
+    void BoxShapeComponent::GetProvidedServices(AZ::ComponentDescriptor::DependencyArrayType& provided)
+    {
+        provided.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        provided.push_back(AZ_CRC("BoxShapeService", 0x946a0032));
+    }
+
+    void BoxShapeComponent::GetIncompatibleServices(AZ::ComponentDescriptor::DependencyArrayType& incompatible)
+    {
+        incompatible.push_back(AZ_CRC("ShapeService", 0xe86aa5fe));
+        incompatible.push_back(AZ_CRC("BoxShapeService", 0x946a0032));
+    }
+
+    void BoxShapeComponent::GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
+    {
+        required.push_back(AZ_CRC("TransformService", 0x8ee22c50));
+    }
+
     void BoxShapeDebugDisplayComponent::Reflect(AZ::ReflectContext* context)
     {
         if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
@@ -32,9 +49,25 @@ namespace LmbrCentral
         }
     }
 
-    void BoxShapeDebugDisplayComponent::Draw(AzFramework::EntityDebugDisplayRequests* displayContext)
+    void BoxShapeDebugDisplayComponent::Activate()
     {
-        DrawBoxShape(g_defaultShapeDrawParams, m_boxShapeConfig, *displayContext);
+        EntityDebugDisplayComponent::Activate();
+        ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
+    }
+
+    void BoxShapeDebugDisplayComponent::Deactivate()
+    {
+        ShapeComponentNotificationsBus::Handler::BusDisconnect();
+        EntityDebugDisplayComponent::Deactivate();
+    }
+
+    void BoxShapeDebugDisplayComponent::Draw(AzFramework::DebugDisplayRequests& debugDisplay)
+    {
+        ShapeDrawParams drawParams = g_defaultShapeDrawParams;
+        drawParams.m_shapeColor = m_boxShapeConfig.GetDrawColor();
+        drawParams.m_filled = m_boxShapeConfig.IsFilled();
+
+        DrawBoxShape(drawParams, m_boxShapeConfig, debugDisplay);
     }
 
     bool BoxShapeDebugDisplayComponent::ReadInConfig(const AZ::ComponentConfig* baseConfig)
@@ -57,6 +90,14 @@ namespace LmbrCentral
         return false;
     }
 
+    void BoxShapeDebugDisplayComponent::OnShapeChanged(ShapeChangeReasons changeReason)
+    {
+        if (changeReason == ShapeChangeReasons::ShapeChanged)
+        {
+            BoxShapeComponentRequestsBus::EventResult(m_boxShapeConfig, GetEntityId(), &BoxShapeComponentRequests::GetBoxConfiguration);
+        }
+    }
+
     namespace ClassConverters
     {
         static bool DeprecateBoxColliderConfiguration(AZ::SerializeContext& context, AZ::SerializeContext::DataElementNode& classElement);
@@ -74,8 +115,8 @@ namespace LmbrCentral
                 &ClassConverters::DeprecateBoxColliderConfiguration)
                 ;
 
-            serializeContext->Class<BoxShapeConfig>()
-                ->Version(1)
+            serializeContext->Class<BoxShapeConfig, ShapeComponentConfig>()
+                ->Version(2)
                 ->Field("Dimensions", &BoxShapeConfig::m_dimensions)
                 ;
 

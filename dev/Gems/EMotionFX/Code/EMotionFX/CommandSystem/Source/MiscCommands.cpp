@@ -24,30 +24,33 @@ namespace CommandSystem
     // CommandRecorderClear
     //--------------------------------------------------------------------------------
 
-    // constructor
+    const char* CommandRecorderClear::s_RecorderClearCmdName = "RecorderClear";
+
     CommandRecorderClear::CommandRecorderClear(MCore::Command* orgCommand)
-        : MCore::Command("RecorderClear", orgCommand)
+        : MCore::Command(s_RecorderClearCmdName, orgCommand)
     {
     }
 
-
-    // destructor
     CommandRecorderClear::~CommandRecorderClear()
     {
     }
 
-
-    // execute
     bool CommandRecorderClear::Execute(const MCore::CommandLine& parameters, AZStd::string& outResult)
     {
         MCORE_UNUSED(parameters);
         MCORE_UNUSED(outResult);
-        EMotionFX::GetRecorder().Clear();
+
+        const bool forceClear = parameters.GetValueAsBool("force", this);
+        m_wasRecording = EMotionFX::GetRecorder().GetIsRecording();
+        m_wasInPlayMode = EMotionFX::GetRecorder().GetIsInPlayMode();
+        if (m_wasRecording || m_wasInPlayMode || forceClear)
+        {
+            EMotionFX::GetRecorder().Clear();
+        }
+
         return true;
     }
 
-
-    // undo the command
     bool CommandRecorderClear::Undo(const MCore::CommandLine& parameters, AZStd::string& outResult)
     {
         MCORE_UNUSED(parameters);
@@ -55,14 +58,11 @@ namespace CommandSystem
         return true;
     }
 
-
-    // init the syntax of the command
     void CommandRecorderClear::InitSyntax()
     {
+        GetSyntax().AddParameter("force", "Force clear? If set to false it will only clear while we are recording.", MCore::CommandSyntax::PARAMTYPE_BOOLEAN, "false");
     }
 
-
-    // get the description
     const char* CommandRecorderClear::GetDescription() const
     {
         return "This command clears any existing recording inside the recorder.";

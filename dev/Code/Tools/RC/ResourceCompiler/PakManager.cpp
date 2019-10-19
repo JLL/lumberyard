@@ -26,6 +26,8 @@
 #include "CryCrc32.h"
 #include "ZipEncryptor.h"
 #include "ThreadUtils.h"
+#include <AzCore/std/algorithm.h>
+#include <AzCore/IO/SystemFile.h>
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -67,15 +69,9 @@ IPakSystem* PakManager::GetPakSystem()
 }
 
 //////////////////////////////////////////////////////////////////////////
-void PakManager::SetMaxThreads(int maxThreads)
+unsigned PakManager::GetMaxThreads() const
 {
-    m_maxThreads = maxThreads;
-}
-
-//////////////////////////////////////////////////////////////////////////
-int PakManager::GetMaxThreads() const
-{
-    return m_maxThreads;
+    return AZStd::GetMax<unsigned>(1, AZStd::thread::hardware_concurrency() / 2);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -241,8 +237,13 @@ PakManager::ECallResult PakManager::CreatePakFile(
     const string& requestedPakFilename,
     bool bUpdate)
 {
-    const bool bVerbose = config->GetAsInt("verbose", 0, 1) > 0;
+    const int iVerbose = config->GetAsInt("verbose", 0, 1);
     const bool bSkipMissing = config->GetAsBool("skipmissing", false, true);
+
+    if (iVerbose > 0)
+    {
+        RCLog("CreatingPakFile %s ...", requestedPakFilename.c_str());
+    }
 
     PakHelpers::ESortType eSortType = PakHelpers::eSortType_Alphabetically;
     const string sortType = config->GetAsString("zip_sort", "", "");
@@ -306,7 +307,7 @@ PakManager::ECallResult PakManager::CreatePakFile(
             return eCallResult_BadArgs;
         }
     }
-    
+
     string platformPakFilename = PathHelpers::ToPlatformPath(requestedPakFilename);
     if (!FileUtil::EnsureDirectoryExists(PathHelpers::GetDirectory(platformPakFilename).c_str()))
     {
@@ -339,6 +340,8 @@ PakManager::ECallResult PakManager::CreatePakFile(
 
     const int zipCompressionLevel = config->GetAsInt("zip_compression", 6, 6);
 
+    const bool useFastestDecompressionCodec = config->GetAsBool("use_fastest", false, false);
+
     ECallResult bResult = eCallResult_Succeeded;
     for (std::map<string, std::vector<PakHelpers::PakEntry> >::iterator it = fileMap.begin(); it != fileMap.end(); ++it)
     {
@@ -346,7 +349,7 @@ PakManager::ECallResult PakManager::CreatePakFile(
         std::vector<PakHelpers::PakEntry>& files = it->second;
 
         RCLog("Found %u valid files to add to zip file %s", files.size(), pakFilename.c_str());
-        
+
         AZ::IO::LocalFileIO localFileIO;
         if (!bUpdate)
         {
@@ -415,7 +418,7 @@ PakManager::ECallResult PakManager::CreatePakFile(
         for (size_t i = 0; i < numFiles; ++i)
         {
             string sFileNameInZip = PathHelpers::RemoveDuplicateSeparators(PathHelpers::ToPlatformPath(PathHelpers::Join(folderInPak, files[i].m_rcFile.m_sourceInnerPathAndName)));
-            
+
             const string sRealFilename = PathHelpers::Join(files[i].m_rcFile.m_sourceLeftPath, files[i].m_rcFile.m_sourceInnerPathAndName);
 
             // Skip files with extensions starting with "$" or "pak".
@@ -467,11 +470,19 @@ PakManager::ECallResult PakManager::CreatePakFile(
         do
         {
             // Add them to pak file.
-            PakSystemArchive* const pPakFile = GetPakSystem()->OpenArchive(pakFilenameToWrite.c_str(), zipFileAlignment, zipEncrypt, zipEncryptKey.empty() ? 0 : encryptionKey);
+            PakSystemArchive* pPakFile = GetPakSystem()->OpenArchive(pakFilenameToWrite.c_str(), zipFileAlignment, zipEncrypt, zipEncryptKey.empty() ? 0 : encryptionKey);
+
             if (!pPakFile)
             {
-                RCLogError("Failed to create zip file %s", pakFilenameToWrite.c_str());
-                return eCallResult_Failed;
+                // Problem to accss the file? it could have get corrupted so try to delete the file and recreate it
+                AZ::IO::SystemFile::Delete(pakFilenameToWrite.c_str());
+                pPakFile = GetPakSystem()->OpenArchive(pakFilenameToWrite.c_str(), zipFileAlignment, zipEncrypt, zipEncryptKey.empty() ? 0 : encryptionKey);
+
+                if (!pPakFile)
+                {
+                    RCLogError("Error: Failed to create zip file %s", pakFilenameToWrite.c_str());
+                    return eCallResult_Failed;
+                }
             }
 
             // submit files for packing
@@ -591,15 +602,15 @@ PakManager::ECallResult PakManager::CreatePakFile(
                     }
                 };
 
-                ZipErrorReporter errorReporter(*m_pProgress, pakFilenameToWrite.c_str(), numFiles, bVerbose,
+                ZipErrorReporter errorReporter(*m_pProgress, pakFilenameToWrite.c_str(), numFiles, iVerbose>1,
                     numFilesAdded, numFilesUpToDate, numFilesSkipped, numFilesMissing, numFilesFailed);
                 ZipSizeSplitter sizeSplitter(filenameCount, nMaxZipSize ? min(nMaxZipSize, INT_MAX) : INT_MAX);
 
                 RCLog("Adding files into %s...", pakFilenameToWrite.c_str());
-                const int threadCount = GetMaxThreads() == 1 ? 0 : GetMaxThreads();
                 pPakFile->zip->UpdateMultipleFiles(&realFilenamePtrs[0], &filenameInZipPtrs[0], filenameCount,
                     zipCompressionLevel, zipEncrypt && zipEncryptContent, nMaxZipSize, nMinSrcSize, nMaxSrcSize,
-                    threadCount, &errorReporter, bSplitOnSizeOverflow ? &sizeSplitter : nullptr);
+                    GetMaxThreads(), &errorReporter, bSplitOnSizeOverflow ? &sizeSplitter : nullptr, useFastestDecompressionCodec);
+                
 
                 // divide files in case it has overflown the maximum allowed file-size
                 if (bSplitOnSizeOverflow)
@@ -607,8 +618,8 @@ PakManager::ECallResult PakManager::CreatePakFile(
                     char cPart[16];
                     char nPart[16];
 
-                    azsnprintf(cPart, sizeof(cPart), "-part%lu.pak", currentPakPart + 0);
-                    azsnprintf(nPart, sizeof(nPart), "-part%lu.pak", currentPakPart + 1);
+                    azsnprintf(cPart, sizeof(cPart), "-part%zu.pak", currentPakPart + 0);
+                    azsnprintf(nPart, sizeof(nPart), "-part%zu.pak", currentPakPart + 1);
 
                     const size_t pos = pakFilenameToWrite.find(cPart);
 
@@ -851,7 +862,7 @@ PakManager::ECallResult PakManager::CreatePakFile(
 
 struct UnpakParameters
 {
-    typedef std::function<void(bool, const string&)> OnFinishCallback;
+    typedef AZStd::function<void(bool, const string&)> OnFinishCallback;
 
     ZipDir::CachePtr m_cache;
     string m_srcFile;
@@ -877,7 +888,7 @@ PakManager::ECallResult PakManager::UnzipPakFile(const IConfig* config, const st
     std::vector<UnpakParameters> params;
     params.reserve(sourceFiles.size());
     // Don't capture parameters in the lambda so it can be converted to a function pointer. Instead pack everything in a struct that is passed as an argument.
-    auto unpakFunc = [](UnpakParameters* params) 
+    auto unpakFunc = [](UnpakParameters* params)
     {
         params->m_onFinishCb(params->m_cache->UnpakToDisk(params->m_destFolder), params->m_srcFile);
     };
@@ -897,7 +908,7 @@ PakManager::ECallResult PakManager::UnzipPakFile(const IConfig* config, const st
         const RcFile& pakFile = *it;
 #if defined(AZ_PLATFORM_WINDOWS)
         const string pakFilePath = PathHelpers::Join(PathHelpers::ToDosPath(pakFile.m_sourceLeftPath), PathHelpers::ToDosPath(pakFile.m_sourceInnerPathAndName));
-#elif defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
         const string pakFilePath = PathHelpers::Join(PathHelpers::ToUnixPath(pakFile.m_sourceLeftPath), PathHelpers::ToUnixPath(pakFile.m_sourceInnerPathAndName));
 #endif
         ZipDir::CacheFactory factory(ZipDir::ZD_INIT_FAST, 0);
@@ -909,7 +920,7 @@ PakManager::ECallResult PakManager::UnzipPakFile(const IConfig* config, const st
         }
 #if defined(AZ_PLATFORM_WINDOWS)
         const string destFolder = PathHelpers::Join(PathHelpers::ToDosPath(unzipFolder), PathHelpers::ToDosPath(pakFile.m_sourceInnerPathAndName.substr(0, index)));
-#elif defined(AZ_PLATFORM_APPLE) || defined(AZ_PLATFORM_LINUX)
+#elif AZ_TRAIT_OS_PLATFORM_APPLE || defined(AZ_PLATFORM_LINUX)
         const string destFolder = PathHelpers::Join(PathHelpers::ToUnixPath(unzipFolder), PathHelpers::ToUnixPath(pakFile.m_sourceInnerPathAndName.substr(0, index)));
 #endif
         params.emplace_back(UnpakParameters{ cache, pakFilePath, destFolder, onFinishCb });

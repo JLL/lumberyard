@@ -19,6 +19,8 @@
 #include <IGameFramework.h>
 #include <MainThreadRenderRequestBus.h>
 
+#include <IMaterial.h>
+
 #ifndef NULL_RENDERER
 #include "DriverD3D.h"
 #endif
@@ -119,7 +121,7 @@ bool CShaderMan::mfReloadShaderIncludes(const char* szPath, int nFlags)
             {
                 continue;
             }
-            if (!_stricmp(&nmf[len], ".cfi"))
+            if (!azstricmp(&nmf[len], ".cfi"))
             {
                 fpStripExtension(fileinfo.name, nmf);
                 bool bCh = false;
@@ -146,23 +148,21 @@ bool CShaderMan::mfReloadAllShaders(int nFlags, uint32 nFlagsHW)
     m_Bin.InvalidateCache();
     CHWShader::mfFlushPendedShadersWait(-1);
     
-    // Ensure all shaders are unbound before forcing a reload of all shaders
-    gRenDev->RT_UnbindResources();
-
 #ifndef NULL_RENDERER
-
+    // Ensure all shaders are unbound before forcing a reload of all shaders
+    gRenDev->m_pRT->RC_UnbindResources();
     if (!gRenDev->IsShaderCacheGenMode())
     {
         gRenDev->m_pRT->RC_ResetToDefault();
-        gRenDev->FlushRTCommands(true, true, true);
     }
-
+    gRenDev->FlushRTCommands(true, true, true);
+    
     CDebugAllowFileAccess ignoreInvalidFileAccess;
 
     // Check include changing
-    if (m_ShadersPath && !CRenderer::CV_r_shadersignoreincludeschanging)
+    if (!CRenderer::CV_r_shadersignoreincludeschanging)
     {
-        bool bChanged = mfReloadShaderIncludes(m_ShadersPath, nFlags);
+        bool bChanged = mfReloadShaderIncludes(m_ShadersPath.c_str(), nFlags);
     }
     CCryNameTSCRC Name = CShader::mfGetClassName();
     SResourceContainer* pRL = CBaseResource::GetResourcesForClass(Name);
@@ -207,7 +207,7 @@ bool CShaderMan::mfReloadAllShaders(int nFlags, uint32 nFlagsHW)
             else
             {
                 char name[256];
-                sprintf_s(name, "%sCryFX/%s.cfx", m_ShadersPath, pS->GetName());
+                sprintf_s(name, "%sCryFX/%s.cfx", m_ShadersPath.c_str(), pS->GetName());
                 AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen(name, "rb");
                 if (fileHandle != AZ::IO::InvalidHandle)
                 {
@@ -236,6 +236,8 @@ bool CShaderMan::mfReloadAllShaders(int nFlags, uint32 nFlagsHW)
     return bState;
 }
 
+// Recursively iterate through all the shaders included by pBin to see if any match szShaderName
+// Returns true if there is a match, meaning pBin is affected by szShaderName.
 static bool sCheckAffecting_r(SShaderBin* pBin, const char* szShaderName)
 {
     pBin->Lock();
@@ -243,19 +245,23 @@ static bool sCheckAffecting_r(SShaderBin* pBin, const char* szShaderName)
     // Check first level
     while (nTok >= 0)
     {
+        // For each include that is found, check to see if it matches szShaderName
         nTok = CParserBin::FindToken(nTok, pBin->m_Tokens.size() - 1, &pBin->m_Tokens[0], eT_include);
         if (nTok >= 0)
         {
+            // If an include was found, check to see if it matches szShaderName
             nTok++;
             uint32 nTokName = pBin->m_Tokens[nTok];
             const char* szNameInc = CParserBin::GetString(nTokName, pBin->m_TokenTable);
-            if (!_stricmp(szNameInc, szShaderName))
+            if (!azstricmp(szNameInc, szShaderName))
             {
+                // If szShaderName matches the included shader, then pBin is affected by that shader
+                // Since nTok is >= 0, breaking here will result in returning 'true'
                 break;
             }
         }
     }
-    // Check recursively
+    // Check each of the included shaders recursively
     if (nTok < 0)
     {
         nTok = 0;
@@ -264,23 +270,35 @@ static bool sCheckAffecting_r(SShaderBin* pBin, const char* szShaderName)
             nTok = CParserBin::FindToken(nTok, pBin->m_Tokens.size() - 1, &pBin->m_Tokens[0], eT_include);
             if (nTok >= 0)
             {
+                // For each include that is found, check to see if it matches szShaderName
                 nTok++;
                 uint32 nTokName = pBin->m_Tokens[nTok];
                 const char* szNameInc = CParserBin::GetString(nTokName, pBin->m_TokenTable);
-                if (!_stricmp(szNameInc, szShaderName))
+                if (!azstricmp(szNameInc, szShaderName))
                 {
+                    // If szShaderName matches the included shader, then pBin is affected by that shader
+                    // Since nTok is >= 0, breaking here will result in returning 'true'
                     break;
                 }
                 SShaderBin* pBinIncl = gRenDev->m_cEF.m_Bin.GetBinShader(szNameInc, true, 0);
+                if (!pBinIncl)
+                {
+                    AZ_Assert(false, "Error attempting to load shader %s while checking all the shaders included by %s.", szNameInc, pBin->m_szName);
+                    break;
+                }
+                // Since the included file did not match szShaderName, recursively check all of its included shaders to see if they match
                 bool bAffect = sCheckAffecting_r(pBinIncl, szShaderName);
                 if (bAffect)
                 {
+                    // One of the included shaders matched szShaderName
+                    // Since nTok is >= 0, breaking here will result in returning 'true'
                     break;
                 }
             }
         }
     }
     pBin->Unlock();
+    // Return true if a shader was found that matched szShaderName, false otherwise
     return (nTok >= 0);
 }
 
@@ -291,12 +309,12 @@ bool CShaderMan::mfReloadFile(const char* szPath, const char* szName, int nFlags
     m_nFrameForceReload++;
 
     const char* szExt = fpGetExtension(szName);
-    if (!_stricmp(szExt, ".cfx"))
+    if (!azstricmp(szExt, ".cfx"))
     {
         m_bReload = true;
         char szShaderName[256];
         cry_strcpy(szShaderName, szName, (size_t)(szExt - szName));
-        strlwr(szShaderName);
+        azstrlwr(szShaderName, AZ_ARRAY_SIZE(szShaderName));
 
         // Check if this shader already loaded
         CBaseResource* pBR = CBaseResource::GetResource(CShader::mfGetClassName(), szShaderName, false);
@@ -308,7 +326,7 @@ bool CShaderMan::mfReloadFile(const char* szPath, const char* szName, int nFlags
         m_bReload = false;
     }
     else
-    if (!_stricmp(szExt, ".cfi"))
+    if (!azstricmp(szExt, ".cfi"))
     {
         CCryNameTSCRC Name = CShader::mfGetClassName();
         SResourceContainer* pRL = CBaseResource::GetResourcesForClass(Name);
@@ -317,10 +335,11 @@ bool CShaderMan::mfReloadFile(const char* szPath, const char* szName, int nFlags
             m_bReload = true;
             char szShaderName[256];
             cry_strcpy(szShaderName, szName, (size_t)(szExt - szName));
-            strlwr(szShaderName);
+            azstrlwr(szShaderName, AZ_ARRAY_SIZE(szShaderName));
             SShaderBin* pBin = m_Bin.GetBinShader(szShaderName, true, 0);
             bool bAffect = false;
 
+            // Since this is a .cfi file, iterate through the existing resources to see if any of them are including it and consequently must be re-loaded
             ResourcesMapItor itor;
             for (itor = pRL->m_RMap.begin(); itor != pRL->m_RMap.end(); itor++)
             {
@@ -334,9 +353,12 @@ bool CShaderMan::mfReloadFile(const char* szPath, const char* szName, int nFlags
                 {
                     continue;
                 }
+
+                // Recursively check to see if sh is affected by the .cfi that is being reloaded
                 bAffect = sCheckAffecting_r(pBin, szShaderName);
                 if (bAffect)
                 {
+                    // If sh is affected, it also needs to be reloaded
                     sh->Reload(nFlags | FRO_FORCERELOAD, sh->GetName());
                 }
             }
@@ -789,8 +811,6 @@ bool CShaderMan::mfUpdateTechnik (SShaderItem& SI, CCryNameTSCRC& Name)
 
 SShaderItem CShaderMan::mfShaderItemForName (const char* nameEf, bool bShare, int flags, SInputShaderResources* Res, uint64 nMaskGen)
 {
-    MEMSTAT_CONTEXT_FMT(EMemStatContextTypes::MSC_Shader, 0, "ShaderItem (%s)", nameEf);
-
     SShaderItem SI;
 
     CShaderResources* pResource = NULL;
@@ -887,39 +907,17 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
     char nameRes[256];
 
     uint64 nMaskGenHW = 0;
+    uint64 maskGenStatic = m_staticFlags;
 
     cry_strcpy(nameEf, nameSh);
 
     cry_strcpy(nameRes, nameEf);
-    if (CParserBin::m_nPlatform == SF_D3D11)
+
+    cry_strcat(nameRes, GetShaderLanguageResourceName());
+
+    if (maskGenStatic)
     {
-        cry_strcat(nameRes, "(DX1)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_GL4)
-    {
-        cry_strcat(nameRes, "(G4)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_GLES3)
-    {
-        cry_strcat(nameRes, "(E3)");
-    }
-    else
-    // Confetti Nicholas Baldwin: adding metal shader language support
-    if (CParserBin::m_nPlatform == SF_METAL)
-    {
-        cry_strcat(nameRes, "(MET)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_ORBIS) // ACCEPTED_USE
-    {
-        cry_strcat(nameRes, "(O)");
-    }
-    else
-    if (CParserBin::m_nPlatform == SF_DURANGO) // ACCEPTED_USE
-    {
-        cry_strcat(nameRes, "(D)");
+        cry_strcat(nameRes, AZStd::string::format("(ST%llx)", maskGenStatic).c_str());
     }
 
     ef = NULL;
@@ -935,11 +933,7 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
 
         mfModifyGenFlags(efGen, Res, nMaskGen, nMaskGenHW);
         bGenModified = true;
-#ifdef __GNUC__
-        sprintf(nameNew, "%s(%llx)", nameRes, nMaskGen);
-#else
-        sprintf(nameNew, "%s(%I64x)", nameRes, nMaskGen);
-#endif
+        azsprintf(nameNew, "%s(%llx)", nameRes, nMaskGen);
         pBR = CBaseResource::GetResource(CShader::mfGetClassName(), nameNew, false);
         ef = (CShader*)pBR;
         if (ef)
@@ -988,11 +982,7 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
                 //nMaskGen = gRenDev->EF_GetRemapedShaderMaskGen(nameSh, nMaskGen | nMaskGenHW);
                 mfModifyGenFlags(efGen, Res, nMaskGen, nMaskGenHW);
             }
-#ifdef __GNUC__
             sprintf_s(nameNew, "%s(%llx)", nameRes, nMaskGen);
-#else
-            sprintf_s(nameNew, "%s(%I64x)", nameRes, nMaskGen);
-#endif
             ef = mfNewShader(nameNew);
             if (!ef)
             {
@@ -1000,6 +990,8 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
             }
 
             ef->m_nMaskGenFX = nMaskGen | nMaskGenHW;
+            ef->m_maskGenStatic = maskGenStatic;
+            ef->m_ShaderGenStaticParams = m_staticExt;
             ef->m_pGenShader = efGen;
         }
         if (efGen && ef)
@@ -1019,6 +1011,9 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
             {
                 return s_DefaultShader;
             }
+
+            ef->m_maskGenStatic = maskGenStatic;
+            ef->m_ShaderGenStaticParams = m_staticExt;
         }
     }
     id = ef->GetID();
@@ -1028,7 +1023,7 @@ CShader* CShaderMan::mfForName (const char* nameSh, int flags, const CShaderReso
     bool bSuccess = false;
 #ifndef NULL_RENDERER
     // Check for the new cryFX format
-    sprintf_s(nameNew, "%sCryFX/%s.cfx", m_ShadersPath, nameEf);
+    sprintf_s(nameNew, "%sCryFX/%s.cfx", m_ShadersPath.c_str(), nameEf);
     ef->m_NameFile = nameNew;
     ef->m_Flags |= flags;
     gRenDev->m_pRT->RC_ParseShader(ef, nMaskGen | nMaskGenHW, flags, (CShaderResources*)Res);
@@ -1090,8 +1085,6 @@ void CShaderMan::CreateShaderMaskGenString(const CShader* pSH, stack_string& fla
 
 void CShaderMan::RT_ParseShader(CShader* pSH, uint64 nMaskGen, uint32 flags, CShaderResources* pRes)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "ParseShader");
-
     CDebugAllowFileAccess ignoreInvalidFileAccess;
 
     bool bSuccess = false;
@@ -1104,21 +1097,40 @@ void CShaderMan::RT_ParseShader(CShader* pSH, uint64 nMaskGen, uint32 flags, CSh
         {
             CRYPROFILE_SCOPE_PROFILE_MARKER("ImportShader");
 
-            bSuccess = ImportShader(pSH, m_Bin);
+            ShaderImportResults importResults = ImportShader(pSH, m_Bin);
 
-            if (!bSuccess)
+            if (importResults == SHADER_IMPORT_SUCCESS)
             {
+                bSuccess = true;
+            }
+            else
+            {
+#ifdef SHADER_SERIALIZE_VERBOSE
                 {
                     stack_string flagString;
                     CreateShaderMaskGenString(pSH, flagString);
+                    
                     CryLog("[CShaderSerialize] Failed to import shader %s (0x%p) flags: 0x%llx 0x%x (%s)\n", pSH->GetName(), pSH, pSH->m_nMaskGenFX, pSH->m_nMDV, flagString.empty() ? "0" : flagString.c_str());
                 }
+#endif
 
                 pSH->m_Flags |= EF_FAILED_IMPORT;
 
                 if (CRenderer::CV_r_shadersImport == 2)
                 {
+                    // Do not fallback to the slow path unless we have a valid permutation in our lookup table (most optimal path)
                     return;
+                }
+                else
+                {
+                    // If importResults == SHADER_IMPORT_MISSING_ENTRY, then allow the fallback path if we have a valid .fxb file 
+                    // for this shader, but the current permutation is missing from the lookup table.
+                    // This will fallback to the slow path to parse the .cfx for this shader permutation
+                    if (importResults == SHADER_IMPORT_FAILURE)
+                    {
+                        // No .fxb was exported for this .cfx, so do not fallback.
+                        return;
+                    }
                 }
             }
         }
@@ -1151,7 +1163,7 @@ void CShaderMan::RT_ParseShader(CShader* pSH, uint64 nMaskGen, uint32 flags, CSh
             }
 #endif
             bSuccess = m_Bin.ParseBinFX(pBin, pSH, nMaskGen);
-#if 0 //def SHADERS_SERIALIZING
+#ifdef SHADERS_SERIALIZING
             if (CRenderer::CV_r_shadersExport && gRenDev->IsShaderCacheGenMode())
             {
                 //Shader compilation must be enabled for export, to allow reading the token table from the fxcbs in the USER dir
@@ -1160,14 +1172,27 @@ void CShaderMan::RT_ParseShader(CShader* pSH, uint64 nMaskGen, uint32 flags, CSh
 
                 if (bSuccess)
                 {
-                    if (!CheckFXBExists(pSH))
+                    // CheckFXBExists() used to only be queried here; however, that function will create the SResource under certain
+                    // conditions if it does not exist and can erroneously cause ExportShader to not be called on the first time a shader .fxb
+                    // is created.
+                    if (!DoesSResourceExist(pSH) || !CheckFXBExists(pSH))
                     {
-                        ExportShader(pSH, m_Bin);
+                        bool shaderExported = ExportShader(pSH, m_Bin);
+#ifdef SHADER_SERIALIZE_VERBOSE
+                        if (!shaderExported)
+                        {
+                            CryLog("[CShaderSerialize] ExportShader failed for shader %s\n", pSH->GetName());
+                        }
+#else
+                        AZ_UNUSED(shaderExported);
+#endif
                     }
+#ifdef SHADER_SERIALIZE_VERBOSE
                     else
                     {
-                        printf("Not exporting shader %s, it already exists\n", pSH->GetName());
+                        CryLog("[CShaderSerialize] Not exporting shader %s, it already exists\n", pSH->GetName());
                     }
+#endif
                 }
 
                 CRenderer::CV_r_shadersAllowCompilation = oldAllowCompilation;
@@ -1181,4 +1206,6 @@ void CShaderMan::RT_ParseShader(CShader* pSH, uint64 nMaskGen, uint32 flags, CSh
         }
     }
     pSH->m_Flags |= EF_LOADED;
+
+    EBUS_QUEUE_EVENT(AZ::MaterialNotificationEventBus, OnShaderLoaded, pSH);
 }

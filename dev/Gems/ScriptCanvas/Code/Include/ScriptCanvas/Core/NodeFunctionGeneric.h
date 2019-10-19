@@ -14,11 +14,16 @@
 
 #include <AzCore/RTTI/RTTI.h>
 #include <AzCore/RTTI/TypeInfo.h>
-#include <AzCore/std/typetraits/function_traits.h>
-#include <AzCore/std/typetraits/add_pointer.h>
-#include <Libraries/Libraries.h>
 #include <AzCore/std/tuple.h>
+#include <AzCore/std/typetraits/add_pointer.h>
+#include <AzCore/std/typetraits/function_traits.h>
+#include <ScriptCanvas/Libraries/Libraries.h>
+
 #include "Node.h"
+#include "Attributes.h"
+
+#pragma warning( push )
+#pragma warning( disable : 5046) // 'function' : Symbol involving type with internal linkage not defined
 
 /**
  * NodeFunctionGeneric.h
@@ -71,7 +76,7 @@ namespace ScriptCanvas
     }
 }
 
-#define SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, DESCRIPTION, ...)\
+#define SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, ISDEPRECATED, DESCRIPTION, ...)\
     struct NODE_NAME##Traits\
     {\
         AZ_TYPE_INFO(NODE_NAME##Traits, UUID);\
@@ -94,9 +99,10 @@ namespace ScriptCanvas
             return !result.empty() ? result.data() : "Result";\
         }\
         \
-        static const char* GetCategory() { return CATEGORY; };\
+        static const char* GetCategory() { if (ISDEPRECATED) return AZ_STRINGIZE(CATEGORY /Deprecated); else return CATEGORY; };\
         static const char* GetDescription() { return DESCRIPTION; };\
         static const char* GetNodeName() { return #NODE_NAME; };\
+        static bool IsDeprecated() { return ISDEPRECATED; };\
         \
     private:\
         static AZStd::string_view GetName(size_t i)\
@@ -111,16 +117,44 @@ namespace ScriptCanvas
     using NODE_NAME##Node = ScriptCanvas::NodeFunctionGenericMultiReturn<AZStd::add_pointer_t<decltype(NODE_NAME)>, NODE_NAME##Traits, &NODE_NAME, AZStd::add_pointer_t<decltype(DEFAULT_FUNC)>, &DEFAULT_FUNC>;
 
 #define SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE(NODE_NAME, CATEGORY, UUID, DESCRIPTION, ...)\
-    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, DESCRIPTION, __VA_ARGS__)
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, false, DESCRIPTION, __VA_ARGS__)
+
+#define SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_DEPRECATED(NODE_NAME, CATEGORY, UUID, DESCRIPTION, ...)\
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, true, DESCRIPTION, __VA_ARGS__)
 
 #define SCRIPT_CANVAS_GENERIC_FUNCTION_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, DESCRIPTION, ...)\
-    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, DESCRIPTION, __VA_ARGS__)
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, false, DESCRIPTION, __VA_ARGS__)
+
+#define SCRIPT_CANVAS_GENERIC_FUNCTION_NODE_WITH_DEFAULTS_DEPRECATED(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, DESCRIPTION, ...)\
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, DEFAULT_FUNC, CATEGORY, UUID, true, DESCRIPTION, __VA_ARGS__)
 
 #define SCRIPT_CANVAS_GENERIC_FUNCTION_NODE(NODE_NAME, CATEGORY, UUID, DESCRIPTION, ...)\
-    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, DESCRIPTION, __VA_ARGS__)
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, false, DESCRIPTION, __VA_ARGS__)
+
+#define SCRIPT_CANVAS_GENERIC_FUNCTION_NODE_DEPRECATED(NODE_NAME, CATEGORY, UUID, DESCRIPTION, ...)\
+    SCRIPT_CANVAS_GENERIC_FUNCTION_MULTI_RESULTS_NODE_WITH_DEFAULTS(NODE_NAME, ScriptCanvas::NoDefaultArguments, CATEGORY, UUID, true, DESCRIPTION, __VA_ARGS__)
 
 namespace ScriptCanvas
 {
+    template<size_t... inputDatumIndices>
+    struct SetDefaultValuesByIndex
+    {
+        template<typename... t_Args>
+        AZ_INLINE static void _(Node& node, t_Args&&... args)
+        {
+            Help(node, AZStd::make_index_sequence<sizeof...(t_Args)>(), AZStd::forward<t_Args>(args)...);
+        }
+
+    private:
+        template<AZStd::size_t... Is, typename... t_Args>
+        AZ_INLINE static void Help(Node& node, AZStd::index_sequence<Is...>, t_Args&&... args)
+        {
+            static int indices[] = { inputDatumIndices... };
+            AZ_STATIC_ASSERT(sizeof...(Is) == AZ_ARRAY_SIZE(indices), "size of default values doesn't match input datum indices for them");
+            SCRIPT_CANVAS_CALL_ON_INDEX_SEQUENCE(*node.ModDatumByIndex(indices[Is])->template ModAs<AZStd::decay_t<t_Args>>() = AZStd::forward<t_Args>(args));
+        }
+    };
+
     // a no-op for generic function nodes that have no overrides for default input
     AZ_INLINE void NoDefaultArguments(Node&) {}
 
@@ -151,13 +185,17 @@ namespace ScriptCanvas
             if (AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(reflectContext))
             {
                 serializeContext->Class<NodeFunctionGenericMultiReturn, Node>()
-                    ->Version(0)
+                    ->Version(1, &VersionConverter)
+                    ->Attribute(AZ::Script::Attributes::Deprecated, t_Traits::IsDeprecated())
+                    ->Field("Initialized", &NodeFunctionGenericMultiReturn::m_initialized)
                     ;
 
                 if (AZ::EditContext* editContext = serializeContext->GetEditContext())
                 {
                     editContext->Class<NodeFunctionGenericMultiReturn>(t_Traits::GetNodeName(), t_Traits::GetDescription())
-                        ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                        ->ClassElement(AZ::Edit::ClassElements::EditorData, t_Traits::GetDescription())
+                        ->Attribute(AZ::Script::Attributes::Deprecated, t_Traits::IsDeprecated())
+                        ->Attribute(ScriptCanvas::Attributes::Node::TitlePaletteOverride, t_Traits::IsDeprecated() ? "DeprecatedNodeTitlePalette" : "")
                         ->Attribute(AZ::Edit::Attributes::Category, t_Traits::GetCategory())
                         ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)
                         ;
@@ -165,24 +203,61 @@ namespace ScriptCanvas
 
                 // NodeFunctionGeneric class has been deprecated in terms of the this class
                 serializeContext->ClassDeprecate("NodeFunctionGeneric", azrtti_typeid<NodeFunctionGeneric<t_Func, t_Traits, function, t_DefaultFunc, defaultsFunction>>(), &ConvertOldNodeGeneric);
+                // Need to calculate the Typeid for the old NodeFunctionGeneric class as if it contains no templated types which are pointers
+                AZ::Uuid genericTypeIdPointerRemoved = AZ::Uuid{ "{19E4AABE-1730-402C-A020-FC1006BC7F7B}" } + AZ::Internal::AggregateTypes<t_Func, t_Traits, t_DefaultFunc>::template Uuid<AZ::PointerRemovedTypeIdTag>();
+                serializeContext->ClassDeprecate("NodeFunctionGenericTemplate", genericTypeIdPointerRemoved, &ConvertOldNodeGeneric);
+                // NodeFunctionGenericMultiReturn class used to use the same typeid for pointer and not-pointer types for the function parameters
+                // i.e, void Func(AZ::Entity*) and void Func2(AZ::Entity&) are the same typeid
+                AZ::Uuid genericMultiReturnV1TypeId = AZ::Uuid{ "{DC5B1799-6C5B-4190-8D90-EF0C2D1BCE4E}" } + AZ::Internal::AggregateTypes<t_Func, t_Traits>::template Uuid<AZ::PointerRemovedTypeIdTag>();
+                serializeContext->ClassDeprecate("NodeFunctionGenericMultiReturnV1", genericMultiReturnV1TypeId, &ConvertOldNodeGeneric);
             }
         }
 
     protected:
+
+        template<typename ArgType, size_t Index>
+        void CreateDataSlot(const ConnectionType& connectionType)
+        {
+            DataSlotConfiguration slotConfiguration;
+
+            slotConfiguration.m_name = AZStd::string::format("%s: %s", Data::Traits<ArgType>::GetName().data(), t_Traits::GetArgName(Index));
+            slotConfiguration.ConfigureDatum(AZStd::move(Datum(Data::FromAZType(Data::Traits<ArgType>::GetAZType()), Datum::eOriginality::Copy)));
+
+            slotConfiguration.SetConnectionType(connectionType);
+            AddSlot(slotConfiguration);
+        }
+
         template<typename... t_Args, AZStd::size_t... Is>
         void AddInputDatumSlotHelper(AZStd::Internal::pack_traits_arg_sequence<t_Args...>, AZStd::index_sequence<Is...>)
         {
             static_assert(sizeof...(t_Args) == sizeof...(Is), "Argument size mismatch in NodeFunctionGenericMultiReturn");
             static_assert(sizeof...(t_Args) == t_Traits::s_numArgs, "Number of arguments does not match number of argument names in NodeFunctionGenericMultiReturn");
-            SCRIPT_CANVAS_CALL_ON_INDEX_SEQUENCE(AddInputDatumSlot(AZStd::string::format("%s: %s", Data::Traits<t_Args>::GetName(), t_Traits::GetArgName(Is)).c_str(), "", Data::FromAZType(Data::Traits<t_Args>::GetAZType()), Datum::eOriginality::Copy));
+
+            SCRIPT_CANVAS_CALL_ON_INDEX_SEQUENCE(
+                (CreateDataSlot<t_Args, Is>(ConnectionType::Input))
+            );
         } 
 
         void ConfigureSlots() override
         {
-            AddSlot("In", "", SlotType::ExecutionIn);
-            AddSlot("Out", "", SlotType::ExecutionOut);
+            {
+                ExecutionSlotConfiguration slotConfiguration("In", ConnectionType::Input);
+                AddSlot(slotConfiguration);
+            }
+
+            {
+                ExecutionSlotConfiguration slotConfiguration("Out", ConnectionType::Output);
+                AddSlot(slotConfiguration);
+            }
+            
             AddInputDatumSlotHelper(typename AZStd::function_traits<t_Func>::arg_sequence{}, AZStd::make_index_sequence<AZStd::function_traits<t_Func>::arity>{});
-            defaultsFunction(*this);
+
+            if (!m_initialized)
+            {
+                m_initialized = true;
+                defaultsFunction(*this);
+            }
+
             MultipleOutputInvoker<t_Func, function, t_Traits>::Add(*this);
         }
 
@@ -192,9 +267,13 @@ namespace ScriptCanvas
             SignalOutput(GetSlotId("Out"));
         }
 
-        void Visit(NodeVisitor& visitor) const override { visitor.Visit(*this); }
 
+        static bool VersionConverter(AZ::SerializeContext& serializeContext, AZ::SerializeContext::DataElementNode& rootElement);
         static bool ConvertOldNodeGeneric(AZ::SerializeContext& serializeContext, AZ::SerializeContext::DataElementNode& rootElement);
+
+    private:
+
+        bool m_initialized = false;
     }; // class NodeFunctionGenericMultiReturn
     
     template<typename... t_Node>
@@ -241,4 +320,17 @@ namespace ScriptCanvas
         return true;
     }
 
+    template<typename t_Func, typename t_Traits, t_Func function, typename t_DefaultFunc, t_DefaultFunc defaultsFunction>
+    bool NodeFunctionGenericMultiReturn<t_Func, t_Traits, function, t_DefaultFunc, defaultsFunction>::VersionConverter(AZ::SerializeContext& serializeContext, AZ::SerializeContext::DataElementNode& rootElement)
+    {
+        if (rootElement.GetVersion() < 1)
+        {
+            rootElement.AddElementWithData(serializeContext, "Initialized", true);
+        }
+
+        return true;
+    }
+
 }
+
+#pragma warning( pop )

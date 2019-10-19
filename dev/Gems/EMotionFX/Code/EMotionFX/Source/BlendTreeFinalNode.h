@@ -28,15 +28,9 @@ namespace EMotionFX
     class EMFX_API BlendTreeFinalNode
         : public AnimGraphNode
     {
-        MCORE_MEMORYOBJECTCATEGORY(BlendTreeFinalNode, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ANIMGRAPH_BLENDTREENODES);
-
     public:
-        AZ_RTTI(BlendTreeFinalNode, "{1A755218-AD9D-48EA-86FC-D571C11ECA4D}", AnimGraphNode);
-
-        enum
-        {
-            TYPE_ID = 0x00000001
-        };
+        AZ_RTTI(BlendTreeFinalNode, "{1A755218-AD9D-48EA-86FC-D571C11ECA4D}", AnimGraphNode)
+        AZ_CLASS_ALLOCATOR_DECL
 
         enum
         {
@@ -58,33 +52,26 @@ namespace EMotionFX
             PORTID_INPUT_POSE   = 0
         };
 
+        BlendTreeFinalNode();
+        ~BlendTreeFinalNode();
 
-        static BlendTreeFinalNode* Create(AnimGraph* animGraph);
+        bool InitAfterLoading(AnimGraph* animGraph) override;
 
         AnimGraphPose* GetMainOutputPose(AnimGraphInstance* animGraphInstance) const override         { return GetOutputPose(animGraphInstance, OUTPUTPORT_RESULT)->GetValue(); }
 
-        void RegisterPorts() override;
-        void RegisterAttributes() override;
-
         bool GetHasOutputPose() const override                  { return true; }
-        uint32 GetVisualColor() const override                  { return MCore::RGBA(255, 0, 0); }
+        AZ::Color GetVisualColor() const override               { return AZ::Color(1.0f, 0.0f, 0.0f, 1.0f); }
         bool GetIsDeletable() const override                    { return false; }
         bool GetIsLastInstanceDeletable() const override        { return false; }
         bool GetHasVisualOutputPorts() const override           { return false; }
         bool GetCanHaveOnlyOneInsideParent() const override     { return true; }
-        AnimGraphObjectData* CreateObjectData() override;
 
         const char* GetPaletteName() const override;
         AnimGraphObject::ECategory GetPaletteCategory() const override;
 
-        const char* GetTypeString() const override;
-        AnimGraphObject* Clone(AnimGraph* animGraph) override;
+        static void Reflect(AZ::ReflectContext* context);
 
     private:
-        BlendTreeFinalNode(AnimGraph* animGraph);
-        ~BlendTreeFinalNode();
-
-        void Init(AnimGraphInstance* animGraphInstance) override;
         void Output(AnimGraphInstance* animGraphInstance) override;
         void Update(AnimGraphInstance* animGraphInstance, float timePassedInSeconds) override;
     };

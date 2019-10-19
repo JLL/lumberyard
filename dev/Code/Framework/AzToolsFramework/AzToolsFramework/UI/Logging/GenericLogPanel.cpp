@@ -18,7 +18,9 @@
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 #include <AzFramework/IO/LocalFileIO.h>
 
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 'QDateTime::d': class 'QSharedDataPointer<QDateTimePrivate>' needs to have dll-interface to be used by clients of class 'QDateTime'
 #include <QDateTime>
+AZ_POP_DISABLE_WARNING
 #include <QTimer>
 
 #include <UI/Logging/GenericLogPanel.moc>
@@ -80,7 +82,7 @@ namespace AzToolsFramework
             }
 
             AZStd::vector<char> tempStorage;
-            tempStorage.resize(logSize + 1);
+            tempStorage.resize_no_construct(logSize + 1);
             if (!mainInstance->Read(openedFile, tempStorage.data(), logSize, true))
             {
                 Logging::LogLine line(AZStd::string::format("Unable to read %llu bytes from log file %s", logSize, fileName.c_str()).c_str(), "LOGGING", Logging::LogLine::TYPE_WARNING, QDateTime::currentMSecsSinceEpoch());

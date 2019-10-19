@@ -17,7 +17,14 @@
 #include "StdAfx.h"
 #include "I3DEngine.h"
 #include "CryHeaders.h"
+#include <Common/RenderCapabilities.h>
+#include <AzCore/std/algorithm.h>
 
+#if defined(AZ_RESTRICTED_PLATFORM)
+#undef AZ_RESTRICTED_SECTION
+#define SHADERCORE_CPP_SECTION_1 1
+#define SHADERCORE_CPP_SECTION_2 2
+#endif
 
 CShader* CShaderMan::s_DefaultShader;
 CShader* CShaderMan::s_shPostEffects;
@@ -30,6 +37,7 @@ CShader* CShaderMan::s_ShaderDeferredRain;
 CShader* CShaderMan::s_ShaderDeferredSnow;
 #ifndef NULL_RENDERER
 CShader* CShaderMan::s_ShaderFPEmu;
+CShader* CShaderMan::s_ShaderUI;
 CShader* CShaderMan::s_ShaderFallback;
 CShader* CShaderMan::s_ShaderStars;
 
@@ -56,13 +64,19 @@ SShaderItem CShaderMan::s_DefaultShaderItem;
 
 CCryNameTSCRC CShaderMan::s_cNameHEAD;
 
-TArray<CShaderResources*> CShader::s_ShaderResources_known(0, 2600);  // Based on BatteryPark
+TArray<CShaderResources*> CShader::s_ShaderResources_known;  // Based on BatteryPark
 TArray <CLightStyle*> CLightStyle::s_LStyles;
 
 SResourceContainer* CShaderMan::s_pContainer;  // List/Map of objects for shaders resource class
 FXCompressedShaders CHWShader::m_CompressedShaders;
 
 uint64 g_HWSR_MaskBit[HWSR_MAX];
+AZStd::pair<const char*, uint64> g_HWSST_Flags[] =
+{
+#undef FX_STATIC_FLAG
+#define FX_STATIC_FLAG(flag) AZStd::make_pair("%ST_"#flag, 0),
+#include "ShaderStaticFlags.inl"
+};
 
 bool gbRgb;
 
@@ -165,6 +179,81 @@ void SEfTexModPool::Unlock(void)
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
+
+
+EShaderLanguage GetShaderLanguage()
+{
+    EShaderLanguage shaderLanguage = eSL_Unknown;
+    if (CParserBin::m_nPlatform == SF_ORBIS) // ACCEPTED_USE
+    {
+        shaderLanguage = eSL_Orbis; // ACCEPTED_USE
+    }
+    else if (CParserBin::m_nPlatform == SF_DURANGO) // ACCEPTED_USE
+    {
+        shaderLanguage = eSL_Durango; // ACCEPTED_USE
+    }
+    else if (CParserBin::m_nPlatform == SF_D3D11)
+    {
+        shaderLanguage = eSL_D3D11;
+    }
+    else if (CParserBin::m_nPlatform == SF_GL4)
+    {
+        shaderLanguage = eSL_GL4_4;
+    }
+    else if (CParserBin::m_nPlatform == SF_GLES3)
+    {
+        shaderLanguage = gRenDev->m_cEF.HasStaticFlag(HWSST_GLES3_0) ? eSL_GLES3_0 : eSL_GLES3_1;
+    }
+    else if (CParserBin::m_nPlatform == SF_METAL)
+    {
+        shaderLanguage = eSL_METAL;
+    }
+
+    return shaderLanguage;
+}
+
+const char* GetShaderLanguageName()
+{
+    static const char *platformNames[eSL_MAX] =
+    {
+        "Unknown",
+        "Orbis", // ACCEPTED_USE
+        "Durango", // ACCEPTED_USE
+        "D3D11",
+        "GL4",
+        "GL4",
+        "GLES3",
+        "GLES3",
+        "METAL"
+    };
+
+    EShaderLanguage shaderLanguage = GetShaderLanguage();
+    return platformNames[shaderLanguage];
+}
+
+const char* GetShaderLanguageResourceName()
+{
+    static const char *platformResourceNames[eSL_MAX] =
+    {
+        "(UNK)",
+        "(O)", // ACCEPTED_USE
+        "(D)", // ACCEPTED_USE
+        "(DX1)",
+        "(G4)",
+        "(G4)",
+        "(E3)",
+        "(E3)",
+        "(MET)"
+    };
+
+    EShaderLanguage shaderLanguage = GetShaderLanguage();
+    return platformResourceNames[shaderLanguage];
+}
+
+AZStd::string GetShaderListFilename()
+{
+    return AZStd::string::format("ShaderList_%s.txt", GetShaderLanguageName());
+}
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -472,7 +561,7 @@ void CShaderResources::PostLoad(CShader* pSH)
             char    sky[128];
             char    path[1024];
 
-            strcpy(sky, pTextureRes->m_Name.c_str());
+            azstrcpy(sky, AZ_ARRAY_SIZE(sky), pTextureRes->m_Name.c_str());
             int size = strlen(sky);
             const char* ext = fpGetExtension(sky);
             if (size > 0)
@@ -685,7 +774,7 @@ void CShaderMan:: mfCreateCommonGlobalFlags(const char* szName)
         }
 
         const char* pszExt = PathUtil::GetExt(fileinfo.name);
-        if (_stricmp(pszExt, "ext"))
+        if (azstricmp(pszExt, "ext"))
         {
             continue;
         }
@@ -722,7 +811,15 @@ void CShaderMan:: mfCreateCommonGlobalFlags(const char* szName)
                     pCurrOffset += 4;
                     char dummy[256] = "\n";
                     char name[256] = "\n";
-                    int res = sscanf(pCurrOffset, "%s %s", dummy, name); // Get flag name..
+                    int res = azsscanf(pCurrOffset, "%s %s", dummy
+#if AZ_TRAIT_USE_SECURE_CRT_FUNCTIONS
+                    , (unsigned int)AZ_ARRAY_SIZE(dummy)
+#endif
+                    , name
+#if AZ_TRAIT_USE_SECURE_CRT_FUNCTIONS
+                    , (unsigned int)AZ_ARRAY_SIZE(name)
+#endif
+                    ); // Get flag name..
                     assert(res);
 
                     string pszNameFlag = name;
@@ -917,7 +1014,7 @@ void CShaderMan::mfInitCommonGlobalFlags(void)
 {
     mfInitCommonGlobalFlagsLegacyFix();
 
-    string pszGlobalsPath = string(m_szCachePath) + string("Shaders/Cache/globals.txt");
+    AZStd::string pszGlobalsPath = m_szCachePath + CONCAT_PATHS(g_shaderCache,"globals.txt");
     AZ::IO::HandleType fileHandle = gEnv->pCryPak->FOpen(pszGlobalsPath.c_str(), "r", ICryPak::FOPEN_HINT_QUIET);
     if (fileHandle != AZ::IO::InvalidHandle)
     {
@@ -928,9 +1025,14 @@ void CShaderMan::mfInitCommonGlobalFlags(void)
         if (strstr(str, "FX_CACHE_VER"))
         {
             float fCacheVer = 0.0f;
-            int res = sscanf(str, "%s %f", name, &fCacheVer);
+            int res = azsscanf(str, "%s %f",
+            name,
+#if AZ_TRAIT_USE_SECURE_CRT_FUNCTIONS
+            (unsigned int)AZ_ARRAY_SIZE(name),
+#endif
+            &fCacheVer);
             assert(res);
-            if (!_stricmp(name, "FX_CACHE_VER") && fabs(FX_CACHE_VER - fCacheVer) >= 0.01f)
+            if (!azstricmp(name, "FX_CACHE_VER") && fabs(FX_CACHE_VER - fCacheVer) >= 0.01f)
             {
                 gEnv->pCryPak->FClose(fileHandle);
                 // re-create common global flags (shader cache bumped)
@@ -954,13 +1056,17 @@ void CShaderMan::mfInitCommonGlobalFlags(void)
                 uint64 nGenMask = 0;
                 gEnv->pCryPak->FGets(str, 256, fileHandle);
 
-                if (sscanf(str, "%s "
+                if (azsscanf(str, "%s "
 #if defined(__GNUC__)
                     "%llx"
 #else
                     "%I64x"
 #endif
-                    , name, &nGenMask) > 1)
+                    , name,
+#if AZ_TRAIT_USE_SECURE_CRT_FUNCTIONS
+                    (unsigned int)AZ_ARRAY_SIZE(name),
+#endif
+                    &nGenMask) > 1)
                 {
                     m_pShaderCommonGlobalFlag.insert(MapNameFlagsItor::value_type(name, nGenMask));
                     nCurrMaskCount++;
@@ -985,7 +1091,7 @@ void CShaderMan::mfInitCommonGlobalFlags(void)
 void CShaderMan::mfInitLookups()
 {
     m_ResLookupDataMan[CACHE_READONLY].Clear();
-    string dirdatafilename(m_ShadersCache);
+    AZStd::string dirdatafilename(m_ShadersCache);
     dirdatafilename += "lookupdata.bin";
     m_ResLookupDataMan[CACHE_READONLY].LoadData(dirdatafilename.c_str(), CParserBin::m_bEndians, true);
 
@@ -1060,11 +1166,6 @@ void CShaderMan::mfInitGlobal (void)
             if (gb->m_ParamName == "%_RT_HDR_MODE")
             {
                 g_HWSR_MaskBit[HWSR_HDR_MODE] = gb->m_Mask;
-            }
-            else
-            if (gb->m_ParamName == "%_RT_NEAREST")
-            {
-                g_HWSR_MaskBit[HWSR_NEAREST] = gb->m_Mask;
             }
             else
             if (gb->m_ParamName == "%_RT_NEAREST")
@@ -1247,6 +1348,11 @@ void CShaderMan::mfInitGlobal (void)
                 g_HWSR_MaskBit[HWSR_SAMPLE5] = gb->m_Mask;
             }
             else
+            if (gb->m_ParamName == "%_RT_FOG_VOLUME_HIGH_QUALITY_SHADER")
+            {
+                g_HWSR_MaskBit[HWSR_FOG_VOLUME_HIGH_QUALITY_SHADER] = gb->m_Mask;
+            }
+            else
             if (gb->m_ParamName == "%_RT_APPLY_SSDO")
             {
                 g_HWSR_MaskBit[HWSR_APPLY_SSDO] = gb->m_Mask;
@@ -1396,6 +1502,67 @@ void CShaderMan::mfInitGlobal (void)
     }
 }
 
+void CShaderMan::InitStaticFlags()
+{
+    SAFE_DELETE(m_staticExt);
+    m_staticExt = mfCreateShaderGenInfo("Statics", true);
+    if (m_staticExt)
+    {
+        AZ_Assert(m_staticExt->m_BitMask.Num() == AZ_ARRAY_SIZE(g_HWSST_Flags), "Mismatch static flags count. Expected %u flags but got %u instead", AZ_ARRAY_SIZE(g_HWSST_Flags), m_staticExt->m_BitMask.Num());
+        for (unsigned i = 0; i < m_staticExt->m_BitMask.Num(); ++i)
+        {
+            SShaderGenBit* gb = m_staticExt->m_BitMask[i];
+            if (!gb)
+            {
+                continue;
+            }
+
+            auto found = AZStd::find_if(std::begin(g_HWSST_Flags), std::end(g_HWSST_Flags), [&gb](const AZStd::pair<const char*, uint64>& element) { return azstricmp(element.first, gb->m_ParamName) == 0; });
+            if (found != std::end(g_HWSST_Flags))
+            {
+                found->second = gb->m_Mask;
+            }
+            else
+            {
+                AZ_Error("Renderer", false, "Invalid static flag param %s", gb->m_ParamName.c_str());
+            }
+        }
+    }
+}
+
+void CShaderMan::AddStaticFlag(EHWSSTFlag flag)
+{
+    if (!m_staticExt)
+    {
+        InitStaticFlags();
+    }
+
+    AZ_Assert(static_cast<int>(flag) >= 0 && static_cast<int>(flag) < AZ_ARRAY_SIZE(g_HWSST_Flags), "Invalid static flag %d", static_cast<int>(flag));
+    m_staticFlags |= g_HWSST_Flags[flag].second;
+}
+
+void CShaderMan::RemoveStaticFlag(EHWSSTFlag flag)
+{
+    if (!m_staticExt)
+    {
+        InitStaticFlags();
+    }
+
+    AZ_Assert(static_cast<int>(flag) >= 0 && static_cast<int>(flag) < AZ_ARRAY_SIZE(g_HWSST_Flags), "Invalid static flag %d", static_cast<int>(flag));
+    m_staticFlags &= ~g_HWSST_Flags[flag].second;
+}
+
+bool CShaderMan::HasStaticFlag(EHWSSTFlag flag)
+{
+    if (!m_staticExt)
+    {
+        InitStaticFlags();
+    }
+
+    AZ_Assert(static_cast<int>(flag) >= 0 && static_cast<int>(flag) < AZ_ARRAY_SIZE(g_HWSST_Flags), "Invalid static flag %d", static_cast<int>(flag));
+    return (m_staticFlags & g_HWSST_Flags[flag].second) != 0;
+}
+
 void CShaderMan::mfInit (void)
 {
     LOADING_TIME_PROFILE_SECTION;
@@ -1410,19 +1577,32 @@ void CShaderMan::mfInit (void)
         m_ShadersPath = "Shaders/HWScripts/";
         m_ShadersMergeCachePath = "Shaders/MergeCache/";
 #if defined(LINUX32)
-        m_ShadersCache = "Shaders/Cache/LINUX32/";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "LINUX32/");
 #elif defined(LINUX64)
-        m_ShadersCache = "Shaders/Cache/LINUX64/";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "LINUX64/");
 #elif defined(MAC)
-        m_ShadersCache = "Shaders/Cache/Mac/";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "Mac/");
 #elif defined(IOS)
-        m_ShadersCache = "Shaders/Cache/iOS/";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "iOS/");
 #elif defined(APPLETV)
-        m_ShadersCache = "Shaders/Cache/AppleTV/";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "AppleTV/");
 #else
-        m_ShadersCache = "Shaders/Cache/D3D11";
+        m_ShadersCache = CONCAT_PATHS(g_shaderCache, "D3D11");
 #endif
         m_szCachePath = "@cache@/";
+        
+        if (CRenderer::CV_r_shadersImport == 3)
+        {
+#if defined(PERFORMANCE_BUILD) || defined(_RELEASE)
+            // Disable all runtime shader compilation and force use of the shader importing system in Performance and Release builds only
+            // We want to still build shaders in Profile builds so we do not miss generating new permutations
+            CRenderer::CV_r_shadersAllowCompilation = 0;
+#else
+            // Disable shader importing and allow r_shadersAllowCompilation and r_shadersremotecompiler to be used to compile shaders at runtime 
+            CRenderer::CV_r_shadersImport = 0;
+#endif
+        }
+
 #ifndef CONSOLE_CONST_CVAR_MODE
         if (CRenderer::CV_r_shadersediting)
         {
@@ -1447,7 +1627,10 @@ void CShaderMan::mfInit (void)
         if (CRenderer::CV_r_shadersAllowCompilation)
         {
             CRenderer::CV_r_shadersasyncactivation = 0;
-            CRenderer::CV_r_shadersImport = 0; // don't allow shader importing
+            
+            // don't allow shader importing when shader compilation is enabled.
+            AZ_Warning("Rendering", CRenderer::CV_r_shadersImport == 0, "Warning: Shader compilation is enabled, but shader importing was requested.  Disabling r_shadersImport.");
+            CRenderer::CV_r_shadersImport = 0;
         }
 
         // make sure correct paks are open - shaders.pak will be unloaded from memory after init
@@ -1469,6 +1652,7 @@ void CShaderMan::mfInit (void)
         //memset(&CShader::m_Shaders_known[0], 0, sizeof(CShader *)*MAX_SHADERS);
 
         mfInitGlobal();
+        InitStaticFlags();
         mfInitLevelPolicies();
 
         //mfInitLookups();
@@ -1488,19 +1672,32 @@ void CShaderMan::mfInit (void)
 #if !defined(NULL_RENDERER)
         if (!gRenDev->IsEditorMode() && !gRenDev->IsShaderCacheGenMode())
         {
+            const char* shaderPakDir = "@assets@";
+            const char* shaderPakPath = "shaderCache.pak";
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION SHADERCORE_CPP_SECTION_1
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ShaderCore_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ShaderCore_cpp_provo.inl"
+    #endif
+#endif
+
             if (CRenderer::CV_r_shaderspreactivate == 3)
             {
-                gEnv->pCryPak->LoadPakToMemory("shaderCache.pak", ICryPak::eInMemoryPakLocale_CPU);
+                gEnv->pCryPak->LoadPakToMemory(shaderPakPath, ICryPak::eInMemoryPakLocale_CPU);
 
-                mfPreactivateShaders2("", "shaders/cache/", true, "@assets@");
+                mfPreactivateShaders2("", "shaders/cache/", true, shaderPakDir);
 
-                gEnv->pCryPak->LoadPakToMemory("shaderCache.pak", ICryPak::eInMemoryPakLocale_Unload);
+                gEnv->pCryPak->LoadPakToMemory(shaderPakPath, ICryPak::eInMemoryPakLocale_Unload);
             }
             else if (CRenderer::CV_r_shaderspreactivate)
             {
-                mfPreactivateShaders2("", "shadercache/", true, "@assets@");
+                mfPreactivateShaders2("", "shadercache/", true, shaderPakDir);
             }
         }
+
 #endif
 
         if (CRenderer::CV_r_shadersAllowCompilation)
@@ -1515,9 +1712,12 @@ void CShaderMan::mfInit (void)
 #if !defined(CONSOLE) && !defined(NULL_RENDERER)
         if (!CRenderer::CV_r_shadersAllowCompilation)
         {
+            AZStd::string cgpShaders = m_ShadersCache + "cgpshaders";
+            AZStd::string cgvShaders = m_ShadersCache + "cgvshaders";
+            
             // make sure we can write to the shader cache
-            if (!CheckAllFilesAreWritable((string(m_ShadersCache) + "cgpshaders").c_str())
-                || !CheckAllFilesAreWritable((string(m_ShadersCache) + "cgvshaders").c_str()))
+            if (!CheckAllFilesAreWritable(cgpShaders.c_str()) ||
+                !CheckAllFilesAreWritable(cgvShaders.c_str()))
             {
                 // message box causes problems in fullscreen
                 //          MessageBox(0,"WARNING: Shader cache cannot be updated\n\n"
@@ -1541,7 +1741,18 @@ void CShaderMan::mfInit (void)
 
 bool CShaderMan::LoadShaderStartupCache()
 {
-    return gEnv->pCryPak->OpenPack("@assets@", "ShaderCacheStartup.pak", ICryPak::FLAGS_PAK_IN_MEMORY | ICryPak::FLAGS_PATH_REAL);
+    const char* shaderPakDir = "@assets@/ShaderCacheStartup.pak";
+
+#if defined(AZ_RESTRICTED_PLATFORM)
+#define AZ_RESTRICTED_SECTION SHADERCORE_CPP_SECTION_2
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/ShaderCore_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/ShaderCore_cpp_provo.inl"
+    #endif
+#endif
+    
+    return gEnv->pCryPak->OpenPack("@assets@", shaderPakDir, ICryPak::FLAGS_PAK_IN_MEMORY | ICryPak::FLAGS_PATH_REAL);
 }
 
 void CShaderMan::UnloadShaderStartupCache()
@@ -1694,7 +1905,7 @@ void CShaderMan::ParseShaderProfiles()
                 SShaderProfile* pr = NULL;
                 assert(name);
                 PREFAST_ASSUME(name);
-                if (!_stricmp(name, "Low"))
+                if (!azstricmp(name, "Low"))
                 {
                     pr = &m_ShaderFixedProfiles[eSQ_Low];
                 }
@@ -1794,6 +2005,7 @@ void CShaderMan::mfReleaseSystemShaders ()
     SAFE_RELEASE_FORCE(s_shPostEffects);
     SAFE_RELEASE_FORCE(s_ShaderFallback);
     SAFE_RELEASE_FORCE(s_ShaderFPEmu);
+    SAFE_RELEASE_FORCE(s_ShaderUI);
     SAFE_RELEASE_FORCE(s_ShaderLightStyles);
     SAFE_RELEASE_FORCE(s_ShaderShadowMaskGen);
     SAFE_RELEASE_FORCE(s_shHDRPostProcess);
@@ -1824,6 +2036,7 @@ void CShaderMan::mfLoadBasicSystemShaders()
     {
         sLoadShader("Fallback", s_ShaderFallback);
         sLoadShader("FixedPipelineEmu", s_ShaderFPEmu);
+        sLoadShader("UI", s_ShaderUI);
 
         mfRefreshSystemShader("Stereo", CShaderMan::s_ShaderStereo);
     }
@@ -1846,6 +2059,7 @@ void CShaderMan::mfLoadDefaultSystemShaders()
 
         sLoadShader("Fallback", s_ShaderFallback);
         sLoadShader("FixedPipelineEmu", s_ShaderFPEmu);
+        sLoadShader("UI", s_ShaderUI);
         sLoadShader("Light", s_ShaderLightStyles);
 
         sLoadShader("ShadowMaskGen", s_ShaderShadowMaskGen);
@@ -1949,7 +2163,7 @@ bool CShaderMan::mfGatherShadersList(const char* szPath, bool bCheckIncludes, bo
         }
         if (bCheckIncludes)
         {
-            if (!_stricmp(&nmf[len], ".cfi"))
+            if (!azstricmp(&nmf[len], ".cfi"))
             {
                 fpStripExtension(fileinfo.name, nmf);
                 SShaderBin* pBin = m_Bin.GetBinShader(nmf, true, 0, &bChanged);
@@ -1967,7 +2181,7 @@ bool CShaderMan::mfGatherShadersList(const char* szPath, bool bCheckIncludes, bo
             }
             continue;
         }
-        if (_stricmp(&nmf[len], ".cfx"))
+        if (azstricmp(&nmf[len], ".cfx"))
         {
             continue;
         }
@@ -2003,7 +2217,7 @@ void CShaderMan::mfGatherFilesList(const char* szPath, std::vector<CCryNameR>& N
         }
         if (fileinfo.attrib & _A_SUBDIR)
         {
-            if (!bUseFilter || nLevel != 1 || (m_ShadersFilter && !_stricmp(fileinfo.name, m_ShadersFilter)))
+            if (!bUseFilter || nLevel != 1 || !azstricmp(fileinfo.name, m_ShadersFilter.c_str()))
             {
                 char ddd[256];
                 sprintf_s(ddd, "%s%s/", szPath, fileinfo.name);
@@ -2023,11 +2237,11 @@ void CShaderMan::mfGatherFilesList(const char* szPath, std::vector<CCryNameR>& N
         {
             continue;
         }
-        if (!bMaterial && _stricmp(&nmf[len], ".fxcb"))
+        if (!bMaterial && azstricmp(&nmf[len], ".fxcb"))
         {
             continue;
         }
-        if (bMaterial && _stricmp(&nmf[len], ".mtl"))
+        if (bMaterial && azstricmp(&nmf[len], ".mtl"))
         {
             continue;
         }
@@ -2040,7 +2254,7 @@ void CShaderMan::mfGatherFilesList(const char* szPath, std::vector<CCryNameR>& N
 int CShaderMan::mfInitShadersList(std::vector<string>* Names)
 {
     // Detect include changes
-    bool bChanged = mfGatherShadersList(m_ShadersPath, true, false, Names);
+    bool bChanged = mfGatherShadersList(m_ShadersPath.c_str(), true, false, Names);
 
     if (gRenDev->m_bShaderCacheGen)
     {
@@ -2060,7 +2274,7 @@ int CShaderMan::mfInitShadersList(std::vector<string>* Names)
     }
 
 #ifndef NULL_RENDERER
-    mfGatherShadersList(m_ShadersPath, false, bChanged, Names);
+    mfGatherShadersList(m_ShadersPath.c_str(), false, bChanged, Names);
     return m_ShaderNames.size();
 #else
     return 0;
@@ -2087,8 +2301,8 @@ void CShaderMan::mfPreloadShaderExts(void)
         {
             continue;
         }
-        // Ignore runtime.ext
-        if (!_stricmp(fileinfo.name, "runtime.ext"))
+
+        if (!azstricmp(fileinfo.name, "runtime.ext") || !azstricmp(fileinfo.name, "statics.ext"))
         {
             continue;
         }
@@ -2168,10 +2382,10 @@ SEnvTexture* SHRenderTarget::GetEnv2D()
     SEnvTexture* pEnvTex = NULL;
     if (m_nIDInPool >= 0)
     {
-        assert(m_nIDInPool < (int)CTexture::s_CustomRT_2D.Num());
-        if (m_nIDInPool < (int)CTexture::s_CustomRT_2D.Num())
+        assert(m_nIDInPool < (int)CTexture::s_CustomRT_2D->Num());
+        if (m_nIDInPool < (int)CTexture::s_CustomRT_2D->Num())
         {
-            pEnvTex = &CTexture::s_CustomRT_2D[m_nIDInPool];
+            pEnvTex = &(*CTexture::s_CustomRT_2D)[m_nIDInPool];
         }
     }
     else
@@ -2286,7 +2500,7 @@ void CShaderResources::CreateModifiers(SInputShaderResources* pInRes)
                 m_ResFlags |= MTL_FLAG_NOTINSTANCED;
             }
 
-        pInTex->UpdateForCreate();
+        pInTex->UpdateForCreate(slotIdx);
         if (pInTex->m_Ext.m_nUpdateFlags & HWMD_TEXCOORD_FLAG_MASK)
         {
             SEfTexModificator* pDstMod = new SEfTexModificator;
@@ -2315,7 +2529,26 @@ void CShaderResources::CreateModifiers(SInputShaderResources* pInRes)
     }
 }
 
-void SEfResTexture::UpdateForCreate()
+int32 GetTextCoordGenObjLinearFlag(int textSlot)
+{
+    switch (static_cast<EEfResTextures>(textSlot))
+    {
+    case EFTT_DIFFUSE:
+        return HWMD_TEXCOORD_GEN_OBJECT_LINEAR_DIFFUSE;
+    case  EFTT_DETAIL_OVERLAY:
+        return HWMD_TEXCOORD_GEN_OBJECT_LINEAR_DETAIL;
+    case EFTT_DECAL_OVERLAY:
+        return HWMD_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE_MULT;
+    case EFTT_EMITTANCE:
+        return HWMD_TEXCOORD_GEN_OBJECT_LINEAR_EMITTANCE;
+    case EFTT_CUSTOM:
+        return HWMD_TEXCOORD_GEN_OBJECT_LINEAR_CUSTOM;
+    default:
+        return 0;
+    }
+}
+
+void SEfResTexture::UpdateForCreate(int textSlot)
 {
     FUNCTION_PROFILER_RENDER_FLAT
 
@@ -2334,7 +2567,7 @@ void SEfResTexture::UpdateForCreate()
         assert(pEnv);
         if (pEnv && pEnv->m_pTex)
         {
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_PROJ | HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
+            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_PROJ | GetTextCoordGenObjLinearFlag(textSlot);
         }
     }
 
@@ -2356,10 +2589,8 @@ void SEfResTexture::UpdateForCreate()
         switch (pMod->m_eTGType)
         {
         case ETG_World:
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
-            break;
         case ETG_Camera:
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
+            m_Ext.m_nUpdateFlags |= GetTextCoordGenObjLinearFlag(textSlot);
             break;
         }
     }
@@ -2429,7 +2660,7 @@ void SEfResTexture::UpdateWithModifier(int nTSlot)
         {
             pMod->m_TexGenMatrix = Matrix44A(rd->m_RP.m_pCurObject->m_II.m_Matrix).GetTransposed() * pEnv->m_Matrix;
             pMod->m_TexGenMatrix = pMod->m_TexGenMatrix.GetTransposed();
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_PROJ | HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
+            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_PROJ | GetTextCoordGenObjLinearFlag(nTSlot);
         }
     }
 
@@ -2703,7 +2934,7 @@ void SEfResTexture::UpdateWithModifier(int nTSlot)
         {
         case ETG_World:
         {
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
+            m_Ext.m_nUpdateFlags |= GetTextCoordGenObjLinearFlag(nTSlot);
             for (int i = 0; i < 4; i++)
             {
                 memset(&Pl, 0, sizeof(Pl));
@@ -2728,7 +2959,7 @@ void SEfResTexture::UpdateWithModifier(int nTSlot)
         break;
         case ETG_Camera:
         {
-            m_Ext.m_nUpdateFlags |= HWMD_TEXCOORD_GEN_OBJECT_LINEAR;
+            m_Ext.m_nUpdateFlags |= GetTextCoordGenObjLinearFlag(nTSlot);
             for (int i = 0; i < 4; i++)
             {
                 memset(&Pl, 0, sizeof(Pl));
@@ -3327,7 +3558,7 @@ inline bool sIdenticalRes(CShaderResources* a, CShaderResources* b)
         return false;
     }
 
-	// [Shader System TO DO] - revisit this comparison!!!
+    // [Shader System TO DO] - revisit this comparison!!!
     for (int texSlot = 0; texSlot < EFTT_MAX; texSlot++)
     {
         SEfResTexture*      pTextureA = a->GetTextureResource(texSlot);

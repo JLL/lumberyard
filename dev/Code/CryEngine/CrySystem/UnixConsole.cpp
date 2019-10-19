@@ -766,7 +766,7 @@ void CUNIXConsole::KeyEnter()
         // commands start with an '@' character.
         {
             const char* const command = m_InputLine.c_str();
-            if (!_stricmp(command, "@quit"))
+            if (!azstricmp(command, "@quit"))
             {
                 // We're called from the input thread, hence we can't join it.  We
                 // have to prevent Cleanup() (called via atexit()) from trying to
@@ -1456,7 +1456,7 @@ void CUNIXConsole::DrawStatus(int maxLines)
         {
             char* pBufferRight = bufferRight;
             char* const pBufferRightEnd = bufferRight + sizeof bufferRight;
-            strcpy(pBufferRight, "| ");
+            azstrcpy(pBufferRight, AZ_ARRAY_SIZE(bufferRight), "| ");
             pBufferRight += strlen(pBufferRight);
             int numPlayers = 0;
 
@@ -2423,7 +2423,11 @@ void CUNIXConsoleSignalHandler::Handler(int signum)
 //
 ///////////////////////////////////////////////////////////////////////////////////////
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(UnixConsole_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/UnixConsole_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/UnixConsole_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED

@@ -19,7 +19,6 @@
 #include "RenderMesh.h"
 #include "PostProcess/PostEffects.h"
 #include "QTangent.h"
-#include <IJobManager_JobDelegator.h>
 #include <Common/Memory/VRAMDrillerBus.h>
 
 #if !defined(NULL_RENDERER)
@@ -62,14 +61,17 @@ namespace
         bool m_doConditionalLock = false;
     };
 
-    static inline void RelinkTail(util::list<CRenderMesh>& instance, util::list<CRenderMesh>& list)
+    static inline void RelinkTail(util::list<CRenderMesh>& instance, util::list<CRenderMesh>& list, int threadId)
     {
-        // Conditional lock logic - If we are any thread that is not the render thread, do the lock because
-        // they are operating on the m_nFillThreadID set of data. The render thread should be the only thread
-        // accessing the m_nProcessThreadID index of the data.
-        // If r_multithreaded == 0 (for example when in the Editor), then always do the lock because the data is no longer double buffered.
+        // Conditional lock logic - When multi-threaded rendering is enabled, 
+        // this data is double buffered and we must only lock when attempting 
+        // to modify the fill thread data.  Only the render thread should  
+        // access the process thread data so we don't need to lock in that case. 
+        // In single-threaded rendering (editor) we must always lock because
+        // the data is not double buffered.
         bool isRenderThread = gRenDev->m_pRT->IsRenderThread();
-        bool doConditionalLock = !isRenderThread || (isRenderThread && (CRenderer::CV_r_multithreaded == 0));
+        bool doConditionalLock = !isRenderThread || threadId == gRenDev->m_pRT->CurThreadFill() || CRenderer::CV_r_multithreaded == 0;
+
         CConditionalLock lock(CRenderMesh::m_sLinkLock, doConditionalLock);
         instance.relink_tail(&list);
     }
@@ -613,10 +615,6 @@ SMeshStream* CRenderMesh::GetVertexStream(int nStream, uint32 nFlags)
 void* CRenderMesh::LockVB(int nStream, uint32 nFlags, int nVerts, int* nStride, bool prefetchIB, bool inplaceCachePos)
 {
     FUNCTION_PROFILER_RENDERER;
-
-    MEMORY_SCOPE_CHECK_HEAP();
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
 # if !defined(_RELEASE)
     if (!m_nThreadAccessCounter)
     {
@@ -663,7 +661,7 @@ void* CRenderMesh::LockVB(int nStream, uint32 nFlags, int nVerts, int* nStride, 
     if (nFlags == FSL_SYSTEM_CREATE)
     {
 lSysCreate:
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (!MS->m_pUpdateData)
         {
             uint32 nSize = GetStreamSize(nStream);
@@ -686,7 +684,7 @@ lSysCreate:
     if (nFlags == FSL_SYSTEM_UPDATE)
     {
 lSysUpdate:
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (!MS->m_pUpdateData)
         {
             MESSAGE_VIDEO_BUFFER_ACC_ATTEMPT;
@@ -708,7 +706,7 @@ lSysUpdate:
         {
             return NULL;
         }
-        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId]);
+        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId], threadId);
         if (MS->m_pUpdateData)
         {
             pD = (byte*)MS->m_pUpdateData;
@@ -723,7 +721,7 @@ lSysUpdate:
         {
             return NULL;
         }
-        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId]);
+        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId], threadId);
 #   if BUFFER_ENABLE_DIRECT_ACCESS == 0
         if (gRenDev->m_pRT && gRenDev->m_pRT->IsMultithreaded())
         {
@@ -767,7 +765,7 @@ lSysUpdate:
         if ((nVB != ~0u && (MS->m_nFrameCreate != nFrame || MS->m_nElements != m_nVerts)) || !CRenderer::CV_r_buffer_enable_lockless_updates)
 #   endif
         goto lSysCreate;
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (nVB == ~0u && !CreateVidVertices(nStream))
         {
             RT_AllocationFailure("Create VB-Stream", GetStreamSize(nStream, m_nVerts));
@@ -798,8 +796,7 @@ lSysUpdate:
 vtx_idx* CRenderMesh::LockIB(uint32 nFlags, int nOffset, int nInds)
 {
     FUNCTION_PROFILER_RENDERER;
-
-    MEMORY_SCOPE_CHECK_HEAP();
+    
     byte* pD;
 # if !defined(_RELEASE)
     if (!m_nThreadAccessCounter)
@@ -834,7 +831,7 @@ vtx_idx* CRenderMesh::LockIB(uint32 nFlags, int nOffset, int nInds)
     if (nFlags == FSL_SYSTEM_CREATE)
     {
 lSysCreate:
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (!m_IBStream.m_pUpdateData)
         {
             uint32 nSize = m_nInds * sizeof(vtx_idx);
@@ -857,7 +854,7 @@ lSysCreate:
     if (nFlags == FSL_SYSTEM_UPDATE)
     {
 lSysUpdate:
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (!m_IBStream.m_pUpdateData)
         {
             MESSAGE_VIDEO_BUFFER_ACC_ATTEMPT;
@@ -875,7 +872,7 @@ lSysUpdate:
     }
     else if (nFlags == FSL_READ)
     {
-        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId]);
+        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId], threadId);
         if (m_IBStream.m_pUpdateData)
         {
             pD = (byte*)m_IBStream.m_pUpdateData;
@@ -886,7 +883,7 @@ lSysUpdate:
 
     if (nFlags == (FSL_READ | FSL_VIDEO))
     {
-        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId]);
+        RelinkTail(m_Dirty[threadId], m_MeshDirtyList[threadId], threadId);
         buffer_handle_t nIB = m_IBStream.m_nID;
         if (nIB == ~0u)
         {
@@ -928,7 +925,7 @@ lSysUpdate:
         if ((nIB != ~0u && (m_IBStream.m_nFrameCreate || m_IBStream.m_nElements != m_nInds)) || !CRenderer::CV_r_buffer_enable_lockless_updates)
 #   endif
         goto lSysCreate;
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         if (m_IBStream.m_nID == ~0u)
         {
             size_t bufferSize = m_nInds * sizeof(vtx_idx);
@@ -971,7 +968,6 @@ lSysUpdate:
 
 ILINE void CRenderMesh::UnlockVB(int nStream)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     SREC_AUTO_LOCK(m_sResLock);
     SMeshStream* pMS = GetVertexStream(nStream, 0);
     if (pMS && pMS->m_nLockFlags & FSL_LOCKED)
@@ -993,7 +989,6 @@ ILINE void CRenderMesh::UnlockVB(int nStream)
 
 ILINE void CRenderMesh::UnlockIB()
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     SREC_AUTO_LOCK(m_sResLock);
     if (m_IBStream.m_nLockFlags & FSL_LOCKED)
     {
@@ -1014,7 +1009,6 @@ ILINE void CRenderMesh::UnlockIB()
 
 void CRenderMesh::UnlockStream(int nStream)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
     UnlockVB(nStream);
     SREC_AUTO_LOCK(m_sResLock);
 
@@ -1076,14 +1070,13 @@ void CRenderMesh::UnlockStream(int nStream)
 }
 void CRenderMesh::UnlockIndexStream()
 {
-    MEMORY_SCOPE_CHECK_HEAP();
+    
     UnlockIB();
     m_IBStream.m_nLockFlags &= ~(FSL_WRITE | FSL_READ | FSL_SYSTEM | FSL_VIDEO);
 }
 
 bool CRenderMesh::CopyStreamToSystemForUpdate(SMeshStream& MS, size_t nSize)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     FUNCTION_PROFILER_RENDERER;
     SREC_AUTO_LOCK(m_sResLock);
     if (!MS.m_pUpdateData)
@@ -1129,10 +1122,6 @@ bool CRenderMesh::CopyStreamToSystemForUpdate(SMeshStream& MS, size_t nSize)
 size_t CRenderMesh::SetMesh_Int(CMesh& mesh, int nSecColorsSetOffset, uint32 flags)
 {
     LOADING_TIME_PROFILE_SECTION;
-    MEMORY_SCOPE_CHECK_HEAP();
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
-
     char* pVBuff = NULL;
     SPipTangents* pTBuff = NULL;
     SPipQTangents* pQTBuff = NULL;
@@ -1435,7 +1424,7 @@ error:
 size_t CRenderMesh::SetMesh(CMesh& mesh, int nSecColorsSetOffset, uint32 flags, bool requiresLock)
 {
     LOADING_TIME_PROFILE_SECTION;
-    MEMORY_SCOPE_CHECK_HEAP();
+    
     size_t resultingSize = ~0U;
 # ifdef USE_VBIB_PUSH_DOWN
     requiresLock = true;
@@ -1455,9 +1444,6 @@ size_t CRenderMesh::SetMesh(CMesh& mesh, int nSecColorsSetOffset, uint32 flags, 
 
 void CRenderMesh::SetSkinningDataVegetation(struct SMeshBoneMapping_uint8* pBoneMapping)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
-    MEMORY_SCOPE_CHECK_HEAP();
     LockForThreadAccess();
     SVF_W4B_I4S* pSkinBuff = (SVF_W4B_I4S*)LockVB(VSF_HWSKIN_INFO, FSL_VIDEO_CREATE);
 
@@ -1521,9 +1507,6 @@ void CRenderMesh::SetSkinningDataVegetation(struct SMeshBoneMapping_uint8* pBone
 
 void CRenderMesh::SetSkinningDataCharacter(CMesh& mesh, struct SMeshBoneMapping_uint16* pBoneMapping, struct SMeshBoneMapping_uint16* pExtraBoneMapping)
 {
-    MEMORY_SCOPE_CHECK_HEAP();
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     SVF_W4B_I4S* pSkinBuff = (SVF_W4B_I4S*)LockVB(VSF_HWSKIN_INFO, FSL_VIDEO_CREATE);
 
     // stop initializing if allocation failed
@@ -1645,8 +1628,7 @@ uint CRenderMesh::GetSkinningWeightCount() const
 }
 
 IIndexedMesh* CRenderMesh::GetIndexedMesh(IIndexedMesh* pIdxMesh)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     struct MeshDataLock
     {
         MeshDataLock(CRenderMesh* pMesh)
@@ -1669,7 +1651,8 @@ IIndexedMesh* CRenderMesh::GetIndexedMesh(IIndexedMesh* pIdxMesh)
 
     CMesh* const pMesh = pIdxMesh->GetMesh();
 
-    uint32 numTexCoords = m_vertexFormat.GetAttributesByUsage(AZ::Vertex::AttributeUsage::TexCoord).size();
+    uint32 numTexCoords = m_vertexFormat.GetAttributeUsageCount(AZ::Vertex::AttributeUsage::TexCoord);
+
     // These functions also re-allocate the streams
     pIdxMesh->SetVertexCount(m_nVerts);
     pIdxMesh->SetTexCoordCount(m_nVerts, numTexCoords);
@@ -1792,8 +1775,7 @@ IIndexedMesh* CRenderMesh::GetIndexedMesh(IIndexedMesh* pIdxMesh)
 }
 
 void CRenderMesh::GenerateQTangents()
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     // FIXME: This needs to be cleaned up. Breakable foliage shouldn't need both streams, and this shouldn't be duplicated
     // between here and CryAnimation.
     LockForThreadAccess();
@@ -1820,10 +1802,6 @@ void CRenderMesh::GenerateQTangents()
 
 void CRenderMesh::CreateChunksSkinned()
 {
-    MEMORY_SCOPE_CHECK_HEAP();
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
-
     ReleaseRenderChunks(&m_ChunksSkinned);
 
     TRenderChunkArray& arrSrcMats = m_Chunks;
@@ -1893,8 +1871,7 @@ int CRenderMesh::GetRenderChunksCount(_smart_ptr<IMaterial> pMaterial, int& nRen
 }
 
 void CRenderMesh::CopyTo(IRenderMesh* _pDst, int nAppendVtx, bool bDynamic, bool fullCopy)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     CRenderMesh* pDst = (CRenderMesh*)_pDst;
 #ifdef USE_VBIB_PUSH_DOWN
     SREC_AUTO_LOCK(m_sResLock);
@@ -1974,8 +1951,7 @@ void CRenderMesh::CopyTo(IRenderMesh* _pDst, int nAppendVtx, bool bDynamic, bool
 
 // set effector for all chunks
 void CRenderMesh::SetCustomTexID(int nCustomTID)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     if (m_Chunks.size())
     {
         for (int i = 0; i < m_Chunks.size(); i++)
@@ -1991,9 +1967,6 @@ void CRenderMesh::SetCustomTexID(int nCustomTID)
 
 void CRenderMesh::SetChunk(int nIndex, CRenderChunk& inChunk)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
-
     if (!inChunk.nNumIndices || !inChunk.nNumVerts)
     {
         return;
@@ -2126,57 +2099,54 @@ bool CRenderMesh::CreateCachePos(byte* pSrc, uint32 nStrideSrc, uint nFlags)
 bool CRenderMesh::CreateUVCache(byte* source, uint32 sourceStride, uint flags, uint32 uvSetIndex)
 {
     PROFILE_FRAME(Mesh_CreateUVCache);
-    uint32 offset = 0;
-    bool hasUVSetAtIndex = m_vertexFormat.TryCalculateOffset(offset, AZ::Vertex::AttributeUsage::TexCoord, uvSetIndex);
+
+    AZ::Vertex::AttributeType attributeType = AZ::Vertex::AttributeType::NumTypes;
+    uint offset = 0;
+    bool hasUVSetAtIndex = m_vertexFormat.TryGetAttributeOffsetAndType(AZ::Vertex::AttributeUsage::TexCoord, uvSetIndex, offset, attributeType);
 
     // If the vertex format has a uv set at the given index
-    if (hasUVSetAtIndex)
+    // And the vertex format uses 16 bit floats to represent that uv set
+    if (hasUVSetAtIndex && (attributeType == AZ::Vertex::AttributeType::Float16_2))
     {
-        AZStd::vector<AZ::Vertex::Attribute> texCoordAttributes = m_vertexFormat.GetAttributesByUsage(AZ::Vertex::AttributeUsage::TexCoord);
-        bool uvSetIsAShort = texCoordAttributes[uvSetIndex].GetType() == AZ::Vertex::AttributeType::Float16_2;
-        // And the vertex format uses 16 bit floats to represent that uv set
-        if (uvSetIsAShort)
+        m_nFlagsCacheUVs = (flags & FSL_WRITE) != 0;
+        m_nFrameRequestCacheUVs = gRenDev->m_RP.m_TI[gRenDev->m_RP.m_nFillThreadID].m_nFrameUpdateID;
+        // Increase the size of the cached uvs vector if it is not big enough for the given uv set, and fill any new slots with nullptr
+        if (uvSetIndex >= m_UVCache.size())
         {
-            m_nFlagsCacheUVs = (flags & FSL_WRITE) != 0;
-            m_nFrameRequestCacheUVs = gRenDev->m_RP.m_TI[gRenDev->m_RP.m_nFillThreadID].m_nFrameUpdateID;
-            // Increase the size of the cached uvs vector if it is not big enough for the given uv set, and fill any new slots with nullptr
-            if (uvSetIndex >= m_UVCache.size())
-            {
-                m_UVCache.resize(uvSetIndex + 1, nullptr);
-            }
+            m_UVCache.resize(uvSetIndex + 1, nullptr);
+        }
 
-            // Return true if the uv cache has already been created and does not need to be updated
-            if ((flags & FSL_READ) && m_UVCache[uvSetIndex])
-            {
-                return true;
-            }
-            if ((flags == FSL_SYSTEM_CREATE) && m_UVCache[uvSetIndex])
-            {
-                return true;
-            }
+        // Return true if the uv cache has already been created and does not need to be updated
+        if ((flags & FSL_READ) && m_UVCache[uvSetIndex])
+        {
+            return true;
+        }
+        if ((flags == FSL_SYSTEM_CREATE) && m_UVCache[uvSetIndex])
+        {
+            return true;
+        }
 
-            // If the cache doesn't exist yet, allocate memory for it
-            if (!m_UVCache[uvSetIndex])
-            {
-                m_UVCache[uvSetIndex] = AllocateMeshData<Vec2>(m_nVerts);
-            }
+        // If the cache doesn't exist yet, allocate memory for it
+        if (!m_UVCache[uvSetIndex])
+        {
+            m_UVCache[uvSetIndex] = AllocateMeshData<Vec2>(m_nVerts);
+        }
 
-            if (m_UVCache[uvSetIndex])
+        if (m_UVCache[uvSetIndex])
+        {
+            // If the new or existing cache needs to be updated, fill it with the source data
+            if (flags == FSL_SYSTEM_UPDATE || (flags & FSL_READ))
             {
-                // If the new or existing cache needs to be updated, fill it with the source data
-                if (flags == FSL_SYSTEM_UPDATE || (flags & FSL_READ))
+                source += offset;
+
+                for (uint32 i = 0; i < m_nVerts; i++)
                 {
-                    source += offset;
-
-                    for (uint32 i = 0; i < m_nVerts; i++)
-                    {
-                        Vec2f16* pVSrc = (Vec2f16*)source;
-                        m_UVCache[uvSetIndex][i] = pVSrc->ToVec2();
-                        source += sourceStride;
-                    }
+                    Vec2f16* pVSrc = (Vec2f16*)source;
+                    m_UVCache[uvSetIndex][i] = pVSrc->ToVec2();
+                    source += sourceStride;
                 }
-                return true;
             }
+            return true;
         }
     }
     return false;
@@ -2478,10 +2448,9 @@ void CRenderMesh::BuildAdjacency(const byte* pVerts, const AZ::Vertex::Format& v
     uint stride = vertexFormat.GetStride();
     uint positionOffset = 0;
     vertexFormat.TryCalculateOffset(positionOffset, AZ::Vertex::AttributeUsage::Position);
-    uint positionByteLength = vertexFormat.GetAttributesByUsage(AZ::Vertex::AttributeUsage::Position).front().GetByteLength();
     uint texCoordOffset = 0;
     vertexFormat.TryCalculateOffset(texCoordOffset, AZ::Vertex::AttributeUsage::TexCoord);
-    uint texCoordByteLength = vertexFormat.GetAttributesByUsage(AZ::Vertex::AttributeUsage::TexCoord).front().GetByteLength();
+    uint texCoordByteLength = vertexFormat.GetAttributeByteLength(AZ::Vertex::AttributeUsage::TexCoord);
 
     // compute how many unique vertices are there, also setup links from each vertex to master vertex
     std::vector<int> arrLinkToMaster;
@@ -2630,8 +2599,6 @@ void CRenderMesh::BuildAdjacency(const byte* pVerts, const AZ::Vertex::Format& v
 
 bool CRenderMesh::RT_CheckUpdate(CRenderMesh* pVContainer, uint32 nStreamMask, bool bTessellation, bool stall)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     PrefetchLine(&m_IBStream, 0);
 
     CRenderer* rd = gRenDev;
@@ -2880,8 +2847,6 @@ bool CRenderMesh::UpdateIndices_Int(
     , int nOffsInd
     , uint32 copyFlags)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     AZ_TRACE_METHOD();
 
     //LockVB operates now on a per mesh lock, any thread may access
@@ -3034,8 +2999,6 @@ bool CRenderMesh::UpdateIndices(
 
 bool CRenderMesh::UpdateVidIndices(SMeshStream& IBStream, bool stall)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     SCOPED_RENDERER_ALLOCATION_NAME_HINT(GetSourceName());
     AZ_TRACE_METHOD();
 
@@ -3049,7 +3012,7 @@ bool CRenderMesh::UpdateVidIndices(SMeshStream& IBStream, bool stall)
 
     if (!nInds)
     {
-        // 0 size index buffer creation crashes on 360
+        // 0 size index buffer creation crashes on deprecated platform
         assert(nInds);
         return false;
     }
@@ -3085,8 +3048,6 @@ bool CRenderMesh::UpdateVidIndices(SMeshStream& IBStream, bool stall)
 
 bool CRenderMesh::CreateVidVertices(int nStream)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     SCOPED_RENDERER_ALLOCATION_NAME_HINT(GetSourceName());
     AZ_TRACE_METHOD();
 
@@ -3118,8 +3079,6 @@ bool CRenderMesh::CreateVidVertices(int nStream)
 
 bool CRenderMesh::UpdateVidVertices(int nStream, bool stall)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     AZ_TRACE_METHOD();
 
     assert(gRenDev->m_pRT->IsRenderThread());
@@ -3161,8 +3120,6 @@ bool CRenderMesh::UpdateVidVertices(int nStream, bool stall)
 template<class VecPos, class VecUV>
 bool CRenderMesh::UpdateUVCoordsAdjacency(SMeshStream& IBStream, const AZ::Vertex::Format& vertexFormat)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
     SCOPED_RENDERER_ALLOCATION_NAME_HINT(GetSourceName());
     AZ_TRACE_METHOD();
 
@@ -3174,7 +3131,7 @@ bool CRenderMesh::UpdateUVCoordsAdjacency(SMeshStream& IBStream, const AZ::Verte
 
     if (!nInds)
     {
-        // 0 size index buffer creation crashes on 360
+        // 0 size index buffer creation crashes on deprecated platform
         assert(nInds);
         return false;
     }
@@ -3274,7 +3231,7 @@ void CRenderMesh::Render(const SRendParams& rParams, CRenderObject* pObj, _smart
     {
         char szMesh[1024];
         cry_strcpy(szMesh, this->m_sSource);
-        strlwr(szMesh);
+        azstrlwr(szMesh, AZ_ARRAY_SIZE(szMesh));
         if (szExcl[0] == '!')
         {
             if (!strstr(&szExcl[1], m_sSource))
@@ -4329,8 +4286,7 @@ void CRenderMesh::FreeSystemBuffers()
 
 //////////////////////////////////////////////////////////////////////////
 void CRenderMesh::DebugDraw(const struct SGeometryDebugDrawInfo& info, uint32 nVisibleChunksMask, float fExtrdueScale)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     IRenderAuxGeom* pRenderAuxGeom = gEnv->pRenderer->GetIRenderAuxGeom();
     LockForThreadAccess();
 
@@ -4483,8 +4439,7 @@ void CRenderMesh::DebugDraw(const struct SGeometryDebugDrawInfo& info, uint32 nV
 
 //===========================================================================================================
 void CRenderMesh::PrintMeshLeaks()
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     AUTO_LOCK(m_sLinkLock);
     for (util::list<CRenderMesh>* iter = CRenderMesh::m_MeshList.next; iter != &CRenderMesh::m_MeshList; iter = iter->next)
     {
@@ -4495,8 +4450,7 @@ void CRenderMesh::PrintMeshLeaks()
 }
 
 bool CRenderMesh::ClearStaleMemory(bool bLocked, int threadId)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     FUNCTION_PROFILER(gEnv->pSystem, PROFILE_RENDERER);
     bool cleared = false;
     bool bKeepSystem = false;
@@ -4559,8 +4513,7 @@ dirty_done:
 }
 
 void CRenderMesh::UpdateModifiedMeshes(bool bLocked, int threadId)
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     AZ_TRACE_METHOD();
     FUNCTION_PROFILER_LEGACYONLY(gEnv->pSystem, PROFILE_RENDERER);
 
@@ -4611,8 +4564,7 @@ void CRenderMesh::UpdateModifiedMeshes(bool bLocked, int threadId)
 
 // Mesh garbage collector
 void CRenderMesh::UpdateModified()
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     SRenderThread* pRT = gRenDev->m_pRT;
     ASSERT_IS_RENDER_THREAD(pRT);
     const int threadId = gRenDev->m_RP.m_nProcessThreadID;
@@ -4631,8 +4583,7 @@ void CRenderMesh::UpdateModified()
 
 // Mesh garbage collector
 void CRenderMesh::Tick()
-{
-    MEMORY_SCOPE_CHECK_HEAP();
+{    
     ASSERT_IS_RENDER_THREAD(gRenDev->m_pRT)
     bool bKeepSystem = false;
     const threadID threadId = gRenDev->m_pRT->IsMultithreaded() ? gRenDev->m_RP.m_nProcessThreadID : threadID(1);
@@ -4709,9 +4660,6 @@ void CRenderMesh::UnKeepSysMesh()
 //////////////////////////////////////////////////////////////////////////
 void CRenderMesh::SetVertexContainer(IRenderMesh* pBuf)
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMeshType, 0, this->GetTypeName());
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_RenderMesh, 0, this->GetSourceName());
-
     if (m_pVertexContainer)
     {
         ((CRenderMesh*)m_pVertexContainer)->m_lstVertexContainerUsers.Delete(this);
@@ -4934,7 +4882,7 @@ void CRenderMesh::CreateRemappedBoneIndicesPair(const uint pairGuid, const TRend
     UnlockIndexStream();
 
     m_CreatedBoneIndices[threadId].push_back(SBoneIndexStreamRequest(pairGuid, remappedIndices));
-    RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+    RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
 }
 
 
@@ -5018,7 +4966,7 @@ void CRenderMesh::CreateRemappedBoneIndicesPair(const DynArray<JointIdType>& arr
     UnlockIndexStream();
 
     m_CreatedBoneIndices[threadId].push_back(SBoneIndexStreamRequest(pairGuid, remappedIndices));
-    RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+    RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
 }
 
 void CRenderMesh::ReleaseRemappedBoneIndicesPair(const uint pairGuid)
@@ -5050,7 +4998,7 @@ void CRenderMesh::ReleaseRemappedBoneIndicesPair(const uint pairGuid)
     if (deleted != ~0u)
     {
         m_DeletedBoneIndices[threadId].push_back(pairGuid);
-        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+        RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
     }
 
     // Check for created but not yet remapped bone indices
@@ -5072,7 +5020,7 @@ void CRenderMesh::ReleaseRemappedBoneIndicesPair(const uint pairGuid)
         if (deleted != ~0u)
         {
             m_DeletedBoneIndices[threadId].push_back(pairGuid);
-            RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId]);
+            RelinkTail(m_Modified[threadId], m_MeshModifiedList[threadId], threadId);
         }
     }
 }

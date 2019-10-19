@@ -33,10 +33,14 @@ namespace AZ
     {
         friend IAllocator;
         friend class Debug::AllocationRecords;
+        friend class AZ::Internal::EnvironmentVariableHolder<AllocatorManager>;
     public:
         typedef AZStd::function<void (IAllocator* allocator, size_t /*byteSize*/, size_t /*alignment*/, int/* flags*/, const char* /*name*/, const char* /*fileName*/, int lineNum /*=0*/)>    OutOfMemoryCBType;
 
-        AZ_FORCE_INLINE static AllocatorManager& Instance()         { return g_allocMgr; }
+        static AllocatorManager& Instance();
+        static bool IsReady();
+        static void Destroy();
+
         AZ_FORCE_INLINE  int            GetNumAllocators() const    { return m_numAllocators; }
         AZ_FORCE_INLINE  IAllocator*    GetAllocator(int index)
         {
@@ -80,15 +84,16 @@ namespace AZ
         /// Reset a memory break. -1 all slots, otherwise (0 to MaxNumMemoryBreaks)
         void ResetMemoryBreak(int slot = -1);
         //////////////////////////////////////////////////////////////////////////
+
+        // Called from IAllocator
+        void RegisterAllocator(IAllocator* alloc);
+        void UnRegisterAllocator(IAllocator* alloc);
+
     private:
         void DebugBreak(void* address, const Debug::AllocationInfo& info);
 
         AllocatorManager(const AllocatorManager&);
         AllocatorManager& operator=(const AllocatorManager&);
-
-        // Called from IAllocator
-        void RegisterAllocator(IAllocator* alloc);
-        void UnRegisterAllocator(IAllocator* alloc);
 
         static const int m_maxNumAllocators = 100;
         IAllocator*         m_allocators[m_maxNumAllocators];

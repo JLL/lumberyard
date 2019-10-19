@@ -47,6 +47,7 @@
 #include <ui_TerrainDialog.h>
 
 #include <Cry3DEngine/Environment/OceanEnvironmentBus.h>
+#include <AzToolsFramework/Physics/EditorTerrainComponentBus.h>
 
 #include "QtUtil.h"
 
@@ -97,12 +98,14 @@ CTerrainDialog::CTerrainDialog()
     m_pHeightmap = GetIEditor()->GetHeightmap();
 
     GetIEditor()->RegisterNotifyListener(this);
+    LmbrCentral::WaterNotificationBus::Handler::BusConnect();
 
     OnInitDialog();
 }
 
 CTerrainDialog::~CTerrainDialog()
 {
+    LmbrCentral::WaterNotificationBus::Handler::BusDisconnect();
     GetIEditor()->UnregisterNotifyListener(this);
     GetIEditor()->SetEditTool(nullptr);
     delete m_sLastParam;
@@ -124,7 +127,11 @@ void CTerrainDialog::RegisterViewClass()
     options.canHaveMultipleInstances = true;
     options.sendViewPaneNameBackToAmazonAnalyticsServers = true;
 
-    AzToolsFramework::RegisterViewPane<CTerrainDialog>(LyViewPane::TerrainEditor, LyViewPane::CategoryTools, options);
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        AzToolsFramework::RegisterViewPane<CTerrainDialog>(
+            LyViewPane::TerrainEditor, LyViewPane::CategoryTools, options);
+    }
 }
 
 
@@ -238,35 +245,8 @@ void CTerrainDialog::OnTerrainLoad()
     if (dlg.exec())
     {
         QString fileName = dlg.selectedFiles().constFirst();
-        QFileInfo info(fileName);
-        const QString ext = info.completeSuffix().toLower();
-
         QWaitCursor wait;
-
-        if (ext == "asc")
-        {
-            // Treat 32-bit formats special to make sure we preserve full data precision
-            m_pHeightmap->LoadASC(fileName);
-        }
-        else if (ext == "bt")
-        {
-            // Treat 32-bit formats special to make sure we preserve full data precision
-            m_pHeightmap->LoadBT(fileName);
-        }
-        else if (ext == "tif")
-        {
-            // Treat 32-bit formats special to make sure we preserve full data precision
-            m_pHeightmap->LoadTIF(fileName);
-        }
-        else if (ext == "raw" || ext == "r16")
-        {
-            m_pHeightmap->LoadRAW(fileName);
-        }
-        else
-        {
-            // Assumes the input format is in 8-bit or 16-bit height values.  Not recommended, but supported.
-            m_pHeightmap->LoadImage(fileName);
-        }
+        m_pHeightmap->ImportHeightmap(fileName);
 
         InvalidateTerrain();
 
@@ -338,7 +318,6 @@ void CTerrainDialog::OnTerrainGenerate()
         sDefaultParam.fFrequency = 7.0f;  // Feature Size
         sDefaultParam.fFrequencyStep = 2.0f;
         sDefaultParam.fFade = 0.46f;  // Bumpiness
-        sDefaultParam.iCover = 0;
         sDefaultParam.iRandom = 1;  // Variation
         sDefaultParam.iSharpness = 0.999f;
         sDefaultParam.iSmoothness = 0;
@@ -388,34 +367,7 @@ void CTerrainDialog::OnExportHeightmap()
         CLogFile::WriteLine("Exporting heightmap...");
 
         QString fileName = dlg.selectedFiles().first();
-        QFileInfo info(fileName);
-        const QString ext = info.completeSuffix().toLower();
-
-        if (ext == "asc")
-        {
-            m_pHeightmap->SaveASC(fileName);
-        }
-        else if (ext == "bt")
-        {
-            m_pHeightmap->SaveBT(fileName);
-        }
-        else if (ext == "tif")
-        {
-            m_pHeightmap->SaveTIF(fileName);
-        }
-        else if (ext == "pgm")
-        {
-            m_pHeightmap->SaveImage16Bit(fileName);
-        }
-        else if (ext == "raw" || ext == "r16")
-        {
-            m_pHeightmap->SaveRAW(fileName);
-        }
-        else
-        {
-            // BMP or others
-            m_pHeightmap->SaveImage(fileName.toUtf8().data());
-        }
+        m_pHeightmap->ExportHeightmap(fileName);
     }
 }
 
@@ -892,7 +844,7 @@ void CTerrainDialog::OnSetUnitSize()
     }
 
     bool ok = false;
-    QString newUnitSize = QInputDialog::getItem(this, tr("Set Unit Size (Meters per texel)"), tr("Unit size (meters/texel)"), unitSizes, currentIndex, false, &ok);
+    QString newUnitSize = QInputDialog::getItem(this, tr("Set Unit Size"), tr("Unit size (meters/texel)"), unitSizes, currentIndex, false, &ok);
     if (ok)
     {
         GetIEditor()->GetHeightmap()->SetUnitSize(newUnitSize.toInt());
@@ -930,6 +882,7 @@ void CTerrainDialog::InvalidateTerrain()
 
     InvalidateViewport();
     UpdateTerrainDimensions();
+    Physics::EditorTerrainComponentRequestsBus::Broadcast(&Physics::EditorTerrainComponentRequests::UpdateHeightFieldAsset);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -971,6 +924,18 @@ void CTerrainDialog::OnEditorNotifyEvent(EEditorNotifyEvent event)
         */
     }
 }
+
+//////////////////////////////////////////////////////////////////////////
+void CTerrainDialog::OceanHeightChanged(float /*height*/)
+{
+    // If our ocean height has changed, and we're currently displaying water in our preview, 
+    // then we need to refresh the preview.
+    if (m_ui->viewport->GetShowWater())
+    {
+        InvalidateViewport();
+    }
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 //void CTerrainDialog::OnCustomize()

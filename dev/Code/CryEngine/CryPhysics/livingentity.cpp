@@ -78,14 +78,16 @@ CLivingEntity::CLivingEntity(CPhysicalWorld* pWorld, IGeneralMemoryHeap* pHeap)
 {
     m_vel.zero();
     m_velRequested.zero();
+    m_useCustomGravity = false;
     if (pWorld)
     {
-        m_gravity = pWorld->m_vars.gravity;
+        m_areaGravity = pWorld->m_vars.gravity;
     }
     else
     {
-        m_gravity.Set(0, 0, -9.81f);
+        m_areaGravity.Set(0, 0, -9.81f);
     }
+    m_customGravity.zero();
     m_bFlying = 1;
     m_bJumpRequested = 0;
     m_iSimClass = 3;
@@ -198,6 +200,9 @@ CLivingEntity::CLivingEntity(CPhysicalWorld* pWorld, IGeneralMemoryHeap* pHeap)
     m_dtRequested = 0;
 
     m_bReleaseGroundColliderWhenNotActive = 1;
+    m_timeStepFull = 0.0f;
+    m_timeStepPerformed = 0.0f;
+    m_iLastGroundColliderPart = -1;
 }
 
 CLivingEntity::~CLivingEntity()
@@ -261,7 +266,9 @@ int CLivingEntity::Awake(int bAwake, int iSource)
     {
         m_vel.zero();
         m_velRequested.zero();
-        m_gravity.zero();
+        m_useCustomGravity = false;
+        m_areaGravity.zero();
+        m_customGravity.zero();
     }
     return 1;
 }
@@ -340,10 +347,21 @@ got_unproj:
             else if (pentlist[i]->m_parts[0].flags & collider_flags && !IgnoreCollision(m_collisionClass, pentlist[i]->m_collisionClass))
             {
                 CLivingEntity* pent = (CLivingEntity*)pentlist[i];
-                if (fabs_tpl((pos.z + hCollider - hPivot) - (pent->m_pos.z + pent->m_hCyl - pent->m_hPivot)) < newdim.z + pent->m_size.z &&
-                    len2(vector2df(pos) - vector2df(pent->m_pos)) < sqr(newdim.x + pent->m_size.x))
+                float myColliderHalfHeight = newdim.z + (newdim.x * bCapsule);
+                float theirColliderHalfHeight = pent->m_size.z + (pent->m_size.x * pent->m_bUseCapsule);
+                float verticalCenterOfMyCollider = pos.z + hCollider - hPivot;
+                float verticalCenterOfTheirCollider = pent->m_pos.z + pent->m_hCyl - pent->m_hPivot;
+                float distanceBetweenVerticalCentersOfColliders = fabs_tpl(verticalCenterOfMyCollider - verticalCenterOfTheirCollider);
+                Vec2 planarCenterToCenterOfColliders = vector2df(pent->m_pos) - vector2df(pos);
+                float squareDistanceBetweenPlanarCentersOfColliders = len2(planarCenterToCenterOfColliders);
+                if (distanceBetweenVerticalCentersOfColliders < myColliderHalfHeight + theirColliderHalfHeight &&
+                    squareDistanceBetweenPlanarCentersOfColliders < sqr(newdim.x + pent->m_size.x))
                 {
-                    return 1E10;
+                    // Pick the best direction to unproject in the XY plane
+                    Vec2 safeUnprojDir = Vec2(cry_random(-1.0f, 1.0f), cry_random(-1.0f, 1.0f)).GetNormalizedSafe(Vec2(0.0f, 1.0f));
+                    dirUnproj = planarCenterToCenterOfColliders.GetNormalizedSafe(safeUnprojDir);
+                    float unprojAmountNeeded = newdim.x + pent->m_size.x - sqrt(squareDistanceBetweenPlanarCentersOfColliders);
+                    return unprojAmountNeeded;
                 }
             }
         }
@@ -354,12 +372,14 @@ got_unproj:
 
 int CLivingEntity::SetParams(const pe_params* _params, int bThreadSafe)
 {
+    const int steps = 30;
+    
     ChangeRequest<pe_params> req(this, m_pWorld, _params, bThreadSafe);
     if (req.IsQueued())
     {
         if (_params->type == pe_player_dimensions::type_id && (unsigned int)m_iSimClass < 7u)
         {
-            int iter = 0, iCaller = get_iCaller();
+            int iter = steps, iCaller = get_iCaller();
             WriteLockCond lockc(m_pWorld->m_lockCaller[iCaller], iCaller == MAX_PHYS_THREADS);
             float hCyl, hPivot;
             Vec3 size, pos;
@@ -381,9 +401,9 @@ int CLivingEntity::SetParams(const pe_params* _params, int bThreadSafe)
                 do
                 {
                     unproj += (step = UnprojectionNeeded(pos + params->dirUnproj * unproj, qrot, heightCollider,
-                                       hPivot, sizeCollider, m_bUseCapsule, params->dirUnproj, iCaller)) * 1.01f;
-                } while (unproj < params->maxUnproj && ++iter < 8 && step > 0);
-                if (unproj > params->maxUnproj || iter == 8)
+                        hPivot, sizeCollider, m_bUseCapsule, params->dirUnproj, iCaller)) * 1.01f;
+                } while (unproj < params->maxUnproj && --iter > 0 && step > 0);
+                if (unproj > params->maxUnproj || iter == 0)
                 {
                     return 0;
                 }
@@ -471,16 +491,16 @@ int CLivingEntity::SetParams(const pe_params* _params, int bThreadSafe)
         }
 
         float unproj = 0, step;
-        res = 0;
+        res = steps;
         if ((params->heightCollider != m_hCyl || params->heightPivot != m_hPivot || params->sizeCollider.x != m_size.x || params->sizeCollider.z != m_size.z ||
              params->bUseCapsule != m_bUseCapsule) && m_pWorld && m_bActive)
         {
             do
             {
                 unproj += (step = UnprojectionNeeded(m_pos + params->dirUnproj * unproj, m_qrot, params->heightCollider,
-                                   params->heightPivot, params->sizeCollider, params->bUseCapsule, params->dirUnproj)) * 1.01f;
-            } while (unproj < params->maxUnproj && ++res < 8 && step > 0);
-            if (unproj > params->maxUnproj || res == 8)
+                    params->heightPivot, params->sizeCollider, params->bUseCapsule, params->dirUnproj)) * 1.01f;
+            } while (unproj < params->maxUnproj && --res > 0 && step > 0);      
+            if (unproj > params->maxUnproj || res == 0)
             {
                 return 0;
             }
@@ -586,13 +606,16 @@ int CLivingEntity::SetParams(const pe_params* _params, int bThreadSafe)
         {
             m_kAirResistance = params->kAirResistance;
         }
+        m_useCustomGravity = false;
         if (!is_unused(params->gravity))
         {
-            m_gravity = params->gravity;
+            m_useCustomGravity = true;
+            m_customGravity = params->gravity;
         }
         else if (!is_unused(params->gravity.z))
         {
-            m_gravity.Set(0, 0, -params->gravity.z);
+            m_useCustomGravity = true;
+            m_customGravity.Set(0, 0, -params->gravity.z);
         }
         if (!is_unused(params->nodSpeed))
         {
@@ -693,7 +716,7 @@ int CLivingEntity::GetParams(pe_params* _params) const
         params->kInertiaAccel = m_kInertiaAccel;
         params->kAirControl = m_kAirControl;
         params->kAirResistance = m_kAirResistance;
-        params->gravity = m_gravity;
+        params->gravity = GetGravity();
         params->nodSpeed = m_nodSpeed;
         params->bSwimming = m_bSwimming;
         params->mass = m_mass;
@@ -793,7 +816,6 @@ int CLivingEntity::GetStatus(pe_status* _status) const
         status->bSquashed = m_bSquashed;
         return 1;
     }
-    else
 
     if (_status->type == pe_status_dynamics::type_id)
     {
@@ -1373,18 +1395,7 @@ int CLivingEntity::SetStateFromSnapshot(TSerialize ser, int flags)
         */
 
         float distance = m_pos.GetDistance(helper.pos);
-        if (ser.GetSerializationTarget() == eST_Network)
-        {
-            /*if (distance > MAX_DIFFERENCE)
-                setpos.pos = helper.pos + (m_pos - helper.pos).GetNormalized() * MAX_DIFFERENCE;
-            else
-                setpos.pos = m_pos + (helper.pos - m_pos) * distance/MAX_DIFFERENCE*0.033f;*/
-            setpos.pos = helper.pos;
-        }
-        else
-        {
-            setpos.pos = helper.pos;
-        }
+        setpos.pos = helper.pos;
 
         SetParams(&setpos, 0);
 
@@ -1538,11 +1549,11 @@ float CLivingEntity::ShootRayDown(le_precomp_entity* pents, int nents, le_precom
 
             if (pPrevCollider != pentbest)
             {
-                AddLegsImpulse(m_gravity * time_interval + m_vel, nslope, true);
+                AddLegsImpulse(GetGravity() * time_interval + m_vel, nslope, true);
             }
             else
             {
-                AddLegsImpulse(m_gravity * time_interval, nslope, false);
+                AddLegsImpulse(GetGravity() * time_interval, nslope, false);
             }
 
             pe_status_dynamics sd;
@@ -1567,7 +1578,7 @@ void CLivingEntity::AddLegsImpulse(const Vec3& vel, const Vec3& nslope, bool bIn
     RigidBody* pbody;
     pe_action_impulse ai;
     ssca.ptTest = m_pos - m_qrot * Vec3(0, 0, m_hPivot);
-    ssca.dirTest = m_gravity;
+    ssca.dirTest = GetGravity();
 
     if (m_pLastGroundCollider && m_flags & lef_push_objects &&
         (unsigned int)m_pLastGroundCollider->m_iSimClass - 1u < 2u && m_pLastGroundCollider->m_flags & pef_pushable_by_players &&
@@ -1711,7 +1722,7 @@ Vec3 CLivingEntity::SyncWithGroundCollider(float time_interval)
         K.SetZero();
         m_pLastGroundCollider->GetContactMatrix(newpos, i, K);
         Vec3 velGround = sd.v + (sd.w ^ newpos - sd.centerOfMass);
-        if ((velGround - velGround0).len2() < m_gravity.len2() * sqr(time_interval * 2.0f))
+        if ((velGround - velGround0).len2() < GetGravity().len2() * sqr(time_interval * 2.0f))
         {
             m_velGround = velGround;
         }
@@ -1884,8 +1895,9 @@ int CLivingEntity::Step(float time_interval)
         m_timeStepPerformed += time_interval;
     }
 
+    const Vec3 gravity = GetGravity();
     if (m_bActive &&
-        (!(vel.len2() == 0 && m_velRequested.len2() == 0 && (!bFlying || m_gravity.len2() == 0) && m_dhSpeed == 0 && m_dhAcc == 0) ||
+        (!(vel.len2() == 0 && m_velRequested.len2() == 0 && (!bFlying || gravity.len2() == 0) && m_dhSpeed == 0 && m_dhAcc == 0) ||
          m_bActiveEnvironment || m_nslope.z < m_slopeSlide || m_velGround.len2() > 0))
     {
         FUNCTION_PROFILER(GetISystem(), PROFILE_PHYSICS);
@@ -1920,9 +1932,9 @@ int CLivingEntity::Step(float time_interval)
 
                 vel += velDelta;
             }
-            else if (m_gravity.len2() > 0)
+            else if (gravity.len2() > 0)
             {
-                vel = m_gravity * (vel * m_gravity - m_velRequested * m_gravity) / m_gravity.len2() + m_velRequested;
+                vel = gravity * (vel * gravity - m_velRequested * gravity) / gravity.len2() + m_velRequested;
             }
             else
             {
@@ -1937,7 +1949,7 @@ int CLivingEntity::Step(float time_interval)
         }
         else if (bFlying && !m_bSwimming && !m_pWorld->m_vars.bFlyMode)
         {
-            move += m_gravity * sqr(time_interval) * 0.5f;
+            move += gravity * sqr(time_interval) * 0.5f;
         }
 
         if (vel.len2() > sqr(m_pWorld->m_vars.maxVelPlayers))
@@ -2301,7 +2313,8 @@ retry_without_ground_sync:
                                                 {
                                                     ai.impulse.normalize() *= fabs_tpl(vrel) * m_mass * 0.5f;
                                                 }
-                                                if ((uFlags & (pef_pushable_by_players | geom_no_coll_response)) == pef_pushable_by_players)
+                                                // don't push rigid bodies that have no collision response 
+                                                if (!(pPrecompParts[j1].partflags & geom_no_coll_response))
                                                 {
                                                     vel += ai.impulse * fMassInv;
                                                 }
@@ -2780,7 +2793,7 @@ nomove:;
                 ReleaseGroundCollider();
             }
 
-            bFlying = m_pWorld->m_vars.bFlyMode || m_gravity * axis > 0 || m_bSwimming || ((bGroundContact | m_bStuck) ^ 1);
+            bFlying = m_pWorld->m_vars.bFlyMode || gravity * axis > 0 || m_bSwimming || ((bGroundContact | m_bStuck) ^ 1);
             m_bActiveEnvironment = m_bStuck;
 
             if (bFlying)
@@ -2794,7 +2807,7 @@ nomove:;
                     Step_HandleWasFlying(vel, bFlying, axis, bGroundContact);
                 }
 
-                Vec3 velReq = m_velRequested, g;
+                Vec3 velReq = m_velRequested;
                 if (!m_bSwimming)
                 {
                     velReq -= m_nslope * (velReq * m_nslope);
@@ -2807,8 +2820,7 @@ nomove:;
                 const float axisSlope = m_nslope * axis;
                 if (axisSlope < m_slopeSlide && !m_bSwimming)
                 {
-                    g = m_gravity;
-                    last_force += g - m_nslope * (g * m_nslope);
+                    last_force += gravity - m_nslope * (gravity * m_nslope);
                 }
 
                 const Vec3 velIncLastForce = vel + (last_force * time_interval);
@@ -2993,7 +3005,7 @@ nomove:;
             m_pWorld->CheckAreas(this, gravity, &pb, 0);
             if (!is_unused(gravity))
             {
-                m_gravity = gravity;
+                m_areaGravity = gravity;
             }
 
             if (m_pWorld->m_pWaterMan)
@@ -3256,7 +3268,7 @@ void CLivingEntity::Step_HandleFlying(Vec3& vel, const Vec3& velGround, int bWas
     }
     if (!m_pWorld->m_vars.bFlyMode)
     {
-        gravity = m_gravity * time_interval;
+        gravity = GetGravity() * time_interval;
         if ((gravity * heightAdj) < 0.f) // Remove any slope adjustment from the gravity accumulation
         {
             gravityAdjusted = gravity + heightAdj / time_interval;
@@ -3317,4 +3329,9 @@ void CLivingEntity::Step_HandleWasFlying(Vec3& vel, int& bFlying, const Vec3& ax
             vel.zero();
         }
     }
+}
+
+Vec3 CLivingEntity::GetGravity() const
+{
+    return m_useCustomGravity ? m_customGravity : m_areaGravity;
 }

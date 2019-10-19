@@ -11,7 +11,7 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "AssetBrowserManager.h"
 #include "Util/FileUtil.h"
 #include "Util/IndexedFiles.h"
@@ -24,23 +24,6 @@
 #include "Objects/BrushObject.h"
 
 static CAssetBrowserManager* s_pInstance = 0;
-
-namespace AssetBrowser
-{
-    // details at http://www.cse.yorku.ca/~oz/hash.html
-    unsigned int HashStringSbdm(const char* pStr)
-    {
-        unsigned long hash = 0;
-        int c;
-
-        while (c = *pStr++)
-        {
-            hash = c + (hash << 6) + (hash << 16) - hash;
-        }
-
-        return hash;
-    }
-}
 
 CAssetBrowserManager* CAssetBrowserManager::Instance()
 {
@@ -122,7 +105,7 @@ bool CAssetBrowserManager::LoadCache()
 void CAssetBrowserManager::CreateThumbsFolderPath()
 {
     AZStd::string strUserFolder;
-    AzFramework::StringFunc::Path::ConstructFull(Path::GetUserSandboxFolder().toUtf8().data(), AssetBrowser::kThumbnailsRoot, strUserFolder);
+    AzFramework::StringFunc::Path::ConstructFull(Path::GetUserSandboxFolder().toUtf8().data(), AssetBrowserCommon::kThumbnailsRoot, strUserFolder);
 
     // create the thumbs folder
     AZ::IO::FileIOBase::GetInstance()->CreatePath(strUserFolder.c_str());
@@ -285,7 +268,8 @@ bool CAssetBrowserManager::OnNewTransaction(const IAssetItem* pAssetItem)
     }
 
     //2. Append the new transaction to the file.
-    FILE* transactionFile = fopen(fullPath.toUtf8().data(), "r+t");
+    FILE* transactionFile = nullptr;
+    azfopen(&transactionFile, fullPath.toUtf8().data(), "r+t");
 
     if (transactionFile == NULL)
     {
@@ -477,7 +461,8 @@ void CAssetBrowserManager::ClearTransactionsAndApplyMetaData(const QString& full
         if (assetDatabasePlugins[i]->QueryInterface(__uuidof(IAssetItemDatabase), (void**)&pCurrentDatabaseInterface) == S_OK)
         {
             QString filePath = fullPath + pCurrentDatabaseInterface->GetTransactionFilename();
-            FILE* file = fopen(filePath.toUtf8().data(), "wt");
+            FILE* file = nullptr;
+            azfopen(&file, filePath.toUtf8().data(), "wt");
 
             if (file == NULL)
             {
@@ -504,7 +489,7 @@ IAssetItemDatabase* CAssetBrowserManager::GetDatabaseByName(const char* pName)
 {
     for (size_t i = 0, iCount = m_assetDatabases.size(); i < iCount; ++i)
     {
-        if (!_stricmp(m_assetDatabases[i]->GetDatabaseName(), pName))
+        if (!azstricmp(m_assetDatabases[i]->GetDatabaseName(), pName))
         {
             return m_assetDatabases[i];
         }
@@ -625,7 +610,7 @@ void CAssetBrowserManager::AddAssetsToTag(const QString& tag, const QString& cat
         for (int idx = 0; idx < assetArrayLen; ++idx)
         {
             assetsStr[idx] = new char[kMaxStrLen];
-            _snprintf(assetsStr[idx], kMaxStrLen, "%s", assets[idx].toUtf8().constData());
+            azsnprintf(assetsStr[idx], kMaxStrLen, "%s", assets[idx].toUtf8().constData());
         }
 
         pAssetTagging->AddAssetsToTag(tag.toUtf8().data(), category.toUtf8().data(), GetProjectName().toUtf8().data(), assetsStr, assetArrayLen);
@@ -668,7 +653,7 @@ void CAssetBrowserManager::RemoveAssetsFromTag(const QString& tag, const QString
         for (int idx = 0; idx < kAssetArrayLen; ++idx)
         {
             assetsStr[idx] = new char[maxStrLen];
-            _snprintf(assetsStr[idx], maxStrLen, "%s", assets[idx].toUtf8().constData());
+            azsnprintf(assetsStr[idx], maxStrLen, "%s", assets[idx].toUtf8().constData());
         }
 
         pAssetTagging->RemoveAssetsFromTag(tag.toUtf8().data(), category.toUtf8().data(), GetProjectName().toUtf8().data(), assetsStr, kAssetArrayLen);
@@ -1106,6 +1091,20 @@ bool CAssetBrowserManager::GetAutocompleteDescription(const QString& partDesc, Q
     fullDescription = NULL;
 
     return bGot;
+}
+
+unsigned int CAssetBrowserManager::HashStringSbdm(const char* pStr)
+{
+    // details at http://www.cse.yorku.ca/~oz/hash.html
+    unsigned long hash = 0;
+    int c;
+
+    while (c = *pStr++)
+    {
+        hash = c + (hash << 6) + (hash << 16) - hash;
+    }
+
+    return hash;
 }
 
 void CAssetBrowserManager::SetAssetDescription(const QString& relpath, const QString& description)

@@ -39,19 +39,14 @@ def build(bld):
         profile_export_defines           = list(debug_defines),
         debug_dedicated_export_defines   = list(debug_defines),
         profile_dedicated_export_defines = list(debug_defines),
-       
+
+        restricted_script = 'update_restricted_parameters',
 
         win_defines = [
             '_HAS_EXCEPTIONS=0', # prevents warning: "C++ exception handler used, but unwind semantics are not enabled"
             ],
 
         msvc_cxxflags   = [
-                           '/WX', # warnings as errors
                            '/W4', # warning level
-                          ],
-
-        clang_cxxflags  = [
-                           '-Werror',  # warnings as errors
-                           '-Wall'     # warning level
                           ],
     )

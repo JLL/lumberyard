@@ -23,10 +23,11 @@
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/API/EditorAssetSystemAPI.h>
 #include <AzCore/std/sort.h>
+#include <AzCore/Script/ScriptContextDebug.h>
 
 extern "C" {
-#	include	<Lua/lualib.h>
-#	include	<Lua/lauxlib.h>
+#include<Lua/lualib.h>
+#include<Lua/lauxlib.h>
 }
 
 namespace AZ
@@ -44,7 +45,7 @@ namespace AZ
                 : m_value(value) {}
             virtual ~AttributeDynamicScriptValue() 
             { 
-                m_value.DestroyData();			
+                m_value.DestroyData();
             }
 
             template<class T>
@@ -63,9 +64,9 @@ namespace AZ
             }
 
             template<class T>
-            void GetValue(T& value, AZStd::false_type /*AZStd::is_pointer<T>::type()*/)		{ value = *reinterpret_cast<T*>(m_value.m_data); }
+            void GetValue(T& value, AZStd::false_type /*AZStd::is_pointer<T>::type()*/) { value = *reinterpret_cast<T*>(m_value.m_data); }
             template<class T>
-            void GetValue(T& value, AZStd::true_type /*AZStd::is_pointer<T>::type()*/)		{ value = reinterpret_cast<T>(m_value.m_data); }
+            void GetValue(T& value, AZStd::true_type /*AZStd::is_pointer<T>::type()*/) { value = reinterpret_cast<T>(m_value.m_data); }
 
             DynamicSerializableField m_value;
         };
@@ -107,7 +108,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // Activate
-        //=========================================================================	
+        //=========================================================================
         void ScriptEditorComponent::Activate()
         {
             // Setup the context
@@ -130,15 +131,16 @@ namespace AzToolsFramework
 
         //=========================================================================
         // Deactivate
-        //=========================================================================	
+        //=========================================================================
         void ScriptEditorComponent::Deactivate()
         {
             AZ::Data::AssetBus::Handler::BusDisconnect();
+            ClearDataElements();
         }
 
         //=========================================================================
         // CacheString
-        //=========================================================================	
+        //=========================================================================
         const char* ScriptEditorComponent::CacheString(const char* str)
         {
             if (str == nullptr)
@@ -151,7 +153,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // LoadDefaultAsset
-        //=========================================================================	
+        //=========================================================================
         bool ScriptEditorComponent::LoadDefaultAsset(AZ::ScriptDataContext& sdc, int valueIndex, const char* name, AzFramework::ScriptPropertyGroup& group, ElementInfo& elementInfo)
         {
             LSV_BEGIN(sdc.GetNativeContext(), 0);
@@ -190,7 +192,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // LoadDefaultEntityRef
-        //=========================================================================	
+        //=========================================================================
         bool ScriptEditorComponent::LoadDefaultEntityRef(AZ::ScriptDataContext& sdc, int valueIndex, const char* name, AzFramework::ScriptPropertyGroup& group, ElementInfo& elementInfo)
         {
             LSV_BEGIN(sdc.GetNativeContext(), 0);
@@ -253,7 +255,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // LoadAttribute
-        //=========================================================================	
+        //=========================================================================
         bool ScriptEditorComponent::LoadAttribute(AZ::ScriptDataContext& sdc, int valueIndex, const char* name, AZ::Edit::ElementData& ed, AZ::ScriptProperty* prop)
         {
             LSV_BEGIN(sdc.GetNativeContext(), 0);
@@ -324,7 +326,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // LoadAttribute
-        //=========================================================================	
+        //=========================================================================
         bool ScriptEditorComponent::LoadEnumValuesDouble(AZ::ScriptDataContext& sdc, int valueIndex, AZ::Edit::ElementData& ed)
         {
             LSV_BEGIN(sdc.GetNativeContext(), 0);
@@ -355,19 +357,19 @@ namespace AzToolsFramework
                             AZ::ScriptDataContext valueTable;
                             if (enumValuesTable.InspectTable(enumIndex, valueTable))
                             {
-                                const char* fieldName;
-                                int fieldIndex;
+                                const char* tableFieldName;
+                                int tableFieldIndex;
                                 int enumValueIndex;
-                                while (valueTable.InspectNextElement(enumValueIndex, fieldName, fieldIndex))
+                                while (valueTable.InspectNextElement(enumValueIndex, tableFieldName, tableFieldIndex))
                                 {
-                                    if (valueTable.IsNumber(enumValueIndex) && fieldIndex == 1)
+                                    if (valueTable.IsNumber(enumValueIndex) && tableFieldIndex == 1)
                                     {
                                         double value;
                                         valueTable.ReadValue(enumValueIndex, value);
                                         enumValue.first = value;
                                         isValidValue = true;
                                     }
-                                    else if (valueTable.IsString(enumValueIndex) && fieldIndex == 2)
+                                    else if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 2)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
@@ -393,7 +395,7 @@ namespace AzToolsFramework
 
         //=========================================================================
         // LoadAttribute
-        //=========================================================================	
+        //=========================================================================
         bool ScriptEditorComponent::LoadEnumValuesString(AZ::ScriptDataContext& sdc, int valueIndex, AZ::Edit::ElementData& ed)
         {
             LSV_BEGIN(sdc.GetNativeContext(), 0);
@@ -424,19 +426,19 @@ namespace AzToolsFramework
                             AZ::ScriptDataContext valueTable;
                             if (enumValuesTable.InspectTable(enumIndex, valueTable))
                             {
-                                const char* fieldName = nullptr;
-                                int fieldIndex;
+                                const char* tableFieldName = nullptr;
+                                int tableFieldIndex;
                                 int enumValueIndex;
-                                while (valueTable.InspectNextElement(enumValueIndex, fieldName, fieldIndex))
+                                while (valueTable.InspectNextElement(enumValueIndex, tableFieldName, tableFieldIndex))
                                 {
-                                    if (valueTable.IsString(enumValueIndex) && fieldIndex == 1)
+                                    if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 1)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
                                         enumValue.first = value;
                                         isValidValue = true;
                                     }
-                                    else if (valueTable.IsString(enumValueIndex) && fieldIndex == 2)
+                                    else if (valueTable.IsString(enumValueIndex) && tableFieldIndex == 2)
                                     {
                                         const char* value = nullptr;
                                         valueTable.ReadValue(enumValueIndex, value);
@@ -490,9 +492,33 @@ namespace AzToolsFramework
                         int defaultValueIndex = 0;
                         if (propertyTable.PushTableElement(AzFramework::ScriptComponent::DefaultFieldName, &defaultValueIndex))  // Is this a value or a group
                         {
-                            // If the property is new, try creating it
+                            bool needToCreateProperty = false;
                             AZ::ScriptProperty* groupProperty = group.GetProperty(propertyName);
                             if (!groupProperty)
+                            {
+                                needToCreateProperty = true;
+                            }
+                            else
+                            {
+                                if (groupProperty->DoesTypeMatch(propertyTable, defaultValueIndex))
+                                {
+                                    needToCreateProperty = false;
+                                }
+                                else
+                                {
+                                    if (auto itr = AZStd::find(group.m_properties.begin(), group.m_properties.end(), groupProperty))
+                                    {
+                                        if (itr != group.m_properties.end())
+                                        { 
+                                            delete *itr;
+                                            group.m_properties.erase(itr);
+                                        }
+                                    }
+                                    needToCreateProperty = true;
+                                }
+                            }
+
+                            if (needToCreateProperty)
                             {
                                 if (AZ::ScriptProperty* scriptProperty = propertyTable.ConstructScriptProperty(defaultValueIndex, propertyName, restrictToPropertyArrays))
                                 {
@@ -560,9 +586,9 @@ namespace AzToolsFramework
                                             // See: AZ::Edit::UIHandlers
                                             if (propertyTable.IsNumber(attrIndex))
                                             {
-                                                int value = 0;
+                                                AZ::u64 value = 0;
                                                 propertyTable.ReadValue(attrIndex, value);
-                                                ei.m_editData.m_elementId = static_cast<AZ::u32>(value);
+                                                ei.m_editData.m_elementId = aznumeric_cast<AZ::u32>(value);
                                             }
                                             else if (propertyTable.IsString(attrIndex))
                                             {
@@ -741,9 +767,23 @@ namespace AzToolsFramework
         {
             LSV_BEGIN(m_scriptComponent.m_context->NativeContext(), 0);
 
+            // At this point we're loading the script to populate the properties.
+            // Disable debugging during this stage as the game is not running yet.
+            bool pausedBreakpoints = false;
+            if (m_scriptComponent.m_context->GetDebugContext())
+            {
+                m_scriptComponent.m_context->GetDebugContext()->DisconnectHook();
+                pausedBreakpoints = true;
+            }
+
             if (m_scriptComponent.LoadInContext())
             {
                 LoadProperties();
+            }
+
+            if (pausedBreakpoints)
+            {
+                m_scriptComponent.m_context->GetDebugContext()->ConnectHook();
             }
 
             EBUS_EVENT(ToolsApplicationEvents::Bus, InvalidatePropertyDisplay, Refresh_EntireTree);
@@ -818,6 +858,16 @@ namespace AzToolsFramework
             }
 
             m_dataElements.clear();
+
+            // The display tree might still be holding onto pointers to our attributes that we just cleared above, so force a refresh to remove them.
+            // However, only force the refresh if we have a valid entity.  If we don't have an entity, this component isn't currently being shown or
+            // edited, so a refresh is at best superfluous, and at worst could cause a feedback loop of infinite refreshes.
+            if (GetEntity())
+            {
+                AzToolsFramework::ToolsApplicationEvents::Bus::Broadcast(
+                    &AzToolsFramework::ToolsApplicationEvents::InvalidatePropertyDisplay, 
+                    AzToolsFramework::Refresh_EntireTree);
+            }
         }
 
         const AZ::Edit::ElementData* ScriptEditorComponent::GetDataElement(const void* element, const AZ::Uuid& typeUuid) const
@@ -835,12 +885,15 @@ namespace AzToolsFramework
 
         void ScriptEditorComponent::BuildGameEntity(AZ::Entity* gameEntity)
         {
-            gameEntity->AddComponent(&m_scriptComponent);
-        }
+            AZ::SerializeContext* context = nullptr;
+            AZ::ComponentApplicationBus::BroadcastResult(context, &AZ::ComponentApplicationBus::Events::GetSerializeContext);
+            if (!context)
+            {
+                AZ_Error("ScriptEditorComponent", false, "Can't get serialize context from component application.");
+                return;
+            }
 
-        void ScriptEditorComponent::FinishedBuildingGameEntity(AZ::Entity* gameEntity)
-        {
-            gameEntity->RemoveComponent(&m_scriptComponent);
+            gameEntity->AddComponent(context->CloneObject(&m_scriptComponent));
         }
 
         void ScriptEditorComponent::SetPrimaryAsset(const AZ::Data::AssetId& assetId)
@@ -858,8 +911,13 @@ namespace AzToolsFramework
         {
             AZ::Data::AssetBus::Handler::BusDisconnect();
 
-            m_scriptComponent.m_properties.Clear();
-            ClearDataElements();
+            // Only clear properties and data elements if the asset we're changing to is not the same one we already had set on our scriptComponent
+            // The only time we shouldn't do this is when someone has set the same script on the component through the editor
+            if (m_scriptAsset != m_scriptComponent.GetScript())
+            {
+                m_scriptComponent.m_properties.Clear();
+                ClearDataElements();
+            }
 
             if (m_scriptAsset.GetId().IsValid())
             {
@@ -920,7 +978,7 @@ namespace AzToolsFramework
 
             if (script)
             {
-                bool outcome = false;
+                 bool outcome = false;
                 AZStd::string folderFoundIn;
                 AZ::Data::AssetInfo assetInfo;
 
@@ -966,7 +1024,7 @@ namespace AzToolsFramework
                         ->Attribute(AZ::Edit::Attributes::NameLabelOverride, &ScriptEditorComponent::m_customName)
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                         ->Attribute(AZ::Edit::Attributes::Category, "Scripting")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/LuaScript.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/LuaScript.svg")
                         ->Attribute(AZ::Edit::Attributes::PrimaryAssetType, AZ::AzTypeInfo<AZ::ScriptAsset>::Uuid())
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Script.png")
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-lua-script.html")

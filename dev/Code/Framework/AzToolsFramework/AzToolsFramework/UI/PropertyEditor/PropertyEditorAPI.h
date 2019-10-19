@@ -21,6 +21,8 @@
 #pragma once
 
 class QWidget;
+class QCheckBox;
+class QLabel;
 
 namespace AzToolsFramework
 {
@@ -82,7 +84,7 @@ namespace AzToolsFramework
     // it should be made as "functional" as possible...
     template <typename PropertyType, class WidgetType>
     class PropertyHandler
-        : public PropertyHandler_Internal<PropertyType, WidgetType>
+        : public TypedPropertyHandler_Internal<PropertyType, WidgetType>
     {
     public:
         // WriteGUIValuesIntoProperty:  This will be called on each instance of your property type.  So for example if you have an object
@@ -102,7 +104,7 @@ namespace AzToolsFramework
         virtual bool ReadValuesIntoGUI(size_t index, WidgetType* GUI, const PropertyType& instance, InstanceDataNode* node) = 0;
 
         // this will be called in order to initialize or refresh your gui.  Your class will be fed one attribute at a time
-        // you can interpret the attributes as you wish - use attrValue->Read<int>() for example, to interpret it as an int.
+        // you may override this to interpret the attributes as you wish - use attrValue->Read<int>() for example, to interpret it as an int.
         // all attributes can either be a flat value, or a function which returns that same type.  In the case of the function
         // it will be called on the first instance.
         // note that this can be called at any time later, again, after your GUI is initialized, if someone invalidates
@@ -114,7 +116,7 @@ namespace AzToolsFramework
         //     if (attrValue->Read<int>(maxValue)) GUI->SetMax(maxValue);
         // }
         // you may not cache the pointer to anything.
-        virtual void ConsumeAttribute(WidgetType* widget, AZ::u32 attrib, PropertyAttributeReader* attrValue, const char* debugName) = 0;
+        //virtual void ConsumeAttribute(WidgetType* widget, AZ::u32 attrib, PropertyAttributeReader* attrValue, const char* debugName) override;
 
         // override GetFirstInTabOrder, GetLastInTabOrder in your base class to define which widget gets focus first when pressing tab,
         // and also what widget is last.
@@ -138,10 +140,82 @@ namespace AzToolsFramework
         // create an instance of the GUI that is used to edit this property type.
         // the QWidget pointer you return also serves as a handle for accessing data.  This means that in order to trigger
         // a write, you need to call RequestWrite(...) on that same widget handle you return.
-        //virtual QWidget* CreateGUI(QWidget *pParent) override;
+        virtual QWidget* CreateGUI(QWidget *pParent) override = 0;
 
         // you MAY override this if you wish to pool your widgets or reuse them.  The default implementation simply calls delete.
         //virtual QWidget* DestroyGUI(QWidget* object) override;
+    };
+
+    // A GenericPropertyHandler may be used to register a widget for a property handler ID that is always used, regardless of the underlying type
+    // This is useful for UI elements that don't have any specific underlying storage, like buttons
+    template <class WidgetType>
+    class GenericPropertyHandler
+        : public PropertyHandler_Internal<WidgetType>
+    {
+    public:
+        virtual void WriteGUIValuesIntoProperty(size_t index, WidgetType* GUI, void* value, const AZ::Uuid& propertyType)
+        {
+            (void)index;
+            (void)GUI;
+            (void)value;
+            (void)propertyType;
+        }
+
+        virtual bool ReadValueIntoGUI(size_t index, WidgetType* GUI, void* value, const AZ::Uuid& propertyType)
+        {
+            (void)index;
+            (void)GUI;
+            (void)value;
+            (void)propertyType;
+            return false;
+        }
+
+        virtual QWidget* GetFirstInTabOrder(WidgetType* widget) { return widget; }
+        virtual QWidget* GetLastInTabOrder(WidgetType* widget) { return widget; }
+        virtual void UpdateWidgetInternalTabbing(WidgetType* /*widget*/) { }
+
+        virtual QWidget* CreateGUI(QWidget *pParent) override = 0;
+    protected:
+        virtual bool HandlesType(const AZ::Uuid& id) const override
+        {
+            (void)id;
+            return true;
+        }
+
+        virtual const AZ::Uuid& GetHandledType() const override
+        {
+            return nullUuid;
+        }
+
+        virtual void WriteGUIValuesIntoProperty_Internal(QWidget* widget, InstanceDataNode* node) override
+        {
+            for (size_t i = 0; i < node->GetNumInstances(); ++i)
+            {
+                WriteGUIValuesIntoProperty(i, reinterpret_cast<WidgetType*>(widget), node->GetInstance(i), node->GetClassMetadata()->m_typeId);
+            }
+        }
+
+        virtual void WriteGUIValuesIntoTempProperty_Internal(QWidget* widget, void* tempValue, const AZ::Uuid& propertyType, AZ::SerializeContext* serializeContext) override
+        {
+            (void)serializeContext;
+            WriteGUIValuesIntoProperty(0, reinterpret_cast<WidgetType*>(widget), tempValue, propertyType);
+        }
+
+        virtual void ReadValuesIntoGUI_Internal(QWidget* widget, InstanceDataNode* node) override
+        {
+            AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::AzToolsFramework);
+
+            for (size_t i = 0; i < node->GetNumInstances(); ++i)
+            {
+                if (!ReadValueIntoGUI(i, reinterpret_cast<WidgetType*>(widget), node->GetInstance(i), node->GetClassMetadata()->m_typeId))
+                {
+                    break;
+                }
+            }
+        }
+
+        // Needed since GetHandledType returns a reference
+        AZ::Uuid nullUuid = AZ::Uuid::CreateNull();
     };
 
     // your components talk to the property manager in this way:
@@ -200,6 +274,8 @@ namespace AzToolsFramework
         virtual void RequestWrite(QWidget* editorGUI) = 0;
         virtual void RequestRefresh(PropertyModificationRefreshLevel) = 0;
 
+        virtual void AddElementsToParentContainer(QWidget* editorGUI, size_t numElements, const InstanceDataNode::FillDataClassCallback& fillDataCallback) = 0;
+
         // Invokes a Property Notification without writing modifying the property
         virtual void RequestPropertyNotify(QWidget* editorGUI) = 0;
 
@@ -216,13 +292,28 @@ namespace AzToolsFramework
         : public AZ::ComponentBus
     {
     public:
-        
         /// Fired when property data was changed for the entity.
         /// \param componentId - Id of the component on which property data was changed.
         virtual void OnEntityComponentPropertyChanged(AZ::ComponentId /*componentId*/) {}
     };
 
     using PropertyEditorEntityChangeNotificationBus = AZ::EBus<PropertyEditorEntityChangeNotifications>;
+
+    /**
+     * Event bus for notifying property changes on a specific component.
+     */
+    class PropertyEditorChangeNotifications
+        : public AZ::EBusTraits
+    {
+    public:
+        /// Fired when property data is changed on a component.
+        /// The event is only fired once per component change, even with a multiple selection.
+        /// \param componentType - The type of component which was modified.
+        virtual void OnComponentPropertyChanged(AZ::Uuid /*componentType*/) {}
+    };
+
+    /// Type to inherit to implement PropertyEditorChangeNotifications
+    using PropertyEditorChangeNotificationBus = AZ::EBus<PropertyEditorChangeNotifications>;
 
     /**
      * Describes a field/node's visibility with editor UIs, for consistency across tools
@@ -261,11 +352,16 @@ namespace AzToolsFramework
      * \return ref NodeDisplayVisibility
      */
     NodeDisplayVisibility CalculateNodeDisplayVisibility(const InstanceDataNode& node, bool isSlicePushUI = false);
-    
+
     /**
      * Used by in-editor tools to determine if a node matches the passed in filter
     */
     bool NodeMatchesFilter(const InstanceDataNode& node, const char* filter);
+
+    /**
+     * Used by in-editor tools to determine if the parent of a node matches the passed in filter
+    */
+    bool NodeGroupMatchesFilter(const InstanceDataNode& node, const char* filter);
 
     /**
      * Used by in-editor tools to read the visibility attribute on a given instance
@@ -277,7 +373,37 @@ namespace AzToolsFramework
      * \param node - instance data hierarchy node for which display name should be determined.
      */
     AZStd::string GetNodeDisplayName(const InstanceDataNode& node);
-    
+
+    /**
+     * Wrapper for OnEntityComponentPropertyChanged EBus call.
+     */
+    void OnEntityComponentPropertyChanged(const AZ::EntityComponentIdPair& entityComponentIdPair);
+
+    /**
+     * Wrapper for OnEntityComponentPropertyChanged EBus call (overload).
+     */
+    void OnEntityComponentPropertyChanged(AZ::EntityId entityId, AZ::ComponentId componentId);
+
+    /**
+     * A function that evaluates whether a property node is read-only.
+     * This can be used to make a property read-only when that can't be
+     * accomplished through attributes on the node.
+     */
+    using ReadOnlyQueryFunction = AZStd::function<bool(const InstanceDataNode*)>;
+
+    /**
+     * A function that evaluates whether a property node is hidden.
+     * This can be used to make a property hidden when that can't be
+     * accomplished through attributes on the node.
+     */
+    using HiddenQueryFunction = AZStd::function<bool(const InstanceDataNode*)>;
+
+    /**
+     * A function that evaluates whether a property node should display an indicator
+     * and if so, which indicator.  Return nullptr if you don't want an indicator to show
+     */
+    using IndicatorQueryFunction = AZStd::function<const char*(const InstanceDataNode*)>;
+
 } // namespace AzToolsFramework
 
 namespace AZ

@@ -10,13 +10,14 @@
 *
 */
 
-// include the required headers
 #include "EMStudioManager.h"
 #include "MainWindow.h"
 #include "DockWidgetPlugin.h"
 #include "RemovePluginOnCloseDockWidget.h"
 #include <MysticQt/Source/DockHeader.h>
 #include <MCore/Source/LogManager.h>
+#include <QHBoxLayout>
+
 
 namespace EMStudio
 {
@@ -125,11 +126,24 @@ namespace EMStudio
 
         //  mDock->setFloating( true );
         mainWindow->addDockWidget(Qt::RightDockWidgetArea, mDock);
+        mainWindow->setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North); // put tabs on top?
 
         titleBar->UpdateIcons();
 
         return mDock;
     }
-}   // namespace EMStudio
 
-#include <EMotionFX/Tools/EMotionStudio/EMStudioSDK/Source/DockWidgetPlugin.moc>
+    QWidget* DockWidgetPlugin::CreateErrorContentWidget(const char* errorMessage) const
+    {
+        QWidget* widget = new QWidget();
+        QHBoxLayout* layout = new QHBoxLayout();
+        layout->setMargin(32);
+        widget->setLayout(layout);
+
+        QLabel* label = new QLabel(errorMessage);
+        label->setWordWrap(true);
+        layout->addWidget(label);
+
+        return widget;
+    }
+} // namespace EMStudio

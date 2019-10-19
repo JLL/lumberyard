@@ -19,7 +19,6 @@
 #include "Cry_Math.h"
 #include "Cry_Color.h"
 #include "Tarray.h"
-#include <CryEngineAPI.h>
 class CTexture;
 
 #ifndef COMPILER_SUPPORTS_ENUM_SPECIFICATION
@@ -186,7 +185,11 @@ enum ETextureFlags
     FT_DONT_RELEASE            = 0x00010000,
     FT_ASYNC_PREPARE           = 0x00020000,
     FT_DONT_STREAM             = 0x00040000,
-    FT_USAGE_PREDICATED_TILING = 0x00080000,
+#if defined(AZ_PLATFORM_IOS)
+    FT_USAGE_MEMORYLESS        = 0x00080000, //reusing an unused bit for ios
+#else
+    FT_USAGE_PREDICATED_TILING = 0x00080000, //unused
+#endif
     FT_FAILED                  = 0x00100000,
     FT_FROMIMAGE               = 0x00200000,
     FT_STATE_CLAMP             = 0x00400000,
@@ -237,6 +240,7 @@ struct STextureStreamingStats
 
 //////////////////////////////////////////////////////////////////////
 // Texture object interface
+class CDeviceTexture;
 class ITexture
 {
 protected:
@@ -248,6 +252,10 @@ public:
     virtual int Release() = 0;
     virtual int ReleaseForce() = 0;
 
+    virtual const ColorF& GetClearColor() const = 0;
+    virtual const ETEX_Format GetDstFormat() const = 0;
+    virtual const ETEX_Format GetSrcFormat() const = 0;
+    virtual const ETEX_Type GetTexType() const = 0;
     virtual void ApplyTexture(int nTUnit, int nState = -1) = 0;
     virtual const char* GetName() const = 0;
     virtual const int GetWidth() const = 0;
@@ -308,6 +316,9 @@ public:
     }
 
     virtual void SetKeepSystemCopy(const bool bKeepSystemCopy) = 0;
+    virtual void UpdateTextureRegion(const uint8_t* data, int nX, int nY, int nZ, int USize, int VSize, int ZSize, ETEX_Format eTFSrc) = 0;
+    virtual CDeviceTexture* GetDevTexture() const = 0;
+
 };
 
 struct STextureLoadData
@@ -334,8 +345,13 @@ struct STextureLoadData
     {
         if (m_pData)
         {
-            free(m_pData);
+            CryModuleFree(m_pData);
         }
+    }
+
+    static void* AllocateData(size_t dataSize)
+    {
+        return CryModuleMalloc(dataSize);
     }
 };
 struct ITextureLoadHandler

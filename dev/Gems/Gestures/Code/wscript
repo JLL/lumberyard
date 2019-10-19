@@ -13,8 +13,9 @@
 def build(bld):
 
     bld.DefineGem(
-        includes    = [ bld.Path('Code/CryEngine/CryAction')],
-        disable_tests = (bld.env['PLATFORM'] != 'project_generator') and ('darwin' in bld.env['PLATFORM']),
+        includes    = [bld.Path('Code/CryEngine/CryCommon'),
+                       bld.Path('Code/CryEngine/CryAction')
+                      ],
 
         # To enable multi-touch simulation, uncomment this line.
         # defines = [ 'SIMULATE_MULTI_TOUCH' ],

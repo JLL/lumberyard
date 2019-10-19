@@ -16,23 +16,23 @@
 struct SRenderShaderResources;
 class CShaderResources;
 
+#include <AzCore/std/smart_ptr/shared_ptr.h>
+
 namespace CloudsGem
 {
     class CloudParticle;
     class CloudRenderElement
-        : public CRendElementBase
+        : public IRenderElementDelegate
     {
     public:
         CloudRenderElement();
         virtual ~CloudRenderElement() {}
 
-        virtual void mfPrepare(bool bCheckOverflow) override;
-        virtual bool mfDraw(CShader* shader, SShaderPass* pass) override;
+        void mfPrepare(bool bCheckOverflow) override;
+        bool mfDraw(CShader* shader, SShaderPass* pass) override;
+
         virtual void SetParticles(const AZStd::vector<CloudParticle>& particles, const SMinMaxBox& box);
-        virtual void GetMemoryUsage(ICrySizer* pSizer) const
-        {
-            pSizer->AddObject(this, sizeof(*this));
-        }
+        IRenderElement* GetRE() { return m_gemRE; }
 
     protected:
 
@@ -46,12 +46,12 @@ namespace CloudsGem
         void GetIllumParams(ColorF& specColor, ColorF& diffColor);
         void ShadeCloud(Vec3 vPos);
         void DrawBillboards(const CameraViewParameters& camera);
-        bool mfDisplay(bool bDisplayFrontOfSplit);
+        bool Display(bool bDisplayFrontOfSplit);
         void UpdateWorldSpaceBounds(CRenderObject* pObj);
         inline float GetScale() { return m_fScale; }
         bool UpdateImposter(CRenderObject* pObj);
 
-        AZStd::vector<std::shared_ptr<CloudParticle>> m_particles;
+        AZStd::vector<AZStd::shared_ptr<CloudParticle>> m_particles;
         SMinMaxBox m_boundingBox;           
         bool m_bUseAnisoLighting{true};     
         Vec3 m_vLastSortViewDir{0, 0, 0};
@@ -67,5 +67,6 @@ namespace CloudsGem
         ColorF m_CurSpecColor{Col_White};
         ColorF m_CurDiffColor{Col_White};
         float m_fCloudColorScale{1};
+        IRenderElement* m_gemRE{ nullptr };
     };
 }

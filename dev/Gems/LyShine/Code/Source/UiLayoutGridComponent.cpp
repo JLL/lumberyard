@@ -353,7 +353,7 @@ float UiLayoutGridComponent::GetMinHeight()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float UiLayoutGridComponent::GetTargetWidth()
+float UiLayoutGridComponent::GetTargetWidth(float maxWidth)
 {
     int numChildElements = 0;
     EBUS_EVENT_ID_RESULT(numChildElements, GetEntityId(), UiElementBus, GetNumChildElements);
@@ -363,16 +363,44 @@ float UiLayoutGridComponent::GetTargetWidth()
         return 0.0f;
     }
 
-    // Calculate number of columns. Since element width/height is unknown at this point, make
-    // target width resemble a square grid
-    int numColumns = static_cast<int>(ceil(sqrt(numChildElements)));
+    // Calculate number of columns
+    int numColumns = 0;
+    if (LyShine::IsUiLayoutCellSizeSpecified(maxWidth))
+    {
+        const int paddingWidth = m_padding.m_left + m_padding.m_right;
+        const float availableWidthForCells = maxWidth - paddingWidth;
+        if (availableWidthForCells > 0.0f)
+        {
+            const float cellAndSpacingWidth = m_cellSize.GetX() + m_spacing.GetX();
+            const int numAvailableColumns = cellAndSpacingWidth > 0.0f ? static_cast<int>((availableWidthForCells + m_spacing.GetX()) / cellAndSpacingWidth) : 1;
+            numColumns = AZ::GetMin(numAvailableColumns, numChildElements);
+        }
+
+        if (numColumns == 0)
+        {
+            return 0.0f;
+        }
+    }
+    else
+    {
+        // Since element width/height is unknown at this point, make target width resemble a square grid
+        numColumns = static_cast<int>(ceil(sqrt(numChildElements)));
+    }
 
     float width = m_padding.m_left + m_padding.m_right + (numColumns * m_cellSize.GetX()) + ((numColumns - 1) * m_spacing.GetX());
+
+    // In order for the number of columns to remain the same after resizing to this new size, the
+    // new size must match the size retrieved from GetCanvasSpacePointsNoScaleRotate. To accommodate
+    // for slight variations, add a small value to ensure that the same number of cells fit per row
+    // after the element has been resized to this target size
+    const float epsilon = 0.01f;
+    width += epsilon;
+
     return width;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float UiLayoutGridComponent::GetTargetHeight()
+float UiLayoutGridComponent::GetTargetHeight(float /*maxHeight*/)
 {
     int numChildElements = 0;
     EBUS_EVENT_ID_RESULT(numChildElements, GetEntityId(), UiElementBus, GetNumChildElements);
@@ -386,8 +414,18 @@ float UiLayoutGridComponent::GetTargetHeight()
     AZ::Vector2 rectSize(0.0f, 0.0f);
     EBUS_EVENT_ID_RESULT(rectSize, GetEntityId(), UiTransformBus, GetCanvasSpaceSizeNoScaleRotate);
 
-    float availableWidth = rectSize.GetX() - (m_padding.m_left + m_padding.m_right + m_cellSize.GetX());
-    int numElementsPerRow = 1 + static_cast<int>(availableWidth / m_cellSize.GetX());
+    // At least one child must fit in each row
+    int numElementsPerRow = 1;
+    float additionalElementWidth = m_spacing.GetX() + m_cellSize.GetX();
+    if (additionalElementWidth > 0.0f)
+    {
+        float availableWidthForAdditionalElements = AZ::GetMax(0.0f, rectSize.GetX() - (m_padding.m_left + m_padding.m_right + m_cellSize.GetX()));
+        numElementsPerRow += static_cast<int>(availableWidthForAdditionalElements / additionalElementWidth);
+    }
+    else
+    {
+        numElementsPerRow = numChildElements;
+    }
 
     // Calculate number of rows
     int numRows = static_cast<int>(ceil(static_cast<float>(numChildElements) / numElementsPerRow));
@@ -447,6 +485,7 @@ void UiLayoutGridComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiLayoutGridComponent>("LayoutGrid", "A layout component that arranges its children in a grid");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiLayoutGrid.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiLayoutGrid.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -526,7 +565,6 @@ void UiLayoutGridComponent::Reflect(AZ::ReflectContext* context)
             ->Enum<(int)UiLayoutGridInterface::StartingDirection::VerticalOrder>("eUiLayoutGridStartingDirection_VerticalOrder");
 
         behaviorContext->EBus<UiLayoutGridBus>("UiLayoutGridBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetPadding", &UiLayoutGridBus::Events::GetPadding)
             ->Event("SetPadding", &UiLayoutGridBus::Events::SetPadding)
             ->Event("GetSpacing", &UiLayoutGridBus::Events::GetSpacing)
@@ -555,7 +593,11 @@ void UiLayoutGridComponent::Activate()
     UiLayoutCellDefaultBus::Handler::BusConnect(m_entity->GetId());
     UiTransformChangeNotificationBus::Handler::BusConnect(m_entity->GetId());
 
+    // If this is the first time the entity has been activated this has no effect since the canvas
+    // is not known. But if a LayoutGrid component has just been pasted onto an existing entity
+    // we need to invalidate the layout in case that affects things.
     InvalidateLayout();
+    InvalidateParentLayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -566,6 +608,11 @@ void UiLayoutGridComponent::Deactivate()
     UiLayoutGridBus::Handler::BusDisconnect();
     UiLayoutCellDefaultBus::Handler::BusDisconnect();
     UiTransformChangeNotificationBus::Handler::BusDisconnect();
+
+    // We could be about to remove this component and then reactivate the entity
+    // which could affect the layout if there is a parent layout component
+    InvalidateLayout();
+    InvalidateParentLayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -9,7 +9,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "precompiled.h"
+
 #include "IsReferenceTypeContract.h"
 
 #include <ScriptCanvas/Core/ContractBus.h>
@@ -23,7 +23,7 @@ namespace ScriptCanvas
         Data::Type targetType;
         NodeRequestBus::EventResult(targetType, targetSlot.GetNodeId(), &NodeRequests::GetSlotDataType, targetSlot.GetId());
 
-        if (!Data::IsValueType(targetType))
+        if (EvaluateForType(targetType))
         {
             return AZ::Success();
         }
@@ -31,7 +31,21 @@ namespace ScriptCanvas
         AZStd::string errorMessage = AZStd::string::format("Connection cannot be created between source slot \"%s\" and target slot \"%s\", slot type must be a reference type, but is: %s."
             , sourceSlot.GetName().data()
             , targetSlot.GetName().data()
-            , Data::GetName(targetType)
+            , Data::GetName(targetType).c_str()
+        );
+
+        return AZ::Failure(errorMessage);
+    }
+
+    AZ::Outcome<void, AZStd::string> IsReferenceTypeContract::OnEvaluateForType(const Data::Type& dataType) const
+    {
+        if (!Data::IsValueType(dataType))
+        {
+            return AZ::Success();
+        }
+
+        AZStd::string errorMessage = AZStd::string::format("Type %s is not a reference type."
+            , Data::GetName(dataType).c_str()
         );
 
         return AZ::Failure(errorMessage);

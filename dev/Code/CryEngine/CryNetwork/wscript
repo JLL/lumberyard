@@ -15,8 +15,7 @@
 
 def build(bld):
 
-    bld.CryEngineModule(
-
+    kw = dict(
         # Settings
         target              = 'CryNetwork',
         vs_filter           = 'CryEngine',
@@ -25,32 +24,25 @@ def build(bld):
         platforms           = ['all'],
         configurations      = ['all'],
         pch                 = 'StdAfx.cpp',
-        includes            = [bld.Path('Code/CryEngine/CryAction')],
-        defines             = ['ENGINE_EXPORTS'],
+        includes            = [bld.Path('Code/CryEngine/CryAction'),
+                               bld.Path('Code/CryEngine/CryCommon')
+                              ],
         use                 = ['GridMate','AzFramework' ],
+        defines             = ['ENGINE_EXPORTS', 'USE_CRY_NEW_AND_DELETE'],
 
         # Platform Specific
         win_defines         = [ '_HAS_EXCEPTIONS=0' ],
 
-        win_cxxflags        = [ '/WX', # warnings as errors
-                                '/W3', # warning level
-                              ],
 
         win_x64_lib         = [ 'Ws2_32', 'mswsock', 'gdi32' ],
         win_x64_linkflags   = '/NODEFAULTLIB:libcmt.lib',
 
-       
-       
-       
-       
-
-       
-       
-       
-
+        restricted_script   = 'update_restricted_parameters',
         android_defines     = [],
-
 
         # Testing
         test_all_file_list  = ['crynetwork_test.waf_files'],
     )
+    for p0, p1, p2, p3 in bld.env['RESTRICTED_PLATFORMS']:
+        kw['{}_file_list'.format(p3)] = ['GridMate/{0}/crynetwork_{1}.waf_files'.format(p0, p1)]
+    bld.CryEngineModule(**kw)

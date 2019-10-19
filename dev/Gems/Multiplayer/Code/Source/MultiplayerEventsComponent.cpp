@@ -21,6 +21,8 @@
 #include <GridMate/NetworkGridMateSessionEvents.h>
 #include <GridMate/Session/Session.h>
 #include <GridMate/Online/UserServiceTypes.h>
+#include <AzFramework/Network/NetBindingHandlerBus.h>
+#include <Multiplayer_Traits_Platform.h>
 
 // Template specialization to not destroy a GridSession; work around for VS2013 where std::is_destructable<> does not detect a hidden destructor
 namespace AZ
@@ -113,12 +115,10 @@ namespace Multiplayer
         }
         bool Connect(AZ::BehaviorValueParameter* id) override
         {
-            if (id == nullptr || id->m_value == nullptr)
-            {
-                AZ::BehaviorValueParameter thisGriMate(gEnv->pNetwork->GetGridMate());
-                return AZ::Internal::EBusConnector<InternalMultiplayerEvents>::Connect(this, &thisGriMate);
-            }
-            return AZ::Internal::EBusConnector<InternalMultiplayerEvents>::Connect(this, id);
+            AZ_UNUSED(id);
+
+            AZ::BehaviorValueParameter thisGridMate(gEnv->pNetwork->GetGridMate());
+            return AZ::Internal::EBusConnector<InternalMultiplayerEvents>::Connect(this, &thisGridMate);
         }
     };
 
@@ -204,16 +204,18 @@ namespace Multiplayer
             behaviorContext
                 ->Enum<GridMate::ST_LAN>("ST_LAN")
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
-#if defined(TOOLS_SUPPORT_XBONE)
-#include AZ_RESTRICTED_FILE(MultiplayerEventsComponent_cpp, TOOLS_SUPPORT_XBONE)
-#endif
-#if defined(TOOLS_SUPPORT_PS4)
-#include AZ_RESTRICTED_FILE(MultiplayerEventsComponent_cpp, TOOLS_SUPPORT_PS4)
-#endif
+#define AZ_RESTRICTED_PLATFORM_EXPANSION(CodeName, CODENAME, codename, PrivateName, PRIVATENAME, privatename, PublicName, PUBLICNAME, publicname, PublicAuxName1, PublicAuxName2, PublicAuxName3)\
+            ->Enum<GridMate::ST_##CODENAME>("ST_"#CODENAME)
+
+            AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS
+#undef AZ_RESTRICTED_PLATFORM_EXPANSION
 #endif
                 ->Enum<GridMate::ST_STEAM>("ST_STEAM")
                 ;
 
+            behaviorContext->Class<AzFramework::NetQuery>("NetQuery")
+                ->Method("IsEntityAuthoritative", &AzFramework::NetQuery::IsEntityAuthoritative)
+                ;
         }
     }
 }

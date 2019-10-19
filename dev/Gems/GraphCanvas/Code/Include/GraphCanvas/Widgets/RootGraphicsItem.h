@@ -18,6 +18,10 @@
 #include <QGraphicsView>
 #include <QDebug>
 
+#include <AzCore/Component/TickBus.h>
+#include <AzCore/std/chrono/chrono.h>
+
+#include <GraphCanvas/Components/GeometryBus.h>
 #include <GraphCanvas/Components/SceneBus.h>
 #include <GraphCanvas/Components/StyleBus.h>
 #include <GraphCanvas/Components/ViewBus.h>
@@ -25,6 +29,7 @@
 #include <GraphCanvas/Styling/definitions.h>
 #include <GraphCanvas/tools.h>
 #include <GraphCanvas/Utils/StateControllers/PrioritizedStateController.h>
+#include <GraphCanvas/Utils/ConversionUtils.h>
 
 namespace AZ
 {
@@ -33,6 +38,9 @@ namespace AZ
 
 namespace GraphCanvas
 {
+    // Number just to cap the movement at a reasonable speed to avoid slow jittery movement
+    constexpr float minimumAnimationPixelsPerSecond = 50.0f;
+
     //! Generates EBus notifications for some QGraphicsItem events.
     template<typename GraphicsItem>
     class RootGraphicsItem
@@ -40,6 +48,7 @@ namespace GraphCanvas
         , public ViewSceneNotificationBus::Handler
         , public RootGraphicsItemRequestBus::Handler
         , public StateController<RootGraphicsItemDisplayState>::Notifications::Handler
+        , public AZ::TickBus::Handler
     {
         static_assert(std::is_base_of<QGraphicsItem, GraphicsItem>::value, "GraphicsItem must be a descendant of QGraphicsItem");        
 
@@ -52,8 +61,11 @@ namespace GraphCanvas
             , m_snapToGrid(false)
             , m_gridX(1)
             , m_gridY(1)
+            , m_animationDuration(0.0f)
+            , m_currentAnimationTime(0.0f)
             , m_itemId(itemId)
             , m_anchorPoint(0,0)
+            , m_enabledState(RootGraphicsItemEnabledState::ES_Enabled)
             , m_forcedStateDisplayState(RootGraphicsItemDisplayState::Neutral)
             , m_internalDisplayState(RootGraphicsItemDisplayState::Neutral)
             , m_actualDisplayState(RootGraphicsItemDisplayState::Neutral)
@@ -103,7 +115,7 @@ namespace GraphCanvas
             if (m_snapToGrid)
             {
                 GraphicsItem* thisItem = static_cast<GraphicsItem*>(this);
-                thisItem->setPos(CalculateSnapPosition(thisItem->pos()));
+                thisItem->setPos(CalculatePosition(thisItem->pos()));
             }
         }
 
@@ -147,7 +159,66 @@ namespace GraphCanvas
         }
         ////
 
+        // TickBus
+        void OnTick(float delta, AZ::ScriptTimePoint)
+        {
+            m_currentAnimationTime += delta;
+
+            if (m_currentAnimationTime >= m_animationDuration)
+            {
+                m_currentAnimationTime = m_animationDuration;
+                CleanUpAnimation();
+            }
+            else
+            {
+                float percentage = m_currentAnimationTime / m_animationDuration;
+
+                AZ::Vector2 position = m_startPoint.Lerp(m_targetPoint, percentage);
+                GeometryRequestBus::Event(GetEntityId(), &GeometryRequests::SetPosition, position);
+            }
+        }
+        ////
+
         // RootGraphicsItemRequestBus
+        void AnimatePositionTo(const QPointF& scenePoint, const AZStd::chrono::milliseconds& duration)
+        {   
+            AZ::Vector2 startPoint;
+
+            if (!AZ::TickBus::Handler::BusIsConnected())
+            {
+                GeometryRequestBus::EventResult(m_startPoint, GetEntityId(), &GeometryRequests::GetPosition);
+                AZ::TickBus::Handler::BusConnect();
+            }
+            else
+            {
+                float percentage = m_currentAnimationTime / m_animationDuration;
+
+                m_startPoint = m_startPoint.Lerp(m_targetPoint, percentage);
+            }
+            
+            m_targetPoint = ConversionUtils::QPointToVector(scenePoint);
+
+            if (m_snapToGrid)
+            {                
+                m_targetPoint = ConversionUtils::QPointToVector(CalculatePosition(ConversionUtils::AZToQPoint(m_targetPoint)));
+            }
+
+            VisualNotificationBus::Event(GetEntityId(), &VisualNotifications::OnPositionAnimateBegin, m_targetPoint);
+
+            // Maintain a certain 'velocity' for the nodes so they don't like slowly dribble around.
+            float minimumDuration = (m_targetPoint - m_startPoint).GetLength();
+            minimumDuration /= minimumAnimationPixelsPerSecond;
+            
+            m_animationDuration = AZStd::min(minimumDuration, duration.count() * 0.001f);
+            m_currentAnimationTime = 0.0f;            
+        }
+
+        void CancelAnimation()
+        {
+            m_currentAnimationTime = m_animationDuration;
+            CleanUpAnimation();
+        }
+
         StateController<RootGraphicsItemDisplayState>* GetDisplayStateStateController() override
         {
             return &m_forcedStateDisplayState;
@@ -157,6 +228,24 @@ namespace GraphCanvas
         {
             return m_actualDisplayState;
         }
+
+        void SetEnabledState(RootGraphicsItemEnabledState state) override
+        {
+            if (m_enabledState != state)
+            {
+                m_enabledState = state;
+                OnEnabledStateChanged(state);
+
+                UpdateActualDisplayState();
+
+                RootGraphicsItemNotificationBus::Event(GetEntityId(), &RootGraphicsItemNotifications::OnEnabledChanged, m_enabledState);
+            }
+        }
+
+        RootGraphicsItemEnabledState GetEnabledState() const
+        {
+            return m_enabledState;
+        }
         ////
 
     protected:        
@@ -164,8 +253,11 @@ namespace GraphCanvas
 
         void SetDisplayState(RootGraphicsItemDisplayState displayState)
         {
-            m_internalDisplayState = displayState;
-            UpdateActualDisplayState();
+            if (m_internalDisplayState != displayState)
+            {
+                m_internalDisplayState = displayState;
+                UpdateActualDisplayState();
+            }
         }
 
         // ViewSceneNotifications
@@ -238,11 +330,22 @@ namespace GraphCanvas
             }
         }
 
+        void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* mouseEvent) override
+        {
+            bool result = false;
+            VisualNotificationBus::EventResult(result, GetEntityId(), &VisualNotifications::OnMouseDoubleClick, mouseEvent);
+
+            if (!result)
+            {
+                GraphicsItem::mouseDoubleClickEvent(mouseEvent);
+            }
+        }
+
         QVariant itemChange(QGraphicsItem::GraphicsItemChange change, const QVariant& value) override
         {
-            if (m_snapToGrid && change == QAbstractGraphicsShapeItem::ItemPositionChange)
+            if (change == QAbstractGraphicsShapeItem::ItemPositionChange)
             {
-                QVariant snappedValue(CalculateSnapPosition(value.toPointF()));
+                QVariant snappedValue(CalculatePosition(value.toPointF()));
 
                 VisualNotificationBus::Event(GetEntityId(), &VisualNotifications::OnItemChange, GetEntityId(), change, snappedValue);
 
@@ -271,7 +374,12 @@ namespace GraphCanvas
 
             AZStd::unordered_set<AZ::EntityId> deleteIds = { GetEntityId() };
             SceneRequestBus::Event(graphId, &SceneRequests::Delete, deleteIds);
-        }        
+        }
+
+        virtual void OnEnabledStateChanged(RootGraphicsItemEnabledState enabledState)
+        {
+            AZ_UNUSED(enabledState);
+        }
 
     private:
 
@@ -283,6 +391,20 @@ namespace GraphCanvas
             {
                 desiredDisplayState = m_forcedStateDisplayState.GetState();
             }
+            else if (m_enabledState != RootGraphicsItemEnabledState::ES_Enabled)
+            {                
+                if (desiredDisplayState <= RootGraphicsItemDisplayState::Disabled)
+                {
+                    if (m_enabledState == RootGraphicsItemEnabledState::ES_Disabled)
+                    {
+                        desiredDisplayState = RootGraphicsItemDisplayState::Disabled;
+                    }
+                    else
+                    {
+                        desiredDisplayState = RootGraphicsItemDisplayState::PartialDisabled;
+                    }
+                }
+            }
 
             if (desiredDisplayState != m_actualDisplayState)
             {
@@ -293,11 +415,20 @@ namespace GraphCanvas
                 case RootGraphicsItemDisplayState::Deletion:
                     LeaveDeletionState();
                     break;
+                case RootGraphicsItemDisplayState::Disabled:
+                    LeaveDisabledState();
+                    break;
+                case RootGraphicsItemDisplayState::PartialDisabled:
+                    LeavePartialDisabledState();
+                    break;
                 case RootGraphicsItemDisplayState::InspectionTransparent:
                     LeaveInspectionTransparentState();
                     break;
                 case RootGraphicsItemDisplayState::Inspection:
                     LeaveInspectionState();
+                    break;
+                case RootGraphicsItemDisplayState::GroupHighlight:
+                    LeaveGroupHighlightState();
                     break;
                 case RootGraphicsItemDisplayState::Preview:
                     LeavePreviewState();
@@ -316,11 +447,20 @@ namespace GraphCanvas
                 case RootGraphicsItemDisplayState::Deletion:
                     EnterDeletionState();
                     break;
+                case RootGraphicsItemDisplayState::Disabled:
+                    EnterDisabledState();
+                    break;
+                case RootGraphicsItemDisplayState::PartialDisabled:
+                    EnterPartialDisabledState();
+                    break;
                 case RootGraphicsItemDisplayState::InspectionTransparent:
                     EnterInspectionTransparentState();
                     break;
                 case RootGraphicsItemDisplayState::Inspection:
                     EnterInspectionState();
+                    break;
+                case RootGraphicsItemDisplayState::GroupHighlight:
+                    EnterGroupHighlightState();
                     break;
                 case RootGraphicsItemDisplayState::Preview:
                     EnterPreviewState();
@@ -356,6 +496,26 @@ namespace GraphCanvas
             StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::RemoveSelectorState, Styling::States::Deletion);
         }
 
+        void EnterPartialDisabledState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::AddSelectorState, Styling::States::PartialDisabled);
+        }
+
+        void LeavePartialDisabledState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::RemoveSelectorState, Styling::States::PartialDisabled);
+        }
+
+        void EnterDisabledState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::AddSelectorState, Styling::States::Disabled);
+        }
+
+        void LeaveDisabledState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::RemoveSelectorState, Styling::States::Disabled);
+        }
+
         void EnterInspectionState()
         {
             StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::AddSelectorState, Styling::States::Hovered);
@@ -376,6 +536,16 @@ namespace GraphCanvas
             StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::RemoveSelectorState, Styling::States::InspectionTransparent);
         }
 
+        void EnterGroupHighlightState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::AddSelectorState, Styling::States::Hovered);
+        }
+
+        void LeaveGroupHighlightState()
+        {
+            StyledEntityRequestBus::Event(GetEntityId(), &StyledEntityRequests::RemoveSelectorState, Styling::States::Hovered);
+        }
+
         void EnterNeutralState()
         {
         }
@@ -384,7 +554,7 @@ namespace GraphCanvas
         {
         }
 
-        QPointF CalculateSnapPosition(QPointF position) const
+        QPointF CalculatePosition(QPointF position) const
         {
             QSizeF offset;
             offset.setWidth(GetBoundingRect().width() * m_anchorPoint.GetX());
@@ -393,26 +563,29 @@ namespace GraphCanvas
             int xPoint = position.x() + offset.width();
             int yPoint = position.y() + offset.height();
 
-            if (xPoint < 0)
+            if (m_snapToGrid && !AZ::TickBus::Handler::BusIsConnected())
             {
-                xPoint = xPoint - (m_gridX * 0.5f);
-                xPoint += abs(xPoint) % m_gridX;
-            }
-            else
-            {
-                xPoint = xPoint + (m_gridX * 0.5f);
-                xPoint -= xPoint % m_gridX;
-            }
+                if (xPoint < 0)
+                {
+                    xPoint = xPoint - (m_gridX * 0.5f);
+                    xPoint += abs(xPoint) % m_gridX;
+                }
+                else
+                {
+                    xPoint = xPoint + (m_gridX * 0.5f);
+                    xPoint -= xPoint % m_gridX;
+                }
 
-            if (yPoint < 0)
-            {
-                yPoint = yPoint - (m_gridY * 0.5f);
-                yPoint += abs(yPoint) % m_gridY;
-            }
-            else
-            {
-                yPoint = yPoint + (m_gridY * 0.5f);
-                yPoint -= yPoint % m_gridY;
+                if (yPoint < 0)
+                {
+                    yPoint = yPoint - (m_gridY * 0.5f);
+                    yPoint += abs(yPoint) % m_gridY;
+                }
+                else
+                {
+                    yPoint = yPoint + (m_gridY * 0.5f);
+                    yPoint -= yPoint % m_gridY;
+                }
             }
 
             position.setX(xPoint - offset.width());
@@ -421,11 +594,24 @@ namespace GraphCanvas
             return position;
         }
 
+        void CleanUpAnimation()
+        {
+            AZ::TickBus::Handler::BusDisconnect();
+            VisualNotificationBus::Event(GetEntityId(), &VisualNotifications::OnPositionAnimateEnd);
+        }
+
         bool m_resizeToGrid;
-        bool m_snapToGrid;
+        bool m_snapToGrid;        
 
         unsigned int m_gridX;
         unsigned int m_gridY;
+        
+        float m_animationDuration;
+        float m_currentAnimationTime;
+        AZ::Vector2 m_targetPoint;
+        AZ::Vector2 m_startPoint;
+
+        RootGraphicsItemEnabledState    m_enabledState;
 
         PrioritizedStateController<RootGraphicsItemDisplayState>  m_forcedStateDisplayState;
         RootGraphicsItemDisplayState                           m_internalDisplayState;

@@ -1,4 +1,15 @@
-#include "stdafx.h"
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
+#include "StdAfx.h"
 
 #include "ReflectedPropertyItem.h"
 #include "ReflectedVarWrapper.h"
@@ -24,7 +35,7 @@ static ColorF StringToColor(const QString &value)
 {
     ColorF color;
     float r, g, b, a;
-    int res = sscanf(value.toUtf8().data(), "%f,%f,%f,%f", &r, &g, &b, &a);
+    int res = azsscanf(value.toUtf8().data(), "%f,%f,%f,%f", &r, &g, &b, &a);
     if (res == 4)
     {
         color.Set(r, g, b, a);
@@ -36,7 +47,7 @@ static ColorF StringToColor(const QString &value)
     else
     {
         unsigned abgr;
-        sscanf(value.toUtf8().data(), "%u", &abgr);
+        azsscanf(value.toUtf8().data(), "%u", &abgr);
         color = ColorF(abgr);
     }
     return color;

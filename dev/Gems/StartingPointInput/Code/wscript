@@ -35,15 +35,16 @@ def build(bld):
 
     bld.DefineGem(
         use    = [ 'AzFramework', 'ScriptCanvas' ],
-        includes = [ bld.Path('Code/CryEngine/CryAction'),
+        includes = [ bld.Path('Code/CryEngine/CryCommon'),
+                     bld.Path('Code/CryEngine/CryAction'),
                      bld.Path('Code/CryEngine')
-                      ],
+                   ],
         export_includes = [bld.Path('Code/CryEngine')],
 
         # Suppressing level 1 warning C4351 on windows
         # new behavior: elements of array 'array' will be default initialized
         # https://msdn.microsoft.com/en-us/library/1ywe7hcy.aspx
-        win_cxxflags = ['/wd4351'],
+        msvc_cxxflags = ['/wd4351'],
         features        = ['az_code_gen'],
         win_defines = [],
 
@@ -58,9 +59,11 @@ def build(bld):
 
             az_code_gen = AZ_CODEGEN_ARGS,
             file_list = [ 'startingpointinput_editor.waf_files' ],
+            includes  = [bld.Path('Code/CryEngine/CryCommon')
+                        ],
 
         )
 
-        
+
         ########################################
     )

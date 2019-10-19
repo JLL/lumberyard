@@ -21,6 +21,23 @@
 
 namespace Camera
 {
+    // Clean up the behaviours instantiated for us by the editor/serialization system
+    CameraRigComponent::~CameraRigComponent()
+    {
+        for (ICameraTargetAcquirer* targetAcquirer : m_targetAcquirers)
+        {
+            delete targetAcquirer;
+        }
+        for (ICameraLookAtBehavior* lookAtBehavior : m_lookAtBehaviors)
+        {
+            delete lookAtBehavior;
+        }
+        for (ICameraTransformBehavior* transformBehavior : m_transformBehaviors)
+        {
+            delete transformBehavior;
+        }
+    }
+
     void CameraRigComponent::Init()
     {
         for (ICameraTargetAcquirer* targetAcquirer : m_targetAcquirers)
@@ -110,7 +127,7 @@ namespace Camera
                 editContext->Class<CameraRigComponent>( "Camera Rig", "The Camera Rig component can be used to add and remove behaviors to drive your camera entity")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Camera")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/CameraRig.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/CameraRig.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/CameraRig.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-camera-rig.html")

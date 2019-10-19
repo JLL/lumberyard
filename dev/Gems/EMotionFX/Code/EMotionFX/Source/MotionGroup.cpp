@@ -17,10 +17,14 @@
 #include "EMotionFXManager.h"
 #include "MotionInstancePool.h"
 #include "AnimGraphPose.h"
+#include <EMotionFX/Source/Allocators.h>
 
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(MotionGroup, MotionAllocator, 0)
+
+
     // default constructor
     MotionGroup::MotionGroup()
         : BaseObject()
@@ -47,14 +51,14 @@ namespace EMotionFX
     // creation
     MotionGroup* MotionGroup::Create()
     {
-        return new MotionGroup();
+        return aznew MotionGroup();
     }
 
 
     // creation
     MotionGroup* MotionGroup::Create(MotionInstance* parentMotionInstance)
     {
-        return new MotionGroup(parentMotionInstance);
+        return aznew MotionGroup(parentMotionInstance);
     }
 
 
@@ -71,7 +75,7 @@ namespace EMotionFX
         MCORE_ASSERT(mParentMotionInstance); // use LinkToMotionInstance before
 
         // create the new motion instance
-        //MotionInstance* newInstance = new MotionInstance(motion, mParentMotionInstance->GetActorInstance(), startNodeIndex);
+        //MotionInstance* newInstance = aznew MotionInstance(motion, mParentMotionInstance->GetActorInstance(), startNodeIndex);
         MotionInstance* newInstance = GetMotionInstancePool().RequestNew(motion, mParentMotionInstance->GetActorInstance(), startNodeIndex);
 
         // initialize the motion instance settings
@@ -126,7 +130,7 @@ namespace EMotionFX
     void MotionGroup::RemoveMotion(Motion* motion)
     {
         // for all the motion instances
-        for (uint32 i = 0; i < mMotionInstances.GetLength(); )
+        for (uint32 i = 0; i < mMotionInstances.GetLength();)
         {
             // if this motion instance uses the given motion
             if (mMotionInstances[i]->GetMotion() == motion)
@@ -216,8 +220,8 @@ namespace EMotionFX
                 const uint32 numTransforms = outPose->GetNumTransforms();
                 for (uint32 t = 0; t < numTransforms; ++t)
                 {
-                    Transform& transform = groupBlendPose->GetLocalTransformDirect(t);
-                    Transform& outTransform = outPose->GetLocalTransformDirect(t);
+                    Transform& transform = groupBlendPose->GetLocalSpaceTransformDirect(t);
+                    Transform& outTransform = outPose->GetLocalSpaceTransformDirect(t);
                     transform.mRotation.Normalize();
 
                     EMFX_SCALECODE
@@ -238,8 +242,8 @@ namespace EMotionFX
                 const uint32 numTransforms = outPose->GetNumTransforms();
                 for (uint32 t = 0; t < numTransforms; ++t)
                 {
-                    Transform& transform = groupBlendPose->GetLocalTransformDirect(t);
-                    Transform& outTransform = outPose->GetLocalTransformDirect(t);
+                    Transform& transform = groupBlendPose->GetLocalSpaceTransformDirect(t);
+                    Transform& outTransform = outPose->GetLocalSpaceTransformDirect(t);
 
                     outTransform.mPosition += transform.mPosition * normalizedWeight;
 
@@ -269,7 +273,7 @@ namespace EMotionFX
         const uint32 numTransforms = outPose->GetNumTransforms();
         for (uint32 t = 0; t < numTransforms; ++t)
         {
-            Transform& outTransform = outPose->GetLocalTransformDirect(t);
+            Transform& outTransform = outPose->GetLocalSpaceTransformDirect(t);
             outTransform.mRotation.Normalize();
 
             //EMFX_SCALECODE

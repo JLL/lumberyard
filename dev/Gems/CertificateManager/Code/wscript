@@ -15,8 +15,10 @@ def build(bld):
     bld.DefineGem(
         # Settings
 		use                         = ['GridMate'],
-        includes                    = [bld.Path('Code/CryEngine/CryAction'),
-                                       bld.Path('Code/CryEngine/CryNetwork')],
+        includes                    = [bld.Path('Code/CryEngine/CryCommon'),
+                                       bld.Path('Code/CryEngine/CryAction'),
+                                       bld.Path('Code/CryEngine/CryNetwork')
+                                      ],
         pch                         = '',
         file_list                   = ['CertificateManager.waf_files'],
 
@@ -25,6 +27,5 @@ def build(bld):
                                        'AWS_CPP_SDK_CORE'],
         win_lib                     = ['gdi32', 'Winhttp', 'Ws2_32', 'mswsock'],
 
-       
-       
+        restricted_script           = 'update_restricted_parameters',
     )

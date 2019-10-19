@@ -36,6 +36,7 @@
 #include "ActorEntity.h"
 #include "SimpleEntity.h"
 #include "MiscEntities.h"
+#include "NullEditTool.h"
 #include "Vehicles/VehiclePrototype.h"
 #include "Vehicles/VehicleHelperObject.h"
 #include "Vehicles/VehiclePart.h"
@@ -97,6 +98,9 @@
 #include "Util/GuidUtil.h"
 
 #include <AzCore/Debug/Profiler.h>
+#include <AzCore/Math/Uuid.h>
+
+#include <AzFramework/Entity/EntityDebugDisplayBus.h>
 
 #include <AzToolsFramework/API/ToolsApplicationAPI.h>
 #include <AzToolsFramework/API/ComponentEntityObjectBus.h>
@@ -105,6 +109,9 @@
 
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 #include <LegacyEntityConversion/LegacyEntityConversion.h>
+#include <Plugins/ComponentEntityEditorPlugin/Objects/ComponentEntityObject.h>
+
+#include "ObjectManagerLegacyUndo.h"
 
 /*!
  *  Class Description used for object templates.
@@ -144,249 +151,16 @@ public:
     virtual int GameCreationOrder() { return superType->GameCreationOrder(); };
 };
 
-//////////////////////////////////////////////////////////////////////////
-//! Prefab helper functions
-// Because a prefab consist of multiple object but it is defined as a single GUID,
-// we want to extract all the childs GUIDs. We need this info if we undo redo new/delete
-// operations on prefabs, since we want to NOT generate new IDs for the childs, otherwise
-// other UNDO operations depending on the guids won't work
-static void ExtractRemapingInformation(CBaseObject* pPrefab, TGUIDRemap& remapInfo)
+void CBaseObjectsCache::AddObject(CBaseObject* object)
 {
-    TBaseObjects childs;
-    pPrefab->GetAllPrefabFlagedChildren(childs);
-
-    for (size_t i = 0, count = childs.size(); i < count; ++i)
+    m_objects.push_back(object);
+    if (object->GetType() == OBJTYPE_AZENTITY)
     {
-        remapInfo.insert(std::make_pair(childs[i]->GetIdInPrefab(), childs[i]->GetId()));
+        auto componentEntityObject = static_cast<CComponentEntityObject*>(object);
+        m_entityIds.push_back(componentEntityObject->GetAssociatedEntityId());
     }
 }
 
-static void RemapObjectsInPrefab(CBaseObject* pPrefab, const TGUIDRemap& remapInfo)
-{
-    IObjectManager* pObjMan = GetIEditor()->GetObjectManager();
-
-    TBaseObjects childs;
-    pPrefab->GetAllPrefabFlagedChildren(childs);
-
-    for (size_t i = 0, count = childs.size(); i < count; ++i)
-    {
-        TGUIDRemap::const_iterator it = remapInfo.find(childs[i]->GetIdInPrefab());
-        if (it != remapInfo.end())
-        {
-            pObjMan->ChangeObjectId(childs[i]->GetId(), (*it).second);
-        }
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////
-//! Undo New Object
-class CUndoBaseObjectNew
-    : public IUndoObject
-{
-public:
-    CUndoBaseObjectNew(CBaseObject* pObj)
-    {
-        m_object = pObj;
-
-        m_isPrefab = qobject_cast<CPrefabObject*>(pObj) != nullptr;
-
-        if (m_isPrefab)
-        {
-            ExtractRemapingInformation(pObj, m_remaping);
-        }
-    }
-protected:
-    virtual int GetSize() { return sizeof(*this); }; // Return size of xml state.
-    virtual QString GetDescription() { return "New BaseObject"; };
-    virtual QString GetObjectName(){ return m_object->GetName(); };
-
-    virtual void Undo(bool bUndo)
-    {
-        if (bUndo)
-        {
-            m_redo = XmlHelpers::CreateXmlNode("Redo");
-            // Save current object state.
-            CObjectArchive ar(GetIEditor()->GetObjectManager(), m_redo, false);
-            ar.bUndo = true;
-            m_object->Serialize(ar);
-            m_object->SetLayerModified();
-        }
-
-        m_object->UpdatePrefab(eOCOT_Delete);
-
-        // Delete this object.
-        GetIEditor()->DeleteObject(m_object);
-    }
-    virtual void Redo()
-    {
-        if (m_redo)
-        {
-            IObjectManager* pObjMan = GetIEditor()->GetObjectManager();
-            {
-                CObjectArchive ar(pObjMan, m_redo, true);
-                ar.bUndo = true;
-                ar.MakeNewIds(false);
-                ar.LoadObject(m_redo, m_object);
-            }
-            pObjMan->ClearSelection();
-            pObjMan->SelectObject(m_object);
-            m_object->SetLayerModified();
-
-            if (m_isPrefab)
-            {
-                RemapObjectsInPrefab(m_object, m_remaping);
-            }
-
-            m_object->UpdatePrefab(eOCOT_Add);
-        }
-    }
-
-private:
-    CBaseObjectPtr m_object;
-    TGUIDRemap m_remaping;
-    XmlNodeRef m_redo;
-    bool m_isPrefab;
-};
-
-//////////////////////////////////////////////////////////////////////////
-//! Undo Delete Object
-class CUndoBaseObjectDelete
-    : public IUndoObject
-{
-public:
-    CUndoBaseObjectDelete(CBaseObject* pObj)
-    {
-        pObj->SetTransformDelegate(nullptr);
-        m_object = pObj;
-        // Save current object state.
-        m_undo = XmlHelpers::CreateXmlNode("Undo");
-        CObjectArchive ar(GetIEditor()->GetObjectManager(), m_undo, false);
-        ar.bUndo = true;
-        m_bSelected = m_object->IsSelected();
-        m_object->Serialize(ar);
-        m_object->SetLayerModified();
-
-        m_isPrefab = qobject_cast<CPrefabObject*>(pObj);
-
-        if (m_isPrefab)
-        {
-            ExtractRemapingInformation(m_object, m_remaping);
-        }
-    }
-protected:
-    virtual int GetSize() { return sizeof(*this); }; // Return size of xml state.
-    virtual QString GetDescription() { return "Delete BaseObject"; };
-    virtual QString GetObjectName(){ return m_object->GetName(); };
-
-    virtual void Undo(bool bUndo)
-    {
-        IObjectManager* pObjMan = GetIEditor()->GetObjectManager();
-        {
-            CObjectArchive ar(pObjMan, m_undo, true);
-            ar.bUndo = true;
-            ar.MakeNewIds(false);
-            ar.LoadObject(m_undo, m_object);
-            m_object->ClearFlags(OBJFLAG_SELECTED);
-        }
-        if (m_bSelected)
-        {
-            pObjMan->ClearSelection();
-            pObjMan->SelectObject(m_object);
-        }
-        m_object->SetLayerModified();
-
-        if (m_isPrefab)
-        {
-            RemapObjectsInPrefab(m_object, m_remaping);
-        }
-
-        m_object->UpdatePrefab(eOCOT_Add);
-    }
-    virtual void Redo()
-    {
-        // Delete this object.
-        m_object->SetLayerModified();
-        m_object->UpdatePrefab(eOCOT_Delete);
-        GetIEditor()->DeleteObject(m_object);
-    }
-
-private:
-    CBaseObjectPtr m_object;
-    XmlNodeRef m_undo;
-    TGUIDRemap m_remaping;
-    bool m_bSelected;
-    bool m_isPrefab;
-};
-
-//////////////////////////////////////////////////////////////////////////
-//! Undo Select Object
-class CUndoBaseObjectSelect
-    : public IUndoObject
-{
-public:
-    CUndoBaseObjectSelect(CBaseObject* pObj)
-    {
-        assert(pObj != 0);
-        m_guid = pObj->GetId();
-        m_bUndoSelect = pObj->IsSelected();
-    }
-protected:
-    virtual void Release() { delete this; };
-    virtual int GetSize() { return sizeof(*this); }; // Return size of xml state.
-    virtual QString GetDescription() { return "Select Object"; };
-    virtual QString GetObjectName()
-    {
-        CBaseObject* pObject = GetIEditor()->GetObjectManager()->FindObject(m_guid);
-        if (!pObject)
-        {
-            return "";
-        }
-
-        return pObject->GetName();
-    }
-
-    virtual void Undo(bool bUndo)
-    {
-        CBaseObject* pObject = GetIEditor()->GetObjectManager()->FindObject(m_guid);
-        if (!pObject)
-        {
-            return;
-        }
-
-        if (bUndo)
-        {
-            m_bRedoSelect = pObject->IsSelected();
-        }
-
-        if (m_bUndoSelect)
-        {
-            GetIEditor()->GetObjectManager()->SelectObject(pObject);
-        }
-        else
-        {
-            GetIEditor()->GetObjectManager()->UnselectObject(pObject);
-        }
-    }
-    virtual void Redo()
-    {
-        if (CBaseObject* pObject = GetIEditor()->GetObjectManager()->FindObject(m_guid))
-        {
-            if (m_bRedoSelect)
-            {
-                GetIEditor()->GetObjectManager()->SelectObject(pObject);
-            }
-            else
-            {
-                GetIEditor()->GetObjectManager()->UnselectObject(pObject);
-            }
-        }
-    }
-
-private:
-    GUID m_guid;
-    bool m_bUndoSelect;
-    bool m_bRedoSelect;
-};
 
 //////////////////////////////////////////////////////////////////////////
 // CObjectManager implementation.
@@ -425,11 +199,16 @@ CObjectManager::CObjectManager()
     m_objectsByName.reserve(1024);
     m_converter.reset(aznew AZ::LegacyConversion::Converter());
     LoadRegistry();
+
+    AzToolsFramework::ComponentModeFramework::EditorComponentModeNotificationBus::Handler::BusConnect(
+        AzToolsFramework::GetEntityContextId());
 }
 
 //////////////////////////////////////////////////////////////////////////
 CObjectManager::~CObjectManager()
 {
+    AzToolsFramework::ComponentModeFramework::EditorComponentModeNotificationBus::Handler::BusDisconnect();
+
     m_converter.reset();
     m_bExiting = true;
     SaveRegistry();
@@ -541,7 +320,7 @@ CBaseObject* CObjectManager::NewObject(CObjectClassDesc* cls, CBaseObject* prev,
         CObjectLayer* destLayer = obj->SupportsLayers() ? m_pLayerManager->GetCurrentLayer() : m_pLayerManager->FindLayerByName("Main");
         obj->SetLayer(destLayer);
         obj->InitVariables();
-        obj->m_guid = QUuid::createUuid();    // generate uniq GUID for this object.
+        obj->m_guid = AZ::Uuid::CreateRandom();    // generate uniq GUID for this object.
 
         GetIEditor()->GetErrorReport()->SetCurrentValidatorObject(obj);
         if (obj->Init(GetIEditor(), prev, file))
@@ -618,7 +397,7 @@ CBaseObject* CObjectManager::NewObject(CObjectArchive& ar, CBaseObject* pUndoObj
     if (!objNode->getAttr("Id", id))
     {
         // Make new ID for object that doesn't have if.
-        id = QUuid::createUuid();
+        id = AZ::Uuid::CreateRandom();
     }
 
     idInPrefab = id;
@@ -626,7 +405,7 @@ CBaseObject* CObjectManager::NewObject(CObjectArchive& ar, CBaseObject* pUndoObj
     if (bMakeNewId)
     {
         // Make new guid for this object.
-        GUID newId = QUuid::createUuid();
+        GUID newId = AZ::Uuid::CreateRandom();
         ar.RemapID(id, newId);  // Mark this id remapped.
         id = newId;
     }
@@ -946,6 +725,7 @@ void CObjectManager::DeleteAllObjects()
 
     m_aiTerritoryObjects.clear();
     m_aiWaveObjects.clear();
+    m_animatedAttachedEntities.clear();
 
     RefreshEntitiesAssignedToSelectedTnW();
 
@@ -1066,6 +846,14 @@ bool CObjectManager::AddObject(CBaseObject* obj)
         {
             m_aiWaveObjects.insert(waveObj);
         }
+        else if (CEntityObject* entityObj = qobject_cast<CEntityObject*>(obj))
+        {
+            CEntityObject::EAttachmentType attachType = entityObj->GetAttachType();
+            if (attachType == CEntityObject::EAttachmentType::eAT_GeomCacheNode || attachType == CEntityObject::EAttachmentType::eAT_CharacterBone)
+            {
+                m_animatedAttachedEntities.insert(entityObj);
+            }
+        }
     }
 
     const AZ::Crc32 nameCrc(obj->GetName().toUtf8().data(), obj->GetName().toUtf8().count(), true);
@@ -1080,6 +868,8 @@ bool CObjectManager::AddObject(CBaseObject* obj)
 //////////////////////////////////////////////////////////////////////////
 void CObjectManager::RemoveObject(CBaseObject* obj)
 {
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     assert(obj != 0);
 
     InvalidateVisibleList();
@@ -1093,6 +883,10 @@ void CObjectManager::RemoveObject(CBaseObject* obj)
         else if (CAIWaveObject* waveObj = qobject_cast<CAIWaveObject*>(obj))
         {
             m_aiWaveObjects.erase(waveObj);
+        }
+        else if (CEntityObject* entityObj = qobject_cast<CEntityObject*>(obj))
+        {
+            m_animatedAttachedEntities.erase(entityObj);
         }
     }
 
@@ -1329,7 +1123,10 @@ void CObjectManager::Update()
 
     m_pPhysicsManager->Update();
 
-    UpdateAttachedEntities();
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        UpdateAttachedEntities();
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1417,11 +1214,6 @@ bool CObjectManager::SelectObject(CBaseObject* obj, bool bUseMask)
         return false;
     }
 
-    if (!obj->IsSelectable())
-    {
-        return false;
-    }
-
     if (m_selectCallback)
     {
         if (!m_selectCallback->OnSelectObject(obj))
@@ -1430,23 +1222,31 @@ bool CObjectManager::SelectObject(CBaseObject* obj, bool bUseMask)
         }
     }
 
-    /*
-    if (GetIEditor()->IsUndoRecording() && !obj->IsSelected())
-    {
-        GetIEditor()->RecordUndo( new CUndoBaseObjectSelect(obj) );
-    }
-    */
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
 
     m_currSelection->AddObject(obj);
-    SetObjectSelected(obj, true);
 
-    GetIEditor()->Notify(eNotify_OnSelectionChange);
+    // while in ComponentMode we never explicitly change selection (the entity will always be selected).
+    // this check is to handle the case where an undo or redo action has occurred and
+    // the entity has been destroyed and recreated as part of the deserialization step.
+    // we want the internal state to stay consistent but do not want to notify other systems of the change.
+    if (AzToolsFramework::ComponentModeFramework::InComponentMode())
+    {
+        obj->SetSelected(true);
+    }
+    else
+    {
+        SetObjectSelected(obj, true);
+        GetIEditor()->Notify(eNotify_OnSelectionChange);
+    }
 
     return true;
 }
 
 void CObjectManager::SelectEntities(std::set<CEntityObject*>& s)
 {
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     for (std::set<CEntityObject*>::iterator it = s.begin(), end = s.end(); it != end; ++it)
     {
         SelectObject(*it);
@@ -1455,13 +1255,21 @@ void CObjectManager::SelectEntities(std::set<CEntityObject*>& s)
 
 void CObjectManager::UnselectObject(CBaseObject* obj)
 {
-    /*
-    if (GetIEditor()->IsUndoRecording() && obj->IsSelected())
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
+    // while in ComponentMode we never explicitly change selection (the entity will always be selected).
+    // this check is to handle the case where an undo or redo action has occurred and
+    // the entity has been destroyed and recreated as part of the deserialization step.
+    // we want the internal state to stay consistent but do not want to notify other systems of the change.
+    if (AzToolsFramework::ComponentModeFramework::InComponentMode())
     {
-        GetIEditor()->RecordUndo( new CUndoBaseObjectSelect(obj) );
+        obj->SetSelected(false);
     }
-    */
-    SetObjectSelected(obj, false);
+    else
+    {
+        SetObjectSelected(obj, false);
+    }
+    
     m_currSelection->RemoveObject(obj);
 }
 
@@ -1602,11 +1410,48 @@ void CObjectManager::SerializeNameSelection(XmlNodeRef& rootNode, bool bLoading)
 int CObjectManager::ClearSelection()
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
+    // Make sure to unlock selection.
+    GetIEditor()->LockSelection(false);
+
     int numSel = m_currSelection->GetCount();
-    UnselectCurrent();
+
+    // Handle Undo/Redo of Component Entities
+    bool isUndoRecording = GetIEditor()->IsUndoRecording();
+    if (isUndoRecording)
+    {
+        m_processingBulkSelect = true;
+        GetIEditor()->RecordUndo(new CUndoBaseObjectClearSelection(*m_currSelection));
+    }
+
+    // Handle legacy entities separately so the selection group can be cleared safely. 
+    // This prevents every AzEntity from being removed one by one from a vector.
+    m_currSelection->RemoveAllExceptLegacySet();
+
+    // Kick off Deselect for Legacy Entities
+    for (CBaseObjectPtr legacyObject : m_currSelection->GetLegacyObjects())
+    {
+        if (isUndoRecording && legacyObject->IsSelected())
+        {
+            GetIEditor()->RecordUndo(new CUndoBaseObjectSelect(legacyObject));
+        }
+
+        SetObjectSelected(legacyObject, false);
+    }
+
+    // Legacy set is cleared
     m_defaultSelection.RemoveAll();
     m_currSelection = &m_defaultSelection;
     m_bSelectionChanged = true;
+
+    // Unselect all component entities as one bulk operation instead of individually
+    AzToolsFramework::ToolsApplicationRequestBus::Broadcast(
+        &AzToolsFramework::ToolsApplicationRequests::SetSelectedEntities, 
+        AzToolsFramework::EntityIdList());
+
+    m_processingBulkSelect = false;
 
     if (!m_bExiting)
     {
@@ -1620,6 +1465,9 @@ int CObjectManager::ClearSelection()
 int CObjectManager::InvertSelection()
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     int selCount = 0;
     // iterate all objects.
     for (Objects::const_iterator it = m_objects.begin(); it != m_objects.end(); ++it)
@@ -1646,6 +1494,8 @@ void CObjectManager::SetSelection(const QString& name)
     CSelectionGroup* selection = stl::find_in_map(m_selections, name, (CSelectionGroup*)0);
     if (selection)
     {
+        AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
         UnselectCurrent();
         assert(selection != 0);
         m_currSelection = selection;
@@ -1656,6 +1506,9 @@ void CObjectManager::SetSelection(const QString& name)
 void CObjectManager::RemoveSelection(const QString& name)
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     QString selName = name;
     CSelectionGroup* selection = stl::find_in_map(m_selections, name, (CSelectionGroup*)0);
     if (selection)
@@ -1676,6 +1529,8 @@ void CObjectManager::CheckAndFixSelection()
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
     bool bObjectMode = qobject_cast<CObjectMode*>(GetIEditor()->GetEditTool()) != nullptr;
+
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
 
     if (m_currSelection->GetCount() == 0)
     {
@@ -1735,6 +1590,8 @@ void CObjectManager::CheckAndFixSelection()
 
 void CObjectManager::SelectCurrent()
 {
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
     for (int i = 0; i < m_currSelection->GetCount(); i++)
     {
@@ -1751,7 +1608,7 @@ void CObjectManager::SelectCurrent()
 void CObjectManager::UnselectCurrent()
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
-    
+
     // Make sure to unlock selection.
     GetIEditor()->LockSelection(false);
 
@@ -1774,7 +1631,7 @@ void CObjectManager::UnselectCurrent()
 //////////////////////////////////////////////////////////////////////////
 void CObjectManager::Display(DisplayContext& dc)
 {
-    FUNCTION_PROFILER(GetIEditor()->GetSystem(), PROFILE_EDITOR);
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
 
     int currentHideMask = GetIEditor()->GetDisplaySettings()->GetObjectHideMask();
     if (m_lastHideMask != currentHideMask)
@@ -1791,7 +1648,7 @@ void CObjectManager::Display(DisplayContext& dc)
         m_lastComputedVisibility = m_visibilitySerialNumber;
         UpdateVisibilityList();
     }
-    
+
     bool viewIsDirty = dc.settings->IsDisplayHelpers(); // displaying helpers require computing all the bound boxes and things anyway.
 
     if (!viewIsDirty)
@@ -1806,10 +1663,13 @@ void CObjectManager::Display(DisplayContext& dc)
             }
         }
     }
-    
+
     if (viewIsDirty)
     {
         FindDisplayableObjects(dc, true);  // this also actually draws the helpers.
+
+        // Also broadcast for anyone else that needs to draw global debug to do so now
+        AzFramework::DebugDisplayEventBus::Broadcast(&AzFramework::DebugDisplayEvents::DrawGlobalDebugInfo);
     }
 
     if (m_gizmoManager)
@@ -1825,6 +1685,8 @@ void CObjectManager::ForceUpdateVisibleObjectCache(DisplayContext& dc)
 
 void CObjectManager::FindDisplayableObjects(DisplayContext& dc, bool bDisplay)
 {
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
     CBaseObjectsCache* pDispayedViewObjects = dc.view->GetVisibleObjectsCache();
     if (!pDispayedViewObjects)
     {
@@ -1843,6 +1705,8 @@ void CObjectManager::FindDisplayableObjects(DisplayContext& dc, bool bDisplay)
 
     CEditTool* pEditTool = GetIEditor()->GetEditTool();
 
+    const bool newViewportInteractionModelEnabled = GetIEditor()->IsNewViewportInteractionModelEnabled();
+
     if (dc.flags & DISPLAY_2D)
     {
         int numVis = m_visibleObjects.size();
@@ -1857,7 +1721,11 @@ void CObjectManager::FindDisplayableObjects(DisplayContext& dc, bool bDisplay)
 
                 if (bDisplay && dc.settings->IsDisplayHelpers() && (gSettings.viewports.nShowFrozenHelpers || !obj->IsFrozen()))
                 {
-                    obj->Display(dc);
+                    if (!newViewportInteractionModelEnabled)
+                    {
+                        obj->Display(dc);
+                    }
+
                     if (pEditTool)
                     {
                         pEditTool->DrawObjectHelpers(obj, dc);
@@ -1905,7 +1773,6 @@ void CObjectManager::FindDisplayableObjects(DisplayContext& dc, bool bDisplay)
         {
             CBaseObject* obj = m_visibleObjects[i];
 
-            obj->GetBoundBox(bbox);
             if (obj && obj->IsInCameraView(camera))
             {
                 // Check if object is too far.
@@ -1916,7 +1783,11 @@ void CObjectManager::FindDisplayableObjects(DisplayContext& dc, bool bDisplay)
 
                     if (bDisplay && dc.settings->IsDisplayHelpers() && (gSettings.viewports.nShowFrozenHelpers || !obj->IsFrozen()) && !obj->CheckFlags(OBJFLAG_HIDE_HELPERS))
                     {
-                        obj->Display(dc);
+                        if (!newViewportInteractionModelEnabled)
+                        {
+                            obj->Display(dc);
+                        }
+
                         if (pEditTool)
                         {
                             pEditTool->DrawObjectHelpers(obj, dc);
@@ -2003,10 +1874,6 @@ int CObjectManager::SelectObjects(const AABB& box, bool bUnselect)
         CBaseObject* obj = it->second;
 
         if (obj->IsHidden())
-        {
-            continue;
-        }
-        if (obj->IsFrozen())
         {
             continue;
         }
@@ -2138,6 +2005,8 @@ void CObjectManager::DeleteSelection()
 {
     AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
 
+    AzToolsFramework::EditorMetricsEventBusSelectionChangeHelper selectionChangeMetricsHelper;
+
     // Make sure to unlock selection.
     GetIEditor()->LockSelection(false);
 
@@ -2168,6 +2037,8 @@ void CObjectManager::DeleteSelection()
 //////////////////////////////////////////////////////////////////////////
 bool CObjectManager::HitTestObject(CBaseObject* obj, HitContext& hc)
 {
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
+
     if (obj->IsFrozen())
     {
         return false;
@@ -2239,7 +2110,7 @@ bool CObjectManager::HitTestObject(CBaseObject* obj, HitContext& hc)
 //////////////////////////////////////////////////////////////////////////
 bool CObjectManager::HitTest(HitContext& hitInfo)
 {
-    FUNCTION_PROFILER(GetIEditor()->GetSystem(), PROFILE_EDITOR);
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
 
     hitInfo.object = nullptr;
     hitInfo.dist = FLT_MAX;
@@ -2340,9 +2211,9 @@ bool CObjectManager::HitTest(HitContext& hitInfo)
                 name = hc.name;
                 selected = obj;
             }
-            
-            // Clear the object pointer if an object was hit, not just if the collision 
-            // was closer than any previous. Not all paths from HitTestObject set the object pointer and so you could get 
+
+            // Clear the object pointer if an object was hit, not just if the collision
+            // was closer than any previous. Not all paths from HitTestObject set the object pointer and so you could get
             // an object from a previous (rejected) result but with collision information about a closer hit.
             hc.object = nullptr;
             hc.iconHit = false;
@@ -2392,6 +2263,7 @@ void CObjectManager::FindObjectsInRect(CViewport* view, const QRect& rect, std::
         HitTestObjectAgainstRect(pObj, view, hc, guids);
     }
 }
+
 //////////////////////////////////////////////////////////////////////////
 void CObjectManager::SelectObjectsInRect(CViewport* view, const QRect& rect, bool bSelect)
 {
@@ -2411,14 +2283,47 @@ void CObjectManager::SelectObjectsInRect(CViewport* view, const QRect& rect, boo
     hc.rect = rect;
     hc.bUseSelectionHelpers = view->GetAdvancedSelectModeFlag();
 
-    CBaseObjectsCache* pDispayedViewObjects = view->GetVisibleObjectsCache();
-    int numVis = pDispayedViewObjects->GetObjectCount();
+    bool isUndoRecording = GetIEditor()->IsUndoRecording();
+    if (isUndoRecording)
+    {
+        m_processingBulkSelect = true;
+    }
+
+    CBaseObjectsCache* displayedViewObjects = view->GetVisibleObjectsCache();
+    int numVis = displayedViewObjects->GetObjectCount();
+
+    // Tracking the previous selection allows proper undo/redo functionality of additional 
+    // selections (CTRL + drag select)
+    AZStd::unordered_set<const CBaseObject*> previousSelection;
+
     for (int i = 0; i < numVis; ++i)
     {
-        CBaseObject* pObj = pDispayedViewObjects->GetObject(i);
+        CBaseObject* object = displayedViewObjects->GetObject(i);
 
-        SelectObjectInRect(pObj, view, hc, bSelect);
+        if (object->IsSelected())
+        {
+            previousSelection.insert(object);
+        }
+        else
+        {
+            // This will update m_currSelection
+            SelectObjectInRect(object, view, hc, bSelect);
+
+            // Legacy undo/redo does not go through the Ebus system and must be done individually 
+            if (isUndoRecording && object->GetType() != OBJTYPE_AZENTITY)
+            {
+                GetIEditor()->RecordUndo(new CUndoBaseObjectSelect(object, true));
+            }
+        }
     }
+
+    if (isUndoRecording && m_currSelection)
+    {
+        // Component Entities can handle undo/redo in bulk due to Ebuses
+        GetIEditor()->RecordUndo(new CUndoBaseObjectBulkSelect(previousSelection, *m_currSelection));
+    }
+
+    m_processingBulkSelect = false;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -2652,7 +2557,7 @@ void CObjectManager::RegisterClassTemplate(const XmlNodeRef& templ)
     classDesc->type = typeName;
     classDesc->category = category;
     classDesc->fileSpec = fileSpec;
-    classDesc->guid = QUuid::createUuid();
+    classDesc->guid = AZ::Uuid::CreateRandom();
     //classDesc->properties = templ->findChild( "Properties" );
 
     CClassFactory::Instance()->RegisterClass(classDesc);
@@ -2679,6 +2584,16 @@ void CObjectManager::LoadClassTemplates(const QString& path)
             }
         }
     }
+}
+
+//////////////////////////////////////////////////////////////////////////
+void CObjectManager::RegisterCVars()
+{
+    REGISTER_CVAR2("AxisHelperHitRadius",
+        &m_axisHelperHitRadius,
+        20,
+        VF_DEV_ONLY,
+        "Adjust the hit radius used for axis helpers, like the transform gizmo.");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -2918,9 +2833,13 @@ void CObjectManager::UpdateVisibilityList()
         // entities not isolated in Isolation Mode will be invisible
         bool isObjectIsolated = obj->IsIsolated();
         visible = visible && (!isInIsolationMode || isObjectIsolated);
-
         obj->UpdateVisibility(visible);
-        if (visible)
+
+        // when the new viewport interaction model is enabled we always want to add objects
+        // in the view (frustum) to the visible objects list so we can draw feedback for
+        // entities being hidden in the viewport when selected in the  entity outliner
+        // (EditorVisibleEntityDataCache must be populated even if entities are 'hidden')
+        if (visible || GetIEditor()->IsNewViewportInteractionModelEnabled())
         {
             // Prefabs are not added into visible list.
             if (!obj->CheckFlags(OBJFLAG_PREFAB))
@@ -2984,6 +2903,7 @@ bool CObjectManager::ConvertToType(CBaseObject* pObject, const QString& typeName
 //////////////////////////////////////////////////////////////////////////
 void CObjectManager::SetObjectSelected(CBaseObject* pObject, bool bSelect)
 {
+    AZ_PROFILE_FUNCTION(AZ::Debug::ProfileCategory::Editor);
     // Only select/unselect once.
     if ((pObject->IsSelected() && bSelect) || (!pObject->IsSelected() && !bSelect))
     {
@@ -2991,7 +2911,7 @@ void CObjectManager::SetObjectSelected(CBaseObject* pObject, bool bSelect)
     }
 
     // Store selection undo.
-    if (CUndo::IsRecording())
+    if (CUndo::IsRecording() && !m_processingBulkSelect)
     {
         CUndo::Record(new CUndoBaseObjectSelect(pObject));
     }
@@ -3171,7 +3091,7 @@ CBaseObject* CObjectManager::FindPhysicalObjectOwner(IPhysicalEntity* pPhysicalE
     break;
     case PHYS_FOREIGN_ID_ENTITY:
     {
-        IEntity* pIEntity = gEnv->pEntitySystem->GetEntityFromPhysics(pPhysicalEntity);
+        IEntity* pIEntity = gEnv->pEntitySystem ? gEnv->pEntitySystem->GetEntityFromPhysics(pPhysicalEntity) : nullptr;
         if (pIEntity)
         {
             return CEntityObject::FindFromEntityId(pIEntity->GetId());
@@ -3881,14 +3801,9 @@ void CObjectManager::ResolveMissingMaterials()
 //////////////////////////////////////////////////////////////////////////
 void CObjectManager::UpdateAttachedEntities()
 {
-    for (Objects::iterator it = m_objects.begin(); it != m_objects.end(); ++it)
+    for (CEntityObject* attachedEntityObj : m_animatedAttachedEntities)
     {
-        CBaseObject* obj = it->second;
-        if (qobject_cast<CEntityObject*>(obj))
-        {
-            CEntityObject* pEntity = static_cast<CEntityObject*>(obj);
-            pEntity->UpdateTransform();
-        }
+        attachedEntityObj->UpdateTransform();
     }
 }
 
@@ -3978,6 +3893,36 @@ void CObjectManager::SelectObjectInRect(CBaseObject* pObj, CViewport* view, HitC
         else
         {
             UnselectObject(pObj);
+        }
+    }
+}
+
+void CObjectManager::EnteredComponentMode(const AZStd::vector<AZ::Uuid>& /*componentModeTypes*/)
+{
+    // provide an EditTool that does nothing.
+    // note: will hide rotation gizmo when active (CRotateTool)
+    GetIEditor()->SetEditTool(new NullEditTool());
+
+    // hide current gizmo for entity (translate/rotate/scale)
+    IGizmoManager* gizmoManager = GetGizmoManager();
+    const size_t gizmoCount = static_cast<size_t>(gizmoManager->GetGizmoCount());
+    for (size_t i = 0; i < gizmoCount; ++i)
+    {
+        gizmoManager->RemoveGizmo(gizmoManager->GetGizmoByIndex(i));
+    }
+}
+
+void CObjectManager::LeftComponentMode(const AZStd::vector<AZ::Uuid>& /*componentModeTypes*/)
+{
+    // return to default EditTool (in whatever transform mode is set)
+    GetIEditor()->SetEditTool(nullptr);
+
+    // show translate/rotate/scale gizmo again
+    if (IGizmoManager* gizmoManager = GetGizmoManager())
+    {
+        if (CBaseObject* selectedObject = GetIEditor()->GetSelectedObject())
+        {
+            gizmoManager->AddGizmo(new CAxisGizmo(selectedObject));
         }
     }
 }

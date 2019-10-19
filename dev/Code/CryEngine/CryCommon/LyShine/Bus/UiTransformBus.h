@@ -98,6 +98,30 @@ public: // types
         bool operator!=(const Rect& rhs) const;
     };
 
+    //! Enum used as a parameter to SetRecomputeFlags
+    enum class Recompute
+    {
+        RectOnly,               //!< Only the rect (offsets or anchors for example) changed (this may affect transform if local scale or rotation)
+        TransformOnly,          //!< Only the transform changed (canvas and viewport transforms must be recomputed)
+        ViewportTransformOnly,  //!< Only the viewport transform changed (viewport transform must be recomputed)
+        RectAndTransform        //!< Both rect and transform changed (all cached data must be recomputed)
+    };
+
+    //! Enum used as a parameter to SetScaleToDeviceMode
+    //! The value determines how an element is scaled when the canvas reference size and actual size are different
+    //! The comments below reference the canvas's "deviceScale". The deviceScale is target (actual) canvas size divided the reference canvas size
+    enum class ScaleToDeviceMode
+    {
+        None,               //!< Default, this element is not affected by device resolution changes
+        UniformScaleToFit,  //!< Apply a uniform scale which is the minimum of deviceScale.x and deviceScale.y
+        UniformScaleToFill, //!< Apply a uniform scale which is the maximum of deviceScale.x and deviceScale.y
+        UniformScaleToFitX, //!< Apply a uniform scale of deviceScale.x
+        UniformScaleToFitY, //!< Apply a uniform scale of deviceScale.y
+        NonUniformScale,    //!< Apply a non-uniform scale which is simply deviceScale
+        ScaleXOnly,         //!< Scale the element only in the X dimension by deviceScale.x
+        ScaleYOnly          //!< Scale the element only in the Y dimension by deviceScale.y
+    };
+
 public: // member functions
 
     virtual ~UiTransformInterface() {}
@@ -150,11 +174,23 @@ public: // member functions
 
     //! Get whether the element and all its children will be scaled to allow for the difference
     //! between the authored canvas size and the actual viewport size.
-    virtual bool GetScaleToDevice() = 0;
+    //! @deprecated GetScaleToDevice has been deprecated in favor of GetScaleToDeviceMode
+    AZ_DEPRECATED(,"GetScaleToDeviceMode is deprecated, use GetScaleToDeviceMode instead")
+        bool GetScaleToDevice() { return Deprecated_GetScaleToDevice(); }
 
     //! Set whether the element and all its children will be scaled to allow for the difference
     //! between the authored canvas size and the actual viewport size.
-    virtual void SetScaleToDevice(bool scaleToDevice) = 0;
+    //! @deprecated SetScaleToDevice has been deprecated in favor of SetScaleToDeviceMode
+    AZ_DEPRECATED(, "SetScaleToDevice is deprecated, use SetScaleToDeviceMode instead")
+        void SetScaleToDevice(bool scaleToDevice) { Deprecated_SetScaleToDevice(scaleToDevice); }
+
+    //! Get how the element and all its children will be scaled to allow for the difference
+    //! between the authored canvas size and the actual viewport size.
+    virtual ScaleToDeviceMode GetScaleToDeviceMode() = 0;
+
+    //! Set how the element and all its children will be scaled to allow for the difference
+    //! between the authored canvas size and the actual viewport size.
+    virtual void SetScaleToDeviceMode(ScaleToDeviceMode scaleToDeviceMode) = 0;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods to get data in viewport space
@@ -296,8 +332,8 @@ public: // member functions
     // Optimization and caching
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    //! Set the dirty flag for the cached transform and rect on this element and all its children
-    virtual void SetRecomputeTransformFlag() = 0;
+    //! Set the required dirty flags for the cached transforms and rect on this element and all its children
+    virtual void SetRecomputeFlags(Recompute recompute) = 0;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     // Canvas space rect change
@@ -317,13 +353,26 @@ public: // member functions
     //! Send notification of canvas space rect change and reset to unchanged
     virtual void NotifyAndResetCanvasSpaceRectChange() = 0;
 
-    //! This is called each frame (when needed) to efficiently update the rect and transform in one pass
-    virtual void RecomputeTransformsAndSendNotifications() = 0;
-
 public: // static member data
 
     //! Only one component on a entity can implement the events
     static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+
+public: // helpers for deprecated events
+
+    //! Method that allows the behavior context to expose this deprecated event
+    bool Deprecated_GetScaleToDevice()
+    {
+        AZ_WarningOnce("UiTransformBus", false, "GetScaleToDevice is deprecated.  Please use GetScaleToDeviceMode.");
+        return GetScaleToDeviceMode() != ScaleToDeviceMode::None;
+    }
+
+    //! Method that allows the behavior context to expose this deprecated event
+    void Deprecated_SetScaleToDevice(bool scaleToDevice)
+    {
+        AZ_WarningOnce("UiTransformBus", false, "SetScaleToDevice is deprecated.  Please use SetScaleToDeviceMode.");
+        SetScaleToDeviceMode(scaleToDevice ? ScaleToDeviceMode::UniformScaleToFit : ScaleToDeviceMode::None);
+    }
 };
 
 typedef AZ::EBus<UiTransformInterface> UiTransformBus;
@@ -337,8 +386,11 @@ public: // member functions
 
     virtual ~UiTransformChangeNotification(){}
 
-    //! Called when an entity's transform has been modified
+    //! Called when an entity's transform (canvas space) has been modified
     virtual void OnCanvasSpaceRectChanged(AZ::EntityId entityId, const UiTransformInterface::Rect& oldRect, const UiTransformInterface::Rect& newRect) = 0;
+
+    //! Called when an entity's transform (viewport space) has been modified
+    virtual void OnTransformToViewportChanged() {}
 };
 
 typedef AZ::EBus<UiTransformChangeNotification> UiTransformChangeNotificationBus;

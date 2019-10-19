@@ -48,6 +48,12 @@ void ProcessLifeManagementGem::OnApplicationConstrained(ApplicationLifecycleEven
         return;
     }
 
+    if (!(gEnv && gEnv->pGame))
+    {
+        // Game is not valid
+        return;
+    }
+
     // Load/show a modal pause screen.
     if (gEnv && gEnv->pLyShine)
     {
@@ -61,11 +67,13 @@ void ProcessLifeManagementGem::OnApplicationConstrained(ApplicationLifecycleEven
     }
 
     // Update text to reflect input required to unpause (should be localized).
-#if defined (AZ_PLATFORM_ANDROID) || defined (AZ_PLATFORM_APPLE_IOS)
-    const char* instructionsText = "Touch the screen to resume";
-#else
-    const char* instructionsText = "Press any key or button to resume";
-#endif
+    const AzFramework::InputDevice* inputDeviceTouch = nullptr;
+    AzFramework::InputDeviceRequestBus::EventResult(inputDeviceTouch,
+                                                    AzFramework::InputDeviceTouch::Id,
+                                                    &AzFramework::InputDeviceRequests::GetInputDevice);
+    const char* instructionsText = (inputDeviceTouch && inputDeviceTouch->IsConnected()) ?
+                                   "Touch the screen to resume" :
+                                   "Press any key or button to resume";
 
     AZ::Entity* instructionsTextElement = nullptr;
     EBUS_EVENT_ID_RESULT(instructionsTextElement, m_pausedCanvasId, UiCanvasBus, FindElementByName, "InstructionsText");
@@ -75,7 +83,10 @@ void ProcessLifeManagementGem::OnApplicationConstrained(ApplicationLifecycleEven
     }
 
     // Pause the game.
-    gEnv->pGame->GetIGameFramework()->PauseGame(true, false);
+    if (gEnv->pGame && gEnv->pGame->GetIGameFramework())
+    {
+        gEnv->pGame->GetIGameFramework()->PauseGame(true, false);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -118,7 +129,10 @@ void ProcessLifeManagementGem::OnInputChannelEvent(const InputChannel& inputChan
     if (shouldUnpause)
     {
         // Unpause the game.
-        gEnv->pGame->GetIGameFramework()->PauseGame(false, false);
+        if (gEnv->pGame && gEnv->pGame->GetIGameFramework())
+        {
+            gEnv->pGame->GetIGameFramework()->PauseGame(false, false);
+        }
 
         // Stop exclusively capturing input.
         InputChannelNotificationBus::Handler::BusDisconnect();

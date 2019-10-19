@@ -12,12 +12,7 @@
 
 // include required headers
 #include "Quaternion.h"
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#undef AZ_RESTRICTED_SECTION
-#define QUATERNION_CPP_SECTION_1 1
-#define QUATERNION_CPP_SECTION_2 2
-#endif
+#include <AzCore/std/typetraits/aligned_storage.h>
 
 namespace MCore
 {
@@ -33,7 +28,20 @@ namespace MCore
     // returns the approximately normalized linear interpolated result [t must be between 0..1]
     Quaternion Quaternion::NLerp(const Quaternion& to, float t) const
     {
-    #ifdef MCORE_SSE_ENABLED
+        AZ_Assert(t > -MCore::Math::epsilon && t < (1 + MCore::Math::epsilon), "Expected t to be between 0..1");
+        static const float weightCloseToOne = 1.0f - MCore::Math::epsilon;
+
+        // Early out for boundaries (common cases)
+        if (t < MCore::Math::epsilon)
+        {
+            return *this;
+        }
+        else if (t > weightCloseToOne)
+        {
+            return to;
+        }
+
+    #if AZ_TRAIT_USE_PLATFORM_SIMD
         __m128 num1, num2, num3, num4, fromVec, toVec;
         const float omt = 1.0f - t;
         float dot;
@@ -68,17 +76,19 @@ namespace MCore
         num3 = _mm_hadd_ps(num4, num4);
         //num4 = _mm_rsqrt_ps( num3 );      // length (argh, too inaccurate on some models)
 
-        const float invLen = Math::InvSqrt(num3.m128_f32[0]);
+        AZStd::aligned_storage<sizeof(float) * 4, 16>::type numFloatStorage;
+        float* numFloat = reinterpret_cast<float*>(&numFloatStorage);
+
+        _mm_store_ps(numFloat, num3);
+        const float invLen = Math::InvSqrt(numFloat[0]);
         num4 = _mm_load_ps1(&invLen);
 
         // calc inverse length, which normalizes everything
         num1 = _mm_mul_ps(num2, num4);
-        return Quaternion(num1.m128_f32[0], num1.m128_f32[1], num1.m128_f32[2], num1.m128_f32[3]);
+
+        _mm_store_ps(numFloat, num1);
+        return Quaternion(numFloat[0], numFloat[1], numFloat[2], numFloat[3]);
     #else
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION QUATERNION_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(Quaternion_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
         const float omt = 1.0f - t;
         const float dot = x * to.x + y * to.y + z * to.z + w * to.w;
         if (dot < 0.0f)
@@ -110,10 +120,6 @@ namespace MCore
     // returns the linear interpolated result [t must be between 0..1]
     Quaternion Quaternion::Lerp(const Quaternion& to, float t) const
     {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION QUATERNION_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(Quaternion_cpp, AZ_RESTRICTED_PLATFORM)
-#endif
         const float omt = 1.0f - t;
         const float cosom = x * to.x + y * to.y + z * to.z + w * to.w;
         if (cosom < 0.0f)
@@ -592,10 +598,11 @@ namespace MCore
     }
 
 
-    // rotate the current quaternion
+    // rotate the current quaternion and renormalize it
     void Quaternion::RotateFromTo(const AZ::Vector3& fromVector, const AZ::Vector3& toVector)
     {
         *this = CreateDeltaRotation(fromVector, toVector) * *this;
+        Normalize();
     }
 }   // namespace MCore
 

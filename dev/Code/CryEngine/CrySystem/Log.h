@@ -19,11 +19,15 @@
 #include <MultiThread_Containers.h>
 
 //////////////////////////////////////////////////////////////////////
-#if defined(ANDROID) || defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(ANDROID) || defined(AZ_PLATFORM_MAC)
     #define MAX_TEMP_LENGTH_SIZE    4098
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(Log_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/Log_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/Log_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -114,6 +118,8 @@ private: // -------------------------------------------------------------------
         void GetMemoryUsage(ICrySizer* pSizer) const {}
     };
 
+    void CheckAndPruneBackupLogs() const;
+
     bool IsError(ELogType logType) const { return logType == ELogType::eError || logType == ELogType::eErrorAlways || logType == ELogType::eWarning || logType == ELogType::eWarningAlways; }
 
     //helper function to pass calls to LogString... to the main thread, returns false if you are on the main thread already, in which case just process the work.
@@ -193,6 +199,8 @@ private: // -------------------------------------------------------------------
     };
     SLogHistoryItem m_history[16];
     int m_iLastHistoryItem;
+
+    static bool CheckLogFormatter(const char* formatter);
 
 #if defined(KEEP_LOG_FILE_OPEN)
     static void LogFlushFile(IConsoleCmdArgs* pArgs);

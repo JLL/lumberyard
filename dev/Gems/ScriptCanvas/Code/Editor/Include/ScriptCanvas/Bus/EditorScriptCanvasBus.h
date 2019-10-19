@@ -21,9 +21,18 @@
 #include <AzCore/Math/Uuid.h>
 #include <AzCore/Math/Vector2.h>
 
+#include <GraphCanvas/Editor/EditorTypes.h>
+#include <GraphCanvas/Types/EntitySaveData.h>
+
 #include <Editor/Include/ScriptCanvas/Assets/ScriptCanvasAsset.h>
 #include <Editor/Include/ScriptCanvas/Bus/NodeIdPair.h>
-#include <GraphCanvas/Editor/EditorTypes.h>
+#include <ScriptCanvas/Core/ExecutionNotificationsBus.h>
+#include <ScriptCanvas/Variable/VariableCore.h>
+
+namespace GraphCanvas
+{
+    class GraphCanvasTreeItem;
+}
 
 namespace ScriptCanvasEditor
 {
@@ -52,13 +61,25 @@ namespace ScriptCanvasEditor
         virtual void CloseGraph() = 0;
 
         //! Retrieves script canvas asset reference
-        virtual AZ::Data::Asset<ScriptCanvasAsset> GetAsset() const = 0;
+        virtual AZ::Data::Asset<ScriptCanvasAsset> GetAsset() const = 0;        
 
         //! Returns the Entity ID of the Editor Entity that owns this graph.
         virtual AZ::EntityId GetEditorEntityId() const = 0;
-
+        virtual AZ::NamedEntityId GetNamedEditorEntityId() const = 0;
     };
+
     using EditorScriptCanvasRequestBus = AZ::EBus<EditorScriptCanvasRequests>;
+
+    class EditorScriptCanvasComponentRequests : public AZ::EBusTraits
+    {
+    public:
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+        using BusIdType = AZ::EntityId;
+
+        virtual void SetAssetId(const AZ::Data::AssetId& assetId) = 0;
+    };
+
+    using EditorScriptCanvasComponentRequestBus = AZ::EBus<EditorScriptCanvasComponentRequests>;
 
     // Above bus is keyed off of the graph Id. Which I don't really have access to.
     // This bus is here just so I can tell it to open the Editor.
@@ -104,14 +125,48 @@ namespace ScriptCanvasEditor
     public:
         static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
         using BusIdType = AZ::EntityId;
-        
+
         virtual void CreateGraphCanvasScene() = 0;
+        virtual void ClearGraphCanvasScene() = 0;
         virtual GraphCanvas::GraphId GetGraphCanvasGraphId() const = 0;
 
+        virtual void DisplayGraphCanvasScene() = 0;
+
+        virtual void UpdateGraphCanvasSaveData(const AZStd::unordered_map< AZ::EntityId, GraphCanvas::EntitySaveDataContainer* >& saveData) = 0;
+        virtual AZStd::unordered_map< AZ::EntityId, GraphCanvas::EntitySaveDataContainer* > GetGraphCanvasSaveData() = 0;
+
         virtual NodeIdPair CreateCustomNode(const AZ::Uuid& typeId, const AZ::Vector2& position) = 0;
+
+        virtual void AddCrcCache(const AZ::Crc32& crcValue, const AZStd::string& cacheString) = 0;
+        virtual void RemoveCrcCache(const AZ::Crc32& crcValue) = 0;
+        virtual AZStd::string DecodeCrc(const AZ::Crc32& crcValue) = 0;
+
+        virtual void ClearHighlights() = 0;
+        virtual void HighlightMembersFromTreeItem(const GraphCanvas::GraphCanvasTreeItem* treeItem) = 0;
+        virtual void HighlightVariables(const AZStd::unordered_set< ScriptCanvas::VariableId>& variableIds) = 0;
+        virtual void HighlightNodes(const AZStd::vector<NodeIdPair>& nodes) = 0;
+
+        virtual AZStd::vector<NodeIdPair> GetNodesOfType(const ScriptCanvas::NodeTypeIdentifier&) = 0;
+        virtual AZStd::vector<NodeIdPair> GetVariableNodes(const ScriptCanvas::VariableId&) = 0;        
+
+        virtual void RemoveUnusedVariables() = 0;
+
+        virtual void QueueVersionUpdate(const AZ::EntityId& graphCanvasNodeId) = 0;
     };
     
     using EditorGraphRequestBus = AZ::EBus<EditorGraphRequests>;
+
+    class EditorGraphNotifications
+        : public AZ::EBusTraits
+    {
+    public:
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+        using BusIdType = AZ::EntityId;
+
+        virtual void OnGraphCanvasSceneDisplayed() {};
+    };
+
+    using EditorGraphNotificationBus = AZ::EBus<EditorGraphNotifications>;
 
     class EditorNodeNotifications : public AZ::EBusTraits
     {
@@ -123,4 +178,30 @@ namespace ScriptCanvasEditor
     };
 
     using EditorNodeNotificationBus = AZ::EBus<EditorNodeNotifications>;
+
+    // Mainly expected to be used from an aggregator.
+    class EditorScriptCanvasComponentLogging 
+        : public AZ::ComponentBus
+    {
+    public:
+        
+        virtual AZ::NamedEntityId FindNamedEntityId() const = 0;
+        virtual ScriptCanvas::GraphIdentifier GetGraphIdentifier() const = 0;
+    };
+
+    using EditorScriptCanvasComponentLoggingBus = AZ::EBus<EditorScriptCanvasComponentLogging>;
+
+    class EditorLoggingComponentNotifications
+        : public AZ::EBusTraits
+    {
+    public:
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
+        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+
+        virtual void OnEditorScriptCanvasComponentActivated(const AZ::NamedEntityId& namedEntityId, const ScriptCanvas::GraphIdentifier& graphIdentifier) = 0;
+        virtual void OnEditorScriptCanvasComponentDeactivated(const AZ::NamedEntityId& namedEntityId, const ScriptCanvas::GraphIdentifier& graphIdentifier) = 0;
+        virtual void OnAssetSwitched(const AZ::NamedEntityId& namedEntityId, const ScriptCanvas::GraphIdentifier& newGraphIdentifier, const ScriptCanvas::GraphIdentifier& oldGraphIdentifier) = 0;
+    };
+
+    using EditorLoggingComponentNotificationBus = AZ::EBus<EditorLoggingComponentNotifications>;
 }

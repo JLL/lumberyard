@@ -48,10 +48,6 @@
             "CGA/ControllerTCB.h",
             "CGA/QuatQuantization.h",
             "CGA/TCBSpline.h"
-        ],
-        "AnimationCompiler/CryAnimation":
-        [
-            "../../../CryEngine/CryAnimation/ControllerOpt.h"
         ]
     },
     "ResourceCompilerPC_uber_2.cpp":
@@ -174,11 +170,11 @@
             "../../../CryEngine/Cry3DEngine/MeshCompiler/MeshCompiler.cpp",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/ForsythFaceReorderer.cpp",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/TangentSpaceCalculation.cpp",
-            "@3P:mikkelsen@/mikkelsen/mikktspace.cpp",
+            "@3P:mikkt@/mikkelsen/mikktspace_stdafx.cpp",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/MeshCompiler.h",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/TangentSpaceCalculation.h",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/ForsythFaceReorderer.h",
-            "@3P:mikkelsen@/mikkelsen/mikktspace.h",
+            "@3P:mikkt@/mikkelsen/mikktspace.h",
             "../../../CryEngine/Cry3DEngine/MeshCompiler/PVRTTriStrip/PVRTTriStrip.cpp"
 
         ],

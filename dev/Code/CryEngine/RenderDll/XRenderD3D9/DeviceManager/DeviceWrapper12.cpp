@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -62,6 +62,7 @@ bool SDeviceObjectHelpers::GetShaderInstanceInfo(std::array<SDeviceObjectHelpers
                 Ident.m_MDMask = mdFlags & (shaderStage != eHWSC_Pixel ? 0xFFFFFFFF : ~HWMD_TEXCOORD_FLAG_MASK);
                 Ident.m_MDVMask = ((shaderStage != eHWSC_Pixel) ? mdvFlags : 0) | CParserBin::m_nPlatform;
                 Ident.m_GLMask = pHWShaderD3D->m_nMaskGenShader;
+                Ident.m_STMask = pHWShaderD3D->m_maskGenStatic;
                 Ident.m_pipelineState = pipelineState ? pipelineState[shaderStage] : UPipelineState();
 
                 if (auto pInstance = pHWShaderD3D->mfGetInstance(pShader, Ident, 0))
@@ -454,7 +455,7 @@ void CDeviceGraphicsPSODesc::Build()
     HashSimpleType(crc, m_DepthBiasClamp);
     HashSimpleType(crc, m_SlopeScaledDepthBias);
     HashSimpleType(crc, m_pResourceLayout);
-    HashSimpleType(crc, m_VertexFormat.GetCRC());
+    HashSimpleType(crc, m_VertexFormat.GetEnum());
     m_Hash = crc;
 }
 
@@ -491,7 +492,7 @@ void CDeviceResourceSet::Clear()
 {
     for (size_t i = 0; i < m_Textures.size(); i++)
     {
-        auto rsTexBind = m_Textures[i];
+        auto& rsTexBind = m_Textures[i];
 
         CTexture* pTex = std::get<1>(rsTexBind.resource);
         if (pTex != nullptr)
@@ -609,10 +610,10 @@ bool CDeviceResourceSet::Fill(CShader* pShader, CShaderResources* pResources, ES
         SetTexture(bindSlot, pTex, SResourceView::DefaultView, shaderStages);
     }
 /*
-	[Shader System TO DO] - replace with the following optimized slots set code 
+    [Shader System TO DO] - replace with the following optimized slots set code 
     for (auto iter = pResources->m_TexturesResourcesMap.begin(); iter != pResources->m_TexturesResourcesMap.end(); ++iter)
     {
-        SEfResTexture*  	    pTexture = &iter->second;
+        SEfResTexture*          pTexture = &iter->second;
         CTexture*               pTex = pTexture->m_Sampler.m_pTex;
         uint16                  texSlot = iter->first;
         const STexSamplerRT&    smp = pTexture->m_Sampler;

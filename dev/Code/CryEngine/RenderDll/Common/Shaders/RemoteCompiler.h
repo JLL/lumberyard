@@ -32,6 +32,28 @@ namespace NRemoteCompiler
         ESRecvFailed,
     };
 
+    enum EProvoHardwareModes : int8
+    {
+        PHMInvalidMode  = -1,
+        PHMBaseMode     = 0,
+        PHMCommonMode   = 1,
+        PHMNeoMode      = 2
+    };
+
+    enum EShaderCompiler
+    {
+        eSC_Unknown,
+        eSC_Orbis_DXC, // ACCEPTED_USE
+        eSC_Durango_FXC, // ACCEPTED_USE
+        eSC_D3D11_FXC,
+        eSC_GLSL_HLSLcc,
+        eSC_METAL_HLSLcc,
+        eSC_GLSL_LLVM_DXC,
+        eSC_METAL_LLVM_DXC,
+
+        eSC_MAX
+    };
+
     class RemoteProxyState;
 
     class CShaderSrv
@@ -41,12 +63,17 @@ namespace NRemoteCompiler
         // on return, rVec contains the response vector, or an error string, if failed
         EServerError Compile(std::vector<uint8>& rVec, const char* pProfile, const char* pProgram, const char* pEntry, const char* pCompileFlags, const char* pIdent) const;
 
+        EServerError GetShaderList(std::vector<uint8>& rVec) const;
+
         bool CommitPLCombinations(std::vector<SCacheCombination>& rVec);
 
         // RequestLine causes the remote compiler to compile without expecting a response.
         bool RequestLine(const string& rList, const string& rString) const;
 
-        const char* GetPlatform() const;
+        EShaderCompiler GetShaderCompiler() const;
+        const char *GetShaderCompilerName() const;
+
+        AZStd::string GetShaderCompilerFlags(EHWShaderClass eClass, UPipelineState pipelineState, uint32 MDVMask) const;
 
         static CShaderSrv& Instance();
 
@@ -72,7 +99,8 @@ namespace NRemoteCompiler
 
         bool EncapsulateRequestInEngineConnectionProtocol(std::vector<uint8>& rCompileData) const;
 
-        static uint32 m_LastWorkingServer;
+        const char* GetPlatformName() const;
+
         RemoteProxyState* m_remoteState;
 
         // root path added to each request line to store the data per game (eg. MyGame\)

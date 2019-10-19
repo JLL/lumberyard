@@ -16,6 +16,7 @@
 // shared code
 
 #include "And.h"
+#include "Any.h"
 #include "Boolean.h"
 #include "Gate.h"
 #include "Indexer.h"
@@ -24,5 +25,8 @@
 #include "Not.h"
 #include "Once.h"
 #include "Or.h"
+#include "OrderedSequencer.h"
 #include "Sequencer.h"
+#include "TargetedSequencer.h"
+#include "WeightedRandomSequencer.h"
 

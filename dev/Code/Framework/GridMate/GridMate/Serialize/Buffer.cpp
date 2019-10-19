@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <GridMate/Serialize/Buffer.h>
 
@@ -39,7 +38,6 @@ namespace GridMate
     //-----------------------------------------------------------------------------
     bool ReadBuffer::ReadRaw(void* data, PackedSize dataSize)
     {
-        AZ_Assert((m_read + PackedSize(dataSize)) <= m_length, "Attempting to read beyond buffer length!");
         if (m_overrun || dataSize > (m_length - m_read))
         {
             m_overrun = true;
@@ -76,6 +74,13 @@ namespace GridMate
                 AZ::u8* outLocation = reinterpret_cast<AZ::u8*>(data) + i;
                 memcpy(outLocation, &combinedValue, 1);
             }
+        }
+
+        if (dataSize.GetAdditionalBits() > 0)
+        {
+            // initialize the left over bits with zeroes
+            AZ::u8* lastByte = reinterpret_cast<AZ::u8*>(data) + dataSize.GetBytes();
+            *lastByte &= (1U << dataSize.GetAdditionalBits()) - 1U;
         }
 
         return true;
@@ -373,5 +378,3 @@ namespace GridMate
     }
     //-----------------------------------------------------------------------------
 }
-
-#endif // AZ_UNITY_BUILD

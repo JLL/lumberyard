@@ -24,7 +24,7 @@ namespace LmbrCentral
 {
     using AzFramework::ColliderComponentRequestBus;
     using AzFramework::ColliderComponentEventBus;
-    
+
     void MeshColliderComponent::Reflect(AZ::ReflectContext* context)
     {
         AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context);
@@ -32,8 +32,7 @@ namespace LmbrCentral
         {
             serializeContext->Class<MeshColliderComponent, AZ::Component>()
                 ->Version(1)
-                ->SerializerForEmptyClass()
-            ;
+                ;
 
             AZ::EditContext* editContext = serializeContext->GetEditContext();
             if (editContext)
@@ -41,8 +40,9 @@ namespace LmbrCentral
                 editContext->Class<MeshColliderComponent>(
                     "Mesh Collider", "The Mesh Collider component specifies that the collider geometry is provided by a mesh component")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
-                        ->Attribute(AZ::Edit::Attributes::Category, "Physics")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/ColliderMesh.png")
+                        ->Attribute(AZ::Edit::Attributes::Category, "Physics (Legacy)")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/ColliderMesh.svg")
+                        ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/MeshCollider.png")
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-physics-mesh-collider.html")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                 ;

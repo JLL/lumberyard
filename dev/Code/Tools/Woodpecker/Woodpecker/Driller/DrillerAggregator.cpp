@@ -10,7 +10,7 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 
 #include "DrillerAggregator.hxx"
 #include <Woodpecker/Driller/DrillerAggregator.moc>
@@ -38,9 +38,9 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<AggregatorSavedState, AZ::UserSettings>()
+                serialize->Class<AggregatorSavedState>()
                     ->Version(1)
-                    ->SerializerForEmptyClass();
+                    ;
             }
         }
     };

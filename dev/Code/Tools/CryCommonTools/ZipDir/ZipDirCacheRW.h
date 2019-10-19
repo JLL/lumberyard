@@ -18,10 +18,7 @@
 // Time to time, the contained Cache object will be recreated during
 // an archive add operation
 
-#ifndef CRYINCLUDE_CRYCOMMONTOOLS_ZIPDIR_ZIPDIRCACHERW_H
-#define CRYINCLUDE_CRYCOMMONTOOLS_ZIPDIR_ZIPDIRCACHERW_H
 #pragma once
-
 
 #include "SimpleStringPool.h"
 #include "StringUtils.h"
@@ -32,6 +29,8 @@ namespace ZipDir
     struct FileDataRecord;
     TYPEDEF_AUTOPTR(FileDataRecord);
     typedef FileDataRecord_AutoPtr FileDataRecordPtr;
+
+    static constexpr int TARGET_MIN_TEST_COMPRESS_BYTES = 128 * 1024;
 
     struct IReporter
     {
@@ -64,6 +63,7 @@ namespace ZipDir
 
     struct IEncryptPredicate
     {
+        virtual ~IEncryptPredicate() = default;
         virtual bool Match(const char* filename) = 0;
     };
 
@@ -112,7 +112,7 @@ namespace ZipDir
         // Adds or updates a bunch of files. Creates directories if needed. Multithreaded when numExtraThreads > 0
         bool UpdateMultipleFiles(const char** realFilenames, const char** filenamesInZip, size_t fileCount,
             int compressionLevel, bool encryptContent, size_t zipMaxSize, int sourceMinSize, int sourceMaxSize,
-            int numExtraThreads, ZipDir::IReporter* reporter, ZipDir::ISplitter* splitter = NULL);
+            unsigned numExtraThreads, ZipDir::IReporter* reporter, ZipDir::ISplitter* splitter = nullptr, bool useFastestDecompressionCodec = false);
 
         //   Adds a new file to the zip or update an existing one if it is not compressed - just stored  - start a big file
         ErrorEnum StartContinuousFileUpdate(const char* szRelativePath, unsigned nSize);
@@ -281,5 +281,3 @@ namespace ZipDir
         }
     };
 }
-
-#endif // CRYINCLUDE_CRYCOMMONTOOLS_ZIPDIR_ZIPDIRCACHERW_H

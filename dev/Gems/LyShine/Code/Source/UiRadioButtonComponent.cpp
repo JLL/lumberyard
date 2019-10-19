@@ -289,6 +289,7 @@ void UiRadioButtonComponent::Reflect(AZ::ReflectContext* context)
             auto editInfo = ec->Class<UiRadioButtonComponent>("RadioButton", "An interactable component for RadioButton behavior.");
 
             editInfo->ClassElement(AZ::Edit::ClassElements::EditorData, "")
+                ->Attribute(AZ::Edit::Attributes::Category, "UI")
                 ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/UiRadioButton.png")
                 ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/UiRadioButton.png")
                 ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("UI", 0x27ff46b0))
@@ -333,7 +334,6 @@ void UiRadioButtonComponent::Reflect(AZ::ReflectContext* context)
     if (behaviorContext)
     {
         behaviorContext->EBus<UiRadioButtonBus>("UiRadioButtonBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Event("GetState", &UiRadioButtonBus::Events::GetState)
             ->Event("GetGroup", &UiRadioButtonBus::Events::GetGroup)
             ->Event("GetCheckedEntity", &UiRadioButtonBus::Events::GetCheckedEntity)
@@ -348,7 +348,6 @@ void UiRadioButtonComponent::Reflect(AZ::ReflectContext* context)
             ->Event("SetChangedActionName", &UiRadioButtonBus::Events::SetChangedActionName);
 
         behaviorContext->EBus<UiRadioButtonNotificationBus>("UiRadioButtonNotificationBus")
-            ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
             ->Handler<UiRadioButtonNotificationBusBehaviorHandler>();
     }
 }

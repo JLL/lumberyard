@@ -18,7 +18,7 @@
 #include <QProcess>
 #include <QDir>
 #include <QList>
-#include "native/utilities/assetUtilEBusHelper.h"
+#include "native/utilities/AssetUtilEBusHelper.h"
 
 #include "rcjoblistmodel.h"
 #include "RCQueueSortModel.h"
@@ -57,7 +57,7 @@ namespace AssetProcessor
         int NumberOfPendingCriticalJobsPerPlatform(QString platform);
 
         void SetSystemRoot(const QDir& systemRoot);
-        int NumberOfPendingCopyJobsPerPlatform(QString platform);
+        int NumberOfPendingJobsPerPlatform(QString platform);
         bool IsIdle();
         bool IsPriorityCopyJob(AssetProcessor::RCJob* rcJob);
     Q_SIGNALS:
@@ -67,6 +67,8 @@ namespace AssetProcessor
         //void AssetStatus(JobEntry jobEntry, AzFramework::AssetProcessor::AssetStatus status);
         void RcError(QString error);
         void ReadyToQuit(QObject* source); //After receiving QuitRequested, you must send this when its safe
+
+        ///! JobStarted will notify with a path name relative to the watch folder it was found in (not the database sourcename column)
         void JobStarted(QString inputFile, QString platform);
         void JobStatusChanged(JobEntry entry, AzToolsFramework::AssetSystem::JobStatus status);
         void JobsInQueuePerPlatform(QString platform, int jobs);
@@ -89,12 +91,13 @@ namespace AssetProcessor
         void OnRequestCompileGroup(AssetProcessor::NetworkRequestID groupID, QString platform, QString searchTerm, bool isStatusRequest = true);
 
         void DispatchJobs();
+        void DispatchJobsImpl();
 
         //! Pause or unpause dispatching, only necessary on startup to avoid thrashing and make sure no jobs jump the gun.
         void SetDispatchPaused(bool pause);
 
         //! All jobs which match this source will be cancelled or removed.  Note that relSourceFile should have any applicable output prefixes!
-        void RemoveJobsBySource(QString relSourceFile);
+        void RemoveJobsBySource(QString relSourceFileDatabaseName);
 
     private:
         void FinishJob(AssetProcessor::RCJob* rcJob);
@@ -105,6 +108,7 @@ namespace AssetProcessor
         bool m_dispatchingJobs = false;
         bool m_shuttingDown = false;
         bool m_dispatchingPaused = true;// dispatching starts out paused.
+        bool m_dispatchJobsQueued = false;
 
         QMap<QString, int> m_jobsCountPerPlatform;// This stores the count of jobs per platform in the RC Queue
         QMap<QString, int> m_pendingCriticalJobsPerPlatform;// This stores the count of pending critical jobs per platform in the RC Queue

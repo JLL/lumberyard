@@ -24,7 +24,9 @@ LayerWeight::LayerWeight(const AZStd::vector<uint8>& layerIds, const AZStd::vect
     for (decltype(count)i = 1; i < count; ++i)
     {
         auto j = i;
-        while (j > 0 && sortedWeights[j] > sortedWeights[j - 1])
+
+        // By using >=, we ensure that the highest priority layers (which are at the end of the unsorted list) are always placed first in the list
+        while (j > 0 && sortedWeights[j] >= sortedWeights[j - 1])
         {
             std::swap(sortedWeights[j], sortedWeights[j - 1]);
             std::swap(sortedLayerIds[j], sortedLayerIds[j - 1]);
@@ -37,7 +39,7 @@ LayerWeight::LayerWeight(const AZStd::vector<uint8>& layerIds, const AZStd::vect
     int weight = 0;
     for (decltype(count)i = 0; i < count; ++i)
     {
-        Ids[i] = sortedLayerIds[i];
+        Ids[i] = (sortedWeights[i] > 0) ? sortedLayerIds[i] : Undefined;
         Weights[i] = sortedWeights[i];
         weight += sortedWeights[i];
     }
@@ -71,7 +73,7 @@ void LayerWeight::SetWeight(uint8 layerId, uint8 weight)
 
     int remainder = static_cast<int>(weight) - static_cast<int>(Weights[foundIndex]);
     Weights[foundIndex] = weight;
-    Ids[foundIndex] = layerId | (Ids[foundIndex] & CLayer::e_hole);
+    Ids[foundIndex] = ((weight > 0) ? layerId : Undefined) | (Ids[foundIndex] & CLayer::e_hole);
 
     Normalize(foundIndex, remainder);
     Sort();
@@ -155,7 +157,7 @@ void LayerWeight::Normalize(int ignoreIndex, int remainder)
         {
             if (i != ignoreIndex)
             {
-                const uint8 AmountToChange = std::min(Weights[i], static_cast<uint8>(remainder));
+                const uint8 AmountToChange = static_cast<uint8>(std::min(static_cast<int>(Weights[i]), remainder));
                 Weights[i] -= AmountToChange;
                 if (Weights[i] == 0)
                 {

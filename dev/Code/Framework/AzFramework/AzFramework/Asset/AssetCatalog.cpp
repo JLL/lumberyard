@@ -268,7 +268,7 @@ namespace AzFramework
 
         if (itr != m_registry->m_assetDependencies.end())
         {
-            AZStd::vector<ProductDependency> assetDependencyList = itr->second;
+            AZStd::vector<ProductDependency>& assetDependencyList = itr->second;
 
             for (const ProductDependency& dependency : assetDependencyList)
             {
@@ -362,7 +362,7 @@ namespace AzFramework
             {
                 if (AZ::IO::FileIOBase::GetInstance()->Open(catalogRegistryFile, AZ::IO::OpenMode::ModeRead, handle))
                 {
-                    bytes.resize(size);
+                    bytes.resize_no_construct(size);
                     // this call will fail on purpose if bytes.size() != size successfully actually read from disk.
                     if (!AZ::IO::FileIOBase::GetInstance()->Read(handle, bytes.data(), bytes.size(), true))
                     {
@@ -377,13 +377,26 @@ namespace AzFramework
         if (!bytes.empty())
         {
             AZ::IO::MemoryStream catalogStream(bytes.data(), bytes.size());
-            AZ::Utils::LoadObjectFromStreamInPlace<AzFramework::AssetRegistry>(catalogStream, *m_registry.get(), serializeContext, AZ::ObjectStream::FilterDescriptor(AZ::ObjectStream::AssetFilterNoAssetLoading));
+        #if (AZ_TRAIT_PUMP_SYSTEM_EVENTS_WHILE_LOADING)
+            ApplicationRequests::Bus::Broadcast(&ApplicationRequests::PumpSystemEventLoopWhileDoingWorkInNewThread,
+                AZStd::chrono::milliseconds(AZ_TRAIT_PUMP_SYSTEM_EVENTS_WHILE_LOADING_INTERVAL_MS),
+                [this, &catalogStream, &serializeContext]
+                {
+                    AZ::Utils::LoadObjectFromStreamInPlace<AzFramework::AssetRegistry>(catalogStream, *m_registry.get(), serializeContext, AZ::ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading));
+                },
+                "Asset Catalog Loading Thread"
+            );
+        #else
+            AZ::Utils::LoadObjectFromStreamInPlace<AzFramework::AssetRegistry>(catalogStream, *m_registry.get(), serializeContext, AZ::ObjectStream::FilterDescriptor(&AZ::Data::AssetFilterNoAssetLoading));
+        #endif // (AZ_TRAIT_PUMP_SYSTEM_EVENTS_WHILE_LOADING)
 
             AZ_TracePrintf("AssetCatalog",
                 "\n========================================================\n"
                 "Loaded registry containing %u assets.\n"
                 "========================================================\n",
                 m_registry->m_assetIdToInfo.size());
+
+            AssetCatalogEventBus::Broadcast(&AssetCatalogEventBus::Events::OnCatalogLoaded, catalogRegistryFile);
         }
         else
         {

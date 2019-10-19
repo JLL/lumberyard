@@ -16,7 +16,7 @@
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/RTTI/RTTI.h>
 #include <AzCore/EBus/EBus.h>
-#include <AzCore/std/containers/ring_buffer.h>
+#include <AzCore/std/containers/vector.h>
 #include <AzCore/std/string/string.h>
 
 #pragma once
@@ -25,6 +25,8 @@ namespace AzToolsFramework
 {
     namespace UndoSystem
     {
+        class UndoStack;
+
         typedef AZ::u64 URCommandID;
 
         // plug one of these into your undo stack if you'd like notification.
@@ -107,7 +109,7 @@ namespace AzToolsFramework
             bool operator==(const URCommandID id) const { return m_id == 0 ? false : m_id == id; }
             bool operator==(const URSequencePoint* com) const { return *this == com->m_id; }
 
-            friend class UndoStack;
+            friend UndoStack;
 
         protected:
             void AddChild(URSequencePoint*);
@@ -148,7 +150,8 @@ namespace AzToolsFramework
 
             AZ_CLASS_ALLOCATOR(UndoStack, AZ::SystemAllocator, 0);
 
-            UndoStack(int limit, IUndoNotify* notify);
+            UndoStack(IUndoNotify* notify);
+            UndoStack(int /*no longer used*/, IUndoNotify* notify);
             ~UndoStack();
 
             URSequencePoint* Post(URSequencePoint*);
@@ -193,7 +196,7 @@ namespace AzToolsFramework
             int m_Cursor;
             int m_CleanPoint;
 
-            typedef AZStd::ring_buffer<URSequencePoint*> SequencePointBuffer;
+            typedef AZStd::vector<URSequencePoint*> SequencePointBuffer;
 
             SequencePointBuffer m_SequencePointsBuffer;
             IUndoNotify* m_notify;

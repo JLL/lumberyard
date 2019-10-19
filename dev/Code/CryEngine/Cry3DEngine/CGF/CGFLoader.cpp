@@ -90,7 +90,7 @@ namespace
     //
     // Calls the object's destructor and returns a void pointer to the storage
     template<typename T>
-    void Destruct(T* obj, void(* pDestructFnc)(void*))
+    void Destruct(T* obj, void(*pDestructFnc)(void*))
     {
         obj->~T();
         pDestructFnc(reinterpret_cast<void*>(obj));
@@ -146,7 +146,6 @@ CContentCGF* CLoaderCGF::LoadCGF(const char* filename, IChunkFile& chunkFile, IL
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadCGF(CContentCGF* pContentCGF, const char* filename, IChunkFile& chunkFile, ILoaderCGFListener* pListener, unsigned long nLoadingFlags)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (!chunkFile.IsLoaded())
@@ -169,7 +168,6 @@ bool CLoaderCGF::LoadCGF(CContentCGF* pContentCGF, const char* filename, IChunkF
 
 bool CLoaderCGF::LoadCGFFromMem(CContentCGF* pContentCGF, const void* pData, size_t nDataLen, IChunkFile& chunkFile, ILoaderCGFListener* pListener, unsigned long nLoadingFlags)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (!chunkFile.IsLoaded())
@@ -210,13 +208,13 @@ bool CLoaderCGF::LoadCGFWork(CContentCGF* pContentCGF, const char* filename, ICh
     {
         const char* const pExt = PathUtil::GetExt(filename);
         m_IsCHR =
-            !_stricmp(pExt, "chr") ||
-            !_stricmp(pExt, "chrp") ||
-            !_stricmp(pExt, "chrm") ||
-            !_stricmp(pExt, "skin") ||
-            !_stricmp(pExt, "skinp") ||
-            !_stricmp(pExt, "skinm") ||
-            !_stricmp(pExt, "skel");
+            !azstricmp(pExt, "chr") ||
+            !azstricmp(pExt, "chrp") ||
+            !azstricmp(pExt, "chrm") ||
+            !azstricmp(pExt, "skin") ||
+            !azstricmp(pExt, "skinp") ||
+            !azstricmp(pExt, "skinm") ||
+            !azstricmp(pExt, "skel");
     }
 
     const bool bJustGeometry = (nLoadingFlags& IStatObj::ELoadingFlagsJustGeometry) != 0;
@@ -278,7 +276,6 @@ bool CLoaderCGF::LoadCGFWork(CContentCGF* pContentCGF, const char* filename, ICh
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadChunks(bool bJustGeometry)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     m_CompiledBones = false;
@@ -344,9 +341,9 @@ bool CLoaderCGF::LoadChunks(bool bJustGeometry)
                     }
                     break;
 
-                //---------------------------------------------------------
-                //---       chunks for compiled characters             ----
-                //---------------------------------------------------------
+                    //---------------------------------------------------------
+                    //---       chunks for compiled characters             ----
+                    //---------------------------------------------------------
 
                 case ChunkType_CompiledBones:
                     if (!ReadCompiledBones(pChunkDesc))
@@ -409,9 +406,9 @@ bool CLoaderCGF::LoadChunks(bool bJustGeometry)
 
             switch (pChunkDesc->chunkType)
             {
-            //---------------------------------------------------------
-            //---       chunks for CGA-objects  -----------------------
-            //---------------------------------------------------------
+                //---------------------------------------------------------
+                //---       chunks for CGA-objects  -----------------------
+                //---------------------------------------------------------
 
             case ChunkType_ExportFlags:
                 if (!LoadExportFlagsChunk(pChunkDesc))
@@ -470,7 +467,6 @@ bool CLoaderCGF::LoadChunks(bool bJustGeometry)
 
 bool CLoaderCGF::ReadBoneInitialPos(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->chunkVersion != BONEINITIALPOS_CHUNK_DESC_0001::VERSION)
@@ -515,7 +511,6 @@ bool CLoaderCGF::ReadBoneInitialPos(IChunkFile::ChunkDesc* pChunkDesc)
 
 bool CLoaderCGF::ReadMorphTargets(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
 #if !defined(RESOURCE_COMPILER)
@@ -627,7 +622,6 @@ bool CLoaderCGF::ReadMorphTargets(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadBoneNameList(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->chunkVersion != BONENAMELIST_CHUNK_DESC_0745::VERSION)
@@ -1013,13 +1007,13 @@ bool CLoaderCGF::ReadBoneMesh(IChunkFile::ChunkDesc* pChunkDesc)
     // Bone meshes may contain many vertices sharing positions, so we
     // call CompactBoneVertices() to get vertices with unique positions only
     if (!CompactBoneVertices(
-            pbm.m_arrPoints,
-            pbm.m_arrMaterials,
-            pbm.m_arrIndices,
-            pMeshChunk->nVerts,
-            pSrcVertices,
-            pMeshChunk->nFaces,
-            pSrcFaces))
+        pbm.m_arrPoints,
+        pbm.m_arrMaterials,
+        pbm.m_arrIndices,
+        pMeshChunk->nVerts,
+        pSrcVertices,
+        pMeshChunk->nFaces,
+        pSrcFaces))
     {
         m_LastError.Format("CLoaderCGF::ReadBoneMesh: Bad geometry (indices are out range or too many vertices in mesh)");
         return false;
@@ -1047,7 +1041,6 @@ bool CLoaderCGF::ReadBoneMesh(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledBones(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     COMPILED_BONE_CHUNK_DESC_0800* const pBIPChunk = (COMPILED_BONE_CHUNK_DESC_0800*)pChunkDesc->data;
@@ -1093,7 +1086,6 @@ bool CLoaderCGF::ReadCompiledBones(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledPhysicalBones(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     COMPILED_PHYSICALBONE_CHUNK_DESC_0800* const pChunk = (COMPILED_PHYSICALBONE_CHUNK_DESC_0800*)pChunkDesc->data;
@@ -1126,7 +1118,6 @@ bool CLoaderCGF::ReadCompiledPhysicalBones(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledPhysicalProxies(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     CSkinningInfo* pSkinningInfo = m_pCGF->GetSkinningInfo();
@@ -1196,7 +1187,6 @@ bool CLoaderCGF::ReadCompiledPhysicalProxies(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledMorphTargets(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     // Note that this chunk type often contains non-aligned data. Because of that
@@ -1269,7 +1259,6 @@ bool CLoaderCGF::ReadCompiledMorphTargets(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledIntFaces(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     const bool bSwapEndianness = pChunkDesc->bSwapEndian;
@@ -1298,7 +1287,6 @@ bool CLoaderCGF::ReadCompiledIntFaces(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledIntSkinVertice(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     COMPILED_INTSKINVERTICES_CHUNK_DESC_0800* const pBIPChunk = (COMPILED_INTSKINVERTICES_CHUNK_DESC_0800*)pChunkDesc->data;
@@ -1329,7 +1317,6 @@ bool CLoaderCGF::ReadCompiledIntSkinVertice(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledBonesBoxes(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     const bool bSwapEndianness = pChunkDesc->bSwapEndian;
@@ -1410,7 +1397,6 @@ bool CLoaderCGF::ReadCompiledBonesBoxes(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledExt2IntMap(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     const bool bSwapEndianness = pChunkDesc->bSwapEndian;
@@ -1438,7 +1424,6 @@ bool CLoaderCGF::ReadCompiledExt2IntMap(IChunkFile::ChunkDesc* pChunkDesc)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::ReadCompiledBreakablePhysics(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->chunkVersion != BREAKABLE_PHYSICS_CHUNK_DESC::VERSION)
@@ -1685,7 +1670,6 @@ namespace ProcessSkinningHelpers
 
 bool CLoaderCGF::ProcessSkinning()
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     CSkinningInfo* const pSkinningInfo = m_pCGF->GetSkinningInfo();
@@ -1762,7 +1746,7 @@ bool CLoaderCGF::ProcessSkinning()
             pSkinningInfo->m_arrBonesDesc[nBone].m_DefaultB2W = m_arrInitPose34[nBoneID];
 
             memset(pSkinningInfo->m_arrBonesDesc[nBone].m_arrBoneName, 0, sizeof(pSkinningInfo->m_arrBonesDesc[nBone].m_arrBoneName));
-            strcpy(pSkinningInfo->m_arrBonesDesc[nBone].m_arrBoneName, m_arrBoneNameTable[nBoneID].c_str());
+            azstrcpy(pSkinningInfo->m_arrBonesDesc[nBone].m_arrBoneName, sizeof(pSkinningInfo->m_arrBonesDesc[nBone].m_arrBoneName), m_arrBoneNameTable[nBoneID].c_str());
 
             //fill in names of the bones and the limb IDs              ---
             uint32 nBoneId = m_arrIndexToId[nBone];
@@ -2478,6 +2462,14 @@ bool CLoaderCGF::LoadExportFlagsChunk(IChunkFile::ChunkDesc* pChunkDesc)
     {
         pExportInfo->b8WeightsPerVertex = false;
     }
+    if (chunk.flags & EXPORT_FLAGS_CHUNK_DESC::SKINNED_CGF)
+    {
+        pExportInfo->bSkinnedCGF = true;
+    }
+    else
+    {
+        pExportInfo->bSkinnedCGF = false;
+    }
 
     return true;
 }
@@ -2546,9 +2538,9 @@ bool CLoaderCGF::LoadNodeChunk(IChunkFile::ChunkDesc* pChunkDesc, bool bJustGeom
         const float* const pMat = &nodeChunk->tm[0][0];
 
         pNodeCGF->localTM.SetFromVectors(
-            Vec3(pMat[ 0], pMat[ 1], pMat[ 2]),
-            Vec3(pMat[ 4], pMat[ 5], pMat[ 6]),
-            Vec3(pMat[ 8], pMat[ 9], pMat[10]),
+            Vec3(pMat[0], pMat[1], pMat[2]),
+            Vec3(pMat[4], pMat[5], pMat[6]),
+            Vec3(pMat[8], pMat[9], pMat[10]),
             Vec3(pMat[12] * VERTEX_SCALE, pMat[13] * VERTEX_SCALE, pMat[14] * VERTEX_SCALE));
     }
 
@@ -2628,7 +2620,6 @@ bool CLoaderCGF::LoadNodeChunk(IChunkFile::ChunkDesc* pChunkDesc, bool bJustGeom
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadHelperChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->chunkVersion != HELPER_CHUNK_DESC::VERSION)
@@ -2652,7 +2643,6 @@ bool CLoaderCGF::LoadHelperChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkD
 //////////////////////////////////////////////////////////////////////////
 void CLoaderCGF::ProcessNodes()
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     //////////////////////////////////////////////////////////////////////////
@@ -2753,7 +2743,6 @@ void CLoaderCGF::SetupMeshSubsets(CMesh& mesh, CMaterialCGF* pMaterialCGF)
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadGeomChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkDesc)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     // First check if this geometry chunk was already loaded by some node.
@@ -2783,7 +2772,7 @@ bool CLoaderCGF::LoadGeomChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkDes
     if (pChunkDesc->chunkVersion == MESH_CHUNK_DESC_0745::VERSION ||
         pChunkDesc->chunkVersion == MESH_CHUNK_DESC_0745::COMPATIBLE_OLD_VERSION)
     {
-#if !defined(RESOURCE_COMPILER)
+#if !defined(RESOURCE_COMPILER) && !defined(ENABLE_NON_COMPILED_CGF)
         m_LastError.Format("%s: non-compiled geometry chunk in %s", __FUNCTION__, m_filename);
         return false;
 #else
@@ -2999,20 +2988,20 @@ bool CLoaderCGF::LoadGeomChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkDes
             {
                 pMesh->ReallocStream(CMesh::COLORS, 0, nVertsNew);
             }
-			
+
             for (uint32 uvSet = 0; uvSet < mesh.m_texCoords.size(); ++uvSet)
             {
                 if (!mesh.m_texCoords[uvSet].empty())
                 {
                     SMeshTexCoord* texCoords = pMesh->GetStreamPtr<SMeshTexCoord>(CMesh::TEXCOORDS, uvSet);
-                    for(int i = 0; i < nVertsNew; ++i)
+                    for (int i = 0; i < nVertsNew; ++i)
                     {
                         const int origVertex = mesh.m_vertexNewToOld[i];
                         texCoords[i] = SMeshTexCoord(mesh.m_texCoords[uvSet][origVertex].x, mesh.m_texCoords[uvSet][origVertex].y);
                     }
                 }
             }
-			
+
             for (int i = 0; i < nVertsNew; ++i)
             {
                 const int origVertex = mesh.m_vertexNewToOld[i];
@@ -3358,7 +3347,7 @@ bool CLoaderCGF::LoadBoneMappingStreamChunk(CMesh& mesh, const MESH_CHUNK_DESC& 
                                 pMeshElements[vIdx + extra].boneIds[k] = 0;
                             }
                             else if (pMeshElements[vIdx + extra].weights[k] != 0 ||
-                                     pMeshElements[vIdx + extra].boneIds[k] != 0)
+                                pMeshElements[vIdx + extra].boneIds[k] != 0)
                             {
                                 m_LastError.Format("Conflicting vertex-bone references.");
                                 return false;
@@ -3383,7 +3372,7 @@ bool CLoaderCGF::LoadBoneMappingStreamChunk(CMesh& mesh, const MESH_CHUNK_DESC& 
                             pMeshElements[vIdx + extra].boneIds[k] = globalBoneIdx;
                         }
                         else if (pMeshElements[vIdx + extra].weights[k] != weight ||
-                                 pMeshElements[vIdx + extra].boneIds[k] != globalBoneIdx)
+                            pMeshElements[vIdx + extra].boneIds[k] != globalBoneIdx)
                         {
                             m_LastError.Format("Conflicting vertex-bone references.");
                             return false;
@@ -3515,7 +3504,7 @@ bool CLoaderCGF::LoadIndexStreamChunk(CMesh& mesh, const MESH_CHUNK_DESC& chunk)
         return false;
     }
 
-    if(!vcache::VertexCacheOptimizer::ReorderIndicesInPlace(pStreamData, nElemCount, nStreamElemSize))
+    if (!vcache::VertexCacheOptimizer::ReorderIndicesInPlace(pStreamData, nElemCount, nStreamElemSize))
     {
         m_LastError.Format("Failed to reorder / optimize index stream %d", (int)MStream);
         return false;
@@ -3634,7 +3623,6 @@ bool CLoaderCGF::LoadCompiledMeshChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* p
 template<class MESH_CHUNK_DESC>
 bool CLoaderCGF::LoadCompiledMeshChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* pChunkDesc, MESH_CHUNK_DESC chunk)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->bSwapEndian)
@@ -3838,7 +3826,6 @@ bool CLoaderCGF::LoadCompiledMeshChunk(CNodeCGF* pNode, IChunkFile::ChunkDesc* p
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadMeshSubsetsChunk(CMesh& mesh, IChunkFile::ChunkDesc* pChunkDesc, std::vector<std::vector<uint16> >& globalBonesPerSubset)
 {
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     globalBonesPerSubset.clear();
@@ -3934,7 +3921,6 @@ bool CLoaderCGF::LoadStreamDataChunk(int nChunkId, void*& pStreamData, int& nStr
         return false;
     }
 
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
     if (pChunkDesc->chunkVersion == STREAM_DATA_CHUNK_DESC_0800::VERSION)
     {
@@ -3988,7 +3974,6 @@ bool CLoaderCGF::LoadPhysicsDataChunk(CNodeCGF* pNode, int nPhysGeomType, int nC
         return false;
     }
 
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     MESH_PHYSICS_DATA_CHUNK_DESC_0800& chunk = *(MESH_PHYSICS_DATA_CHUNK_DESC_0800*)pChunkDesc->data;
@@ -4008,7 +3993,8 @@ bool CLoaderCGF::LoadPhysicsDataChunk(CNodeCGF* pNode, int nPhysGeomType, int nC
 //////////////////////////////////////////////////////////////////////////
 bool CLoaderCGF::LoadFoliageInfoChunk(IChunkFile::ChunkDesc* pChunkDesc)
 {
-    if (pChunkDesc->chunkVersion != FOLIAGE_INFO_CHUNK_DESC::VERSION)
+    if (pChunkDesc->chunkVersion != FOLIAGE_INFO_CHUNK_DESC::VERSION &&
+        pChunkDesc->chunkVersion != FOLIAGE_INFO_CHUNK_DESC::VERSION2)
     {
         m_LastError.Format("Unknown version of FoliageInfo chunk");
         return false;
@@ -4020,6 +4006,7 @@ bool CLoaderCGF::LoadFoliageInfoChunk(IChunkFile::ChunkDesc* pChunkDesc)
     pChunkDesc->bSwapEndian = false;
 
     SFoliageInfoCGF& fi = *m_pCGF->GetFoliageInfo();
+    bool isSkinned = m_pCGF->GetExportInfo()->bSkinnedCGF;
     if (fi.nSpines = chunk.nSpines)
     {
         fi.nSkinnedVtx = chunk.nSkinnedVtx;
@@ -4027,30 +4014,99 @@ bool CLoaderCGF::LoadFoliageInfoChunk(IChunkFile::ChunkDesc* pChunkDesc)
         FOLIAGE_SPINE_SUB_CHUNK* const pSpineSrc = (FOLIAGE_SPINE_SUB_CHUNK*)(&chunk + 1);
         Vec3* const pSpineVtxSrc = (Vec3*)(&pSpineSrc[chunk.nSpines]);
         Vec4* const pSpineSegDimSrc = (Vec4*)(&pSpineVtxSrc[chunk.nSpineVtx]);
-        SMeshBoneMapping_uint8* const pBoneMappingSrc = (SMeshBoneMapping_uint8*)(&pSpineSegDimSrc[chunk.nSpineVtx]);
-        uint16* const pBoneIdsSrc = (uint16*)(&pBoneMappingSrc[chunk.nSkinnedVtx]);
+        //START: Per bone UDP for stiffness, damping and thickness for touch bending vegetation
+        float* pStiffness = new float[chunk.nSpineVtx];
+        float* pDamping = new float[chunk.nSpineVtx];
+        float* pThickness = new float[chunk.nSpineVtx];
+        SMeshBoneMapping_uint8* pBoneMappingSrc = nullptr;
+
+        if (pChunkDesc->chunkVersion == FOLIAGE_INFO_CHUNK_DESC::VERSION)
+        {
+            for (int i = 0; i < chunk.nSpineVtx; i++)
+            {
+                pStiffness[i] = SSpineRC::GetDefaultStiffness();
+                pDamping[i] = SSpineRC::GetDefaultDamping();
+                pThickness[i] = SSpineRC::GetDefaultThickness();
+            }
+            pBoneMappingSrc = (SMeshBoneMapping_uint8*)&pSpineSegDimSrc[chunk.nSpineVtx];
+        }
+        else
+        {
+            float* pStiffnessSrc = (float*)(&pSpineSegDimSrc[chunk.nSpineVtx]);
+            float* pDampingSrc = (float*)(&pStiffnessSrc[chunk.nSpineVtx]);
+            float* pThicknessSrc = (float*)(&pDampingSrc[chunk.nSpineVtx]);
+
+            if (bSwapEndianness)
+            {
+                SwapEndian(pStiffnessSrc, chunk.nSpineVtx, true);
+                SwapEndian(pDampingSrc, chunk.nSpineVtx, true);
+                SwapEndian(pThicknessSrc, chunk.nSpineVtx, true);
+            }
+
+            memcpy(pStiffness, pStiffnessSrc, sizeof(pStiffness[0]) * chunk.nSpineVtx);
+            memcpy(pDamping, pDampingSrc, sizeof(pStiffness[0]) * chunk.nSpineVtx);
+            memcpy(pThickness, pThicknessSrc, sizeof(pStiffness[0]) * chunk.nSpineVtx);
+
+            pBoneMappingSrc = (SMeshBoneMapping_uint8*)&pThicknessSrc[chunk.nSpineVtx];
+        }
+
+        //Add LOD support for touch bending vegetation
+        //Load bone mapping. Skinned CGF doesn't have chunkBoneIds because it doesn't need bone index remapping to mesh bone id.
+        if (isSkinned && chunk.nBoneIds == 0)
+        {
+            const char* pStart = (const char*)pBoneMappingSrc;
+            {
+                int numBoneMapping = *pStart;
+                pStart += sizeof(int);
+                int vertexCount = 0;
+
+                for (int i = 0; i < numBoneMapping; i++)
+                {
+                    const char* pCGFNodeName = pStart;
+                    pStart += CGF_NODE_NAME_LENGTH;
+                    memcpy(&vertexCount, pStart, sizeof(int));
+                    SMeshBoneMappingInfo_uint8* pBoneMappingEntry = new SMeshBoneMappingInfo_uint8(vertexCount);
+                    pStart += sizeof(int);
+                    memcpy(pBoneMappingEntry->pBoneMapping, pStart, sizeof(SMeshBoneMapping_uint8)*vertexCount);
+                    pStart += sizeof(SMeshBoneMapping_uint8)*vertexCount;
+
+                    if (bSwapEndianness)
+                    {
+                        SwapEndian(&pBoneMappingEntry->nVertexCount, 1, true);
+                        SwapEndian(pBoneMappingEntry->pBoneMapping, pBoneMappingEntry->nVertexCount, true);
+                    }
+                    fi.boneMappings[pCGFNodeName] = pBoneMappingEntry;
+                }
+            }
+        }
+        else
+        {
+            uint16* const pBoneIdsSrc = (uint16*)(&pBoneMappingSrc[chunk.nSkinnedVtx]);
+            if (bSwapEndianness)
+            {
+                SwapEndian(pBoneMappingSrc, chunk.nSkinnedVtx, true);
+                SwapEndian(pBoneIdsSrc, chunk.nBoneIds, true);
+            }
+            fi.pBoneMapping = new SMeshBoneMapping_uint8[chunk.nSkinnedVtx];
+            memcpy(fi.pBoneMapping, pBoneMappingSrc, sizeof(pBoneMappingSrc[0]) * chunk.nSkinnedVtx);
+            fi.chunkBoneIds.resize(chunk.nBoneIds);
+            memcpy(&fi.chunkBoneIds[0], pBoneIdsSrc, sizeof(fi.chunkBoneIds[0]) * chunk.nBoneIds);
+            COMPILE_TIME_ASSERT(sizeof(fi.chunkBoneIds[0]) == sizeof(pBoneIdsSrc[0]));
+        }
 
         if (bSwapEndianness)
         {
             SwapEndian(pSpineSrc, chunk.nSpines, true);
             SwapEndian(pSpineVtxSrc, chunk.nSpineVtx, true);
             SwapEndian(pSpineSegDimSrc, chunk.nSpineVtx, true);
-            SwapEndian(pBoneMappingSrc, chunk.nSkinnedVtx, true);
-            SwapEndian(pBoneIdsSrc, chunk.nBoneIds, true);
         }
 
         Vec3* const pSpineVtx = new Vec3[chunk.nSpineVtx];
         Vec4* const pSpineSegDim = new Vec4[chunk.nSpineVtx];
-        fi.pBoneMapping = new SMeshBoneMapping_uint8[chunk.nSkinnedVtx];
-        fi.chunkBoneIds.resize(chunk.nBoneIds);
-        fi.pSpines = new SSpineRC[chunk.nSpines];
-
         memcpy(pSpineVtx, pSpineVtxSrc, sizeof(pSpineVtx[0]) * chunk.nSpineVtx);
         memcpy(pSpineSegDim, pSpineSegDimSrc, sizeof(pSpineSegDim[0]) * chunk.nSpineVtx);
-        memcpy(fi.pBoneMapping, pBoneMappingSrc, sizeof(pBoneMappingSrc[0]) * chunk.nSkinnedVtx);
-        COMPILE_TIME_ASSERT(sizeof(fi.chunkBoneIds[0]) == sizeof(pBoneIdsSrc[0]));
-        memcpy(&fi.chunkBoneIds[0], pBoneIdsSrc, sizeof(fi.chunkBoneIds[0]) * chunk.nBoneIds);
 
+        fi.pSpines = new SSpineRC[chunk.nSpines];
         int i, j;
         for (i = j = 0; i < chunk.nSpines; j += fi.pSpines[i++].nVtx)
         {
@@ -4061,6 +4117,11 @@ bool CLoaderCGF::LoadFoliageInfoChunk(IChunkFile::ChunkDesc* pChunkDesc)
             fi.pSpines[i].iAttachSeg = pSpineSrc[i].iAttachSeg - 1;
             fi.pSpines[i].pVtx = pSpineVtx + j;
             fi.pSpines[i].pSegDim = pSpineSegDim + j;
+
+            // Per bone data for stiffness, damping and thickness for touch bending vegetation
+            fi.pSpines[i].pStiffness = pStiffness + j;
+            fi.pSpines[i].pDamping = pDamping + j;
+            fi.pSpines[i].pThickness = pThickness + j;
         }
     }
 
@@ -4085,7 +4146,6 @@ CMaterialCGF* CLoaderCGF::LoadMaterialFromChunk(int nChunkId)
         return 0;
     }
 
-    FUNCTION_PROFILER_3DENGINE;
     LOADING_TIME_PROFILE_SECTION;
 
     if (pChunkDesc->chunkType != ChunkType_MtlName)
@@ -4246,7 +4306,7 @@ CMaterialCGF* CLoaderCGF::LoadMaterialNameChunk(IChunkFile::ChunkDesc* pChunkDes
 
         if (pMtlCGF->nPhysicalizeType != PHYS_GEOM_TYPE_NONE &&
             (pMtlCGF->nPhysicalizeType < PHYS_GEOM_TYPE_DEFAULT ||
-             pMtlCGF->nPhysicalizeType > PHYS_GEOM_TYPE_DEFAULT_PROXY))
+                pMtlCGF->nPhysicalizeType > PHYS_GEOM_TYPE_DEFAULT_PROXY))
         {
             m_LastError.Format("Invalid physicalize type in material name chunk (0x%08x) in %s, %s", pMtlCGF->nPhysicalizeType, pMtlCGF->name, m_filename);
             return NULL;
@@ -4293,7 +4353,7 @@ void CLoaderCGF::Warning(const char* szFormat, ...)
         char szBuffer[1024];
         va_list args;
         va_start(args, szFormat);
-        vsprintf_s(szBuffer, szFormat, args);
+        azvsprintf(szBuffer, szFormat, args);
         m_pListener->Warning(szBuffer);
         va_end(args);
     }

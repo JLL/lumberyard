@@ -15,7 +15,8 @@
 #include "TrackViewAnimNode.h"
 #include "TrackViewTrack.h"
 #include "TrackViewSequence.h"
-#include "Maestro/Types/AnimNodeType.h"
+#include <Maestro/Types/AnimNodeType.h>
+#include <Maestro/Bus/EditorSequenceComponentBus.h>
 
 ////////////////////////////////////////////////////////////////////////////
 void CTrackViewKeyConstHandle::GetKey(IKey* pKey) const
@@ -68,9 +69,35 @@ bool CTrackViewKeyHandle::IsSelected() const
 ////////////////////////////////////////////////////////////////////////////
 void CTrackViewKeyHandle::SetTime(float time, bool notifyListeners)
 {
-    assert(m_bIsValid);
+    AZ_Assert(m_bIsValid, "Expected a valid key handle.");
 
+    // Flag the current key, because the key handle may become invalid
+    // after the time is set and it is potentially sorted into a different
+    // index.    
+    m_pTrack->SetSortMarkerKey(m_keyIndex, true);
+
+    // set the new time, this may cause a sort that reorders the keys, making
+    // m_keyIndex incorrect.
     m_pTrack->SetKeyTime(m_keyIndex, time, notifyListeners);
+
+    // If the key at this index changed because of the key sort by time.
+    // We need to search through the keys now and find the marker.
+    if (!m_pTrack->IsSortMarkerKey(m_keyIndex))
+    {
+        CTrackViewKeyBundle allKeys = m_pTrack->GetAllKeys();
+        for (int x = 0; x < allKeys.GetKeyCount(); x++)
+        {
+            unsigned int curIndex = allKeys.GetKey(x).GetIndex();
+            if (m_pTrack->IsSortMarkerKey(curIndex))
+            {
+                m_keyIndex = curIndex;
+                break;
+            }
+        }
+    }
+
+    // clear the sort marker
+    m_pTrack->SetSortMarkerKey(m_keyIndex, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -106,12 +133,12 @@ const char* CTrackViewKeyHandle::GetDescription() const
 }
 
 ////////////////////////////////////////////////////////////////////////////
-void CTrackViewKeyHandle::Offset(float offset)
+void CTrackViewKeyHandle::Offset(float offset, bool notifyListeners)
 {
-    assert(m_bIsValid);
+    AZ_Assert(m_bIsValid, "Expected key handle to be in a valid state.");
 
     float newTime = m_pTrack->GetKeyTime(m_keyIndex) + offset;
-    m_pTrack->SetKeyTime(m_keyIndex, newTime);
+    m_pTrack->SetKeyTime(m_keyIndex, newTime, notifyListeners);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -292,7 +319,6 @@ CTrackViewKeyHandle CTrackViewKeyBundle::GetSingleSelectedKey()
 CTrackViewNode::CTrackViewNode(CTrackViewNode* pParent)
     : m_pParentNode(pParent)
     , m_bSelected(false)
-    , m_bExpanded(false)
     , m_bHidden(false)
 {
 }
@@ -363,7 +389,7 @@ CTrackViewNode* CTrackViewNode::GetAboveNode() const
 
     // Find last node in sibling tree
     CTrackViewNode* pCurrentNode = pPrevSibling;
-    while (pCurrentNode && pCurrentNode->GetChildCount() > 0 && pCurrentNode->IsExpanded())
+    while (pCurrentNode && pCurrentNode->GetChildCount() > 0 && pCurrentNode->GetExpanded())
     {
         pCurrentNode = pCurrentNode->GetChild(pCurrentNode->GetChildCount() - 1);
     }
@@ -375,7 +401,7 @@ CTrackViewNode* CTrackViewNode::GetAboveNode() const
 CTrackViewNode* CTrackViewNode::GetBelowNode() const
 {
     const unsigned int childCount = GetChildCount();
-    if (childCount > 0 && IsExpanded())
+    if (childCount > 0 && GetExpanded())
     {
         return GetChild(0);
     }
@@ -516,26 +542,6 @@ const CTrackViewSequence* CTrackViewNode::GetSequenceConst() const
     return nullptr;
 }
 
-
-
-//////////////////////////////////////////////////////////////////////////
-void CTrackViewNode::SetExpanded(bool bExpanded)
-{
-    if (bExpanded != m_bExpanded)
-    {
-        m_bExpanded = bExpanded;
-
-        if (bExpanded)
-        {
-            GetSequence()->OnNodeChanged(this, ITrackViewSequenceListener::eNodeChangeType_Expanded);
-        }
-        else
-        {
-            GetSequence()->OnNodeChanged(this, ITrackViewSequenceListener::eNodeChangeType_Collapsed);
-        }
-    }
-}
-
 //////////////////////////////////////////////////////////////////////////
 void CTrackViewNode::AddNode(CTrackViewNode* pNode)
 {
@@ -566,17 +572,14 @@ namespace
 {
     static int GetNodeOrder(AnimNodeType nodeType)
     {
-        assert(nodeType < AnimNodeType::Num);
+        AZ_Assert(nodeType < AnimNodeType::Num, "Expected nodeType to be less than AnimNodeType::Num");
 
         // note: this array gets over-allocated and is sparsely populated because the eAnimNodeType enums are not sequential in IMovieSystem.h
         // I wonder if the original authors intended this? Not a big deal, just some trivial memory wastage.
         static int nodeOrder[static_cast<int>(AnimNodeType::Num)];
         nodeOrder[static_cast<int>(AnimNodeType::Invalid)] = 0;
         nodeOrder[static_cast<int>(AnimNodeType::Director)] = 1;
-        nodeOrder[static_cast<int>(AnimNodeType::Camera)] = 2;
-        nodeOrder[static_cast<int>(AnimNodeType::Entity)] = 3;
         nodeOrder[static_cast<int>(AnimNodeType::Alembic)] = 4;
-        nodeOrder[static_cast<int>(AnimNodeType::GeomCache)] = 5;
         nodeOrder[static_cast<int>(AnimNodeType::CVar)] = 6;
         nodeOrder[static_cast<int>(AnimNodeType::ScriptVar)] = 7;
         nodeOrder[static_cast<int>(AnimNodeType::Material)] = 8;
@@ -622,7 +625,7 @@ bool CTrackViewNode::operator<(const CTrackViewNode& otherNode) const
         if (thisTypeOrder == otherTypeOrder)
         {
             // Same node type, sort by name
-            return stricmp(thisAnimNode.GetName(), otherAnimNode.GetName()) < 0;
+            return azstricmp(thisAnimNode.GetName(), otherAnimNode.GetName()) < 0;
         }
 
         return thisTypeOrder < otherTypeOrder;
@@ -634,7 +637,7 @@ bool CTrackViewNode::operator<(const CTrackViewNode& otherNode) const
         if (thisTrack.GetParameterType() == otherTrack.GetParameterType())
         {
             // Same parameter type, sort by name
-            return stricmp(thisTrack.GetName(), otherTrack.GetName()) < 0;
+            return azstricmp(thisTrack.GetName(), otherTrack.GetName()) < 0;
         }
 
         return thisTrack.GetParameterType() < otherTrack.GetParameterType();

@@ -17,7 +17,6 @@
 #include <MCore/Source/StandardHeaders.h>
 #include <EMotionFX/CommandSystem/Source/SelectionCommands.h>
 #include <MysticQt/Source/ButtonGroup.h>
-#include <MysticQt/Source/SearchButton.h>
 #include "EMStudioConfig.h"
 #include "NodeHierarchyWidget.h"
 #include <QDialog>
@@ -44,7 +43,6 @@ namespace EMStudio
 
     public:
         NodeSelectionWindow(QWidget* parent, bool useSingleSelection);
-        virtual ~NodeSelectionWindow();
 
         MCORE_INLINE NodeHierarchyWidget* GetNodeHierarchyWidget()                                                                { return mHierarchyWidget; }
         void Update(uint32 actorInstanceID, CommandSystem::SelectionList* selectionList = nullptr)                                { mHierarchyWidget->Update(actorInstanceID, selectionList); }

@@ -20,6 +20,7 @@
 
 #include <Terrain/Texture/MacroTexture.h>
 #include <Terrain/Texture/TexturePool.h>
+#include <Terrain/Bus/LegacyTerrainBus.h>
 #include <AzCore/std/function/function_fwd.h> // for callbacks
 #include "Environment/OceanEnvironmentBus.h"
 
@@ -168,6 +169,7 @@ struct SNameChunk
 class CTerrain
     : public ITerrain
     , public Cry3DEngineBase
+    , public LegacyTerrain::CryTerrainRequestBus::Handler
 {
     friend class CTerrainNode;
 public:
@@ -178,16 +180,18 @@ public:
     CTerrain(const STerrainInfo& TerrainInfo);
     ~CTerrain();
 
-    float GetZ(Meter x, Meter y) const;
-    float GetBilinearZ(MeterF x1, MeterF y1) const;
+    virtual float GetZ(Meter x, Meter y) const;
+    virtual float GetBilinearZ(MeterF x1, MeterF y1) const;
 
-    SurfaceWeight GetSurfaceWeight(Meter x, Meter y) const;
+    virtual SurfaceWeight GetSurfaceWeight(Meter x, Meter y) const;
 
-    Vec3 GetTerrainSurfaceNormal(Vec3 vPos, float fRange);
-    void GetTerrainAlignmentMatrix(const Vec3& vPos, const float amount, Matrix33& matrix33);
+    virtual Vec3 GetTerrainSurfaceNormal(Vec3 vPos, float fRange);
+    virtual void GetTerrainAlignmentMatrix(const Vec3& vPos, const float amount, Matrix33& matrix33);
 
-    bool IsHole(Meter x, Meter y) const;
-    bool IsMeshQuadFlipped(const Meter x, const Meter y, const Meter nUnitSize) const;
+    void GetMaterials(AZStd::vector<_smart_ptr<IMaterial>>& materials) override;
+
+    virtual bool IsHole(Meter x, Meter y) const;
+    virtual bool IsMeshQuadFlipped(const Meter x, const Meter y, const Meter nUnitSize) const;
 
     struct SRayTrace
     {
@@ -238,7 +242,7 @@ public:
     bool TryGetTextureStatistics(MacroTexture::TileStatistics& statistics) const;
     bool IsTextureStreamingInProgress() const;
     void CloseTerrainTextureFile();
-    void SetTerrainSectorTexture(int nTexSectorX, int nTexSectorY, unsigned int textureId, bool bMergeNotAllowed);
+    void SetTerrainSectorTexture(int nTexSectorX, int nTexSectorY, unsigned int textureId, unsigned int textureSizeX, unsigned int textureSizeY, bool bMergeNotAllowed);
 
     _smart_ptr<IRenderMesh> MakeAreaRenderMesh(const Vec3& vPos, float fRadius, _smart_ptr<IMaterial> pMat, const char* szLSourceName, Plane* planes);
     bool RenderArea(Vec3 vPos, float fRadius, _smart_ptr<IRenderMesh>& arrLightRenderMeshs, CRenderObject* pObj, _smart_ptr<IMaterial> pMaterial, const char* szComment, float* pCustomData, Plane* planes, const SRenderingPassInfo& passInfo);
@@ -320,6 +324,9 @@ public:
     static void LoadDataFromFile_FixAlignment(AZ::IO::HandleType& fileHandle, int& nDataSize);
     static void LoadDataFromFile_FixAlignment(uint8*& f, int& nDataSize);
     //
+
+    // LegacyTerrain::CryTerrainRequestBus
+    void RequestTerrainUpdate() override;
 
 private:
     template <class T>

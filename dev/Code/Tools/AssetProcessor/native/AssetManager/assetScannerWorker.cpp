@@ -11,11 +11,12 @@
 */
 #include "native/AssetManager/assetScannerWorker.h"
 #include "native/AssetManager/assetScanner.h"
-#include "native/utilities/AssetUtils.h"
+#include "native/utilities/assetUtils.h"
 #include "native/utilities/PlatformConfiguration.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QFileInfoList>
+#include <QDateTime>
 
 using namespace AssetProcessor;
 
@@ -31,6 +32,7 @@ void AssetScannerWorker::StartScan()
     Q_ASSERT(QThread::currentThread() == this->thread());
 
     m_fileList.clear();
+    m_folderList.clear();
     m_doScan = true;
 
     AZ_TracePrintf(AssetProcessor::ConsoleChannel, "Scanning file system for changes...\n");
@@ -50,6 +52,7 @@ void AssetScannerWorker::StartScan()
     if (!m_doScan)
     {
         m_fileList.clear();
+        m_folderList.clear();
         Q_EMIT ScanningStateChanged(AssetProcessor::AssetScanningStatus::Stopped);
         return;
     }
@@ -100,6 +103,7 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
         }
 
         QString absPath = entry.absoluteFilePath();
+        const bool isDirectory = entry.isDir();
 
         // Filtering out excluded files
         if (m_platformConfiguration->IsFileExcluded(absPath))
@@ -107,15 +111,17 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
             continue;
         }
 
-        if (entry.isDir())
+        if (isDirectory)
         {
             //Entry is a directory
+            AZ::u64 modTime = entry.lastModified().toMSecsSinceEpoch();
+            m_folderList.insert(AssetFileInfo(absPath, modTime, isDirectory));
             ScanFolderInfo tempScanFolderInfo(absPath, "", "", "", false, true);
             ScanForSourceFiles(tempScanFolderInfo);
         }
         else
         {
-            // Filtering out metadata files as well, there is no need to send both the source file and the metadafiles 
+            // Filtering out metadata files as well, there is no need to send both the source file and the metadata files 
             // to the apm for analysis, just sending the source file should be enough
             bool isMetaFile = false;
             for (int idx = 0; idx < m_platformConfiguration->MetaDataFileTypesCount(); idx++)
@@ -135,7 +141,8 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
             }
 
             //Entry is a file
-            m_fileList.insert(absPath);
+            AZ::u64 modTime = entry.lastModified().toMSecsSinceEpoch();
+            m_fileList.insert(AssetFileInfo(absPath, modTime, isDirectory));
         }
     }
 }
@@ -143,15 +150,10 @@ void AssetScannerWorker::ScanForSourceFiles(ScanFolderInfo scanFolderInfo)
 void AssetScannerWorker::EmitFiles()
 {
     //Loop over all source asset files and send them up the chain:
-    for (const QString& fileEntries : m_fileList)
-    {
-        if (!m_doScan)
-        {
-            break;
-        }
-        Q_EMIT FileOfInterestFound(fileEntries);
-    }
+    Q_EMIT FilesFound(m_fileList);
     m_fileList.clear();
+    Q_EMIT FoldersFound(m_folderList);
+    m_folderList.clear();
 }
 
 

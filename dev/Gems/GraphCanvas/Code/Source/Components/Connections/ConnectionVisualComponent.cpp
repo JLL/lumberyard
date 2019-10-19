@@ -114,8 +114,22 @@ namespace GraphCanvas
     {
         return m_connectionGraphicsItem->isSelected();
     }
-	
-	void ConnectionVisualComponent::CreateConnectionVisual()
+
+    QPainterPath ConnectionVisualComponent::GetOutline() const
+    {
+        return m_connectionGraphicsItem->path();
+    }
+    void ConnectionVisualComponent::SetZValue(int zValue)
+    {
+        m_connectionGraphicsItem->setZValue(zValue);
+    }
+
+    int ConnectionVisualComponent::GetZValue() const
+    {
+        return m_connectionGraphicsItem->zValue();
+    }
+
+    void ConnectionVisualComponent::CreateConnectionVisual()
     {
         m_connectionGraphicsItem = AZStd::make_unique<ConnectionGraphicsItem>(GetEntityId());
     }
@@ -123,8 +137,8 @@ namespace GraphCanvas
     ////////////////////////////
     // ConnectionGraphicsItem
     ////////////////////////////
-	
-	qreal ConnectionGraphicsItem::VectorLength(QPointF vectorPoint)
+
+    qreal ConnectionGraphicsItem::VectorLength(QPointF vectorPoint)
     {
         return qSqrt(vectorPoint.x() * vectorPoint.x() + vectorPoint.y() * vectorPoint.y());
     }
@@ -133,6 +147,7 @@ namespace GraphCanvas
         : RootGraphicsItem(connectionEntityId)
         , m_trackMove(false)
         , m_moveSource(false)
+        , m_curveType(Styling::ConnectionCurveType::Straight)
         , m_offset(0.0)
         , m_connectionEntityId(connectionEntityId)
     {
@@ -159,6 +174,8 @@ namespace GraphCanvas
 
         ConnectionUIRequestBus::Handler::BusConnect(GetConnectionEntityId());
 
+        SceneMemberNotificationBus::Handler::BusConnect(GetConnectionEntityId());
+
         OnStyleChanged();
         UpdateConnectionPath();
 
@@ -167,6 +184,7 @@ namespace GraphCanvas
 
     void ConnectionGraphicsItem::Deactivate()
     {
+        SceneMemberNotificationBus::Handler::BusDisconnect();
         ConnectionUIRequestBus::Handler::BusDisconnect();
         ConnectionNotificationBus::Handler::BusDisconnect();
         StyleNotificationBus::Handler::BusDisconnect();
@@ -187,11 +205,20 @@ namespace GraphCanvas
 
     void ConnectionGraphicsItem::UpdateOffset()
     {
+        auto currentTime = AZStd::chrono::system_clock::now();
+        auto currentDuration = currentTime.time_since_epoch();
+        AZStd::chrono::milliseconds currentUpdate = AZStd::chrono::duration_cast<AZStd::chrono::milliseconds>(currentDuration);
+
+        float delta = (currentUpdate - m_lastUpdate).count() * 0.001f;
+
+        m_lastUpdate = currentUpdate;
+
         // This works for all default dash/dot patterns, for now
         static const double offsetReset = 24.0;
 
         // TODO: maybe calculate this based on an "animation-speed" attribute?
-        m_offset += 0.25;
+        //       For now. 1.35 resets per second?
+        m_offset += offsetReset * 1.35f * delta;
 
         if (m_offset >= offsetReset)
         {
@@ -253,6 +280,10 @@ namespace GraphCanvas
         {
             if (!AZ::SystemTickBus::Handler::BusIsConnected())
             {
+                auto currentTime = AZStd::chrono::system_clock::now();
+                auto currentDuration = currentTime.time_since_epoch();
+                m_lastUpdate = AZStd::chrono::duration_cast<AZStd::chrono::milliseconds>(currentDuration);
+
                 AZ::SystemTickBus::Handler::BusConnect();
             }
         }
@@ -261,7 +292,6 @@ namespace GraphCanvas
             AZ::SystemTickBus::Handler::BusDisconnect();
         }
 
-        setZValue(m_style.GetAttribute(Styling::Attribute::ZValue, 0));
         setOpacity(m_style.GetAttribute(Styling::Attribute::Opacity, 1.0f));
 
         UpdateConnectionPath();
@@ -295,8 +325,23 @@ namespace GraphCanvas
         QPointF start;
         ConnectionRequestBus::EventResult(start, GetEntityId(), &ConnectionRequests::GetSourcePosition);
 
+        QPointF startJutDirection;
+        SlotUIRequestBus::EventResult(startJutDirection, sourceId, &SlotUIRequests::GetJutDirection);
+
         QPointF end;
         ConnectionRequestBus::EventResult(end, GetEntityId(), &ConnectionRequests::GetTargetPosition);
+
+        QPointF endJutDirection;
+        SlotUIRequestBus::EventResult(endJutDirection, targetId, &SlotUIRequests::GetJutDirection);            
+
+        if (!sourceId.IsValid())
+        {
+            startJutDirection = -endJutDirection;
+        }
+        else if (!targetId.IsValid())
+        {
+            endJutDirection = -startJutDirection;
+        }
 
         bool loopback = false;
         float nodeHeight = 0;
@@ -336,9 +381,7 @@ namespace GraphCanvas
 
         QPainterPath path = QPainterPath(start);
 
-        Styling::Curves curve = m_style.GetAttribute(Styling::Attribute::LineCurve, Styling::Curves::Curved);
-
-        if (curve == Styling::Curves::Curved)
+        if (m_curveType == Styling::ConnectionCurveType::Curved)
         {
             // Scale the control points based on the length of the line to make sure the curve looks pretty
             QPointF offset = (end - start);
@@ -355,11 +398,11 @@ namespace GraphCanvas
             {
                 magnitude = AZ::GetMax(qSqrt(VectorLength(offset)) * 5, offset.x() * 0.5f);
             }
-            magnitude = AZ::GetClamp(magnitude, (qreal) 10.0f, qMax(VectorLength(midVector), (qreal) 10.0f));
+            magnitude = AZ::GetClamp(magnitude, (qreal) 10.0f, qMax(VectorLength(midVector), (qreal) 10.0f));            
 
             // Makes the line come out horizontally from the start and end points
-            QPointF offsetStart = start + QPointF(magnitude, 0);
-            QPointF offsetEnd = end - QPointF(magnitude, 0);
+            QPointF offsetStart = start + startJutDirection * magnitude;
+            QPointF offsetEnd = end + endJutDirection * magnitude;
 
             if (!loopback)
             {
@@ -380,8 +423,8 @@ namespace GraphCanvas
         {
             float connectionJut = m_style.GetAttribute(Styling::Attribute::ConnectionJut, 0.0f);
 
-            QPointF startOffset = start + QPointF(connectionJut, 0);
-            QPointF endOffset = end - QPointF(connectionJut, 0);
+            QPointF startOffset = start + startJutDirection * connectionJut;
+            QPointF endOffset = end + endJutDirection * connectionJut;
             path.lineTo(startOffset);
             path.lineTo(endOffset);
             path.lineTo(end);
@@ -391,6 +434,47 @@ namespace GraphCanvas
         update();
 
         OnPathChanged();
+        ConnectionVisualNotificationBus::Event(GetEntityId(), &ConnectionVisualNotifications::OnConnectionPathUpdated);
+    }
+
+    void ConnectionGraphicsItem::OnSceneMemberHidden()
+    {
+        AZ::EntityId sourceId;
+        ConnectionRequestBus::EventResult(sourceId, GetConnectionEntityId(), &ConnectionRequests::GetSourceSlotId);
+        VisualNotificationBus::MultiHandler::BusDisconnect(sourceId);
+
+        AZ::EntityId targetId;
+        ConnectionRequestBus::EventResult(targetId, GetConnectionEntityId(), &ConnectionRequests::GetTargetSlotId);
+        VisualNotificationBus::MultiHandler::BusDisconnect(targetId);
+    }
+
+    void ConnectionGraphicsItem::OnSceneMemberShown()
+    {
+        AZ::EntityId sourceId;
+        ConnectionRequestBus::EventResult(sourceId, GetConnectionEntityId(), &ConnectionRequests::GetSourceSlotId);
+        VisualNotificationBus::MultiHandler::BusConnect(sourceId);
+
+        AZ::EntityId targetId;
+        ConnectionRequestBus::EventResult(targetId, GetConnectionEntityId(), &ConnectionRequests::GetTargetSlotId);
+        VisualNotificationBus::MultiHandler::BusConnect(targetId);
+
+        UpdateConnectionPath();
+    }
+
+    void ConnectionGraphicsItem::OnSceneSet(const GraphId& graphId)
+    {
+        m_editorId = EditorId();
+        SceneRequestBus::EventResult(m_editorId, graphId, &SceneRequests::GetEditorId);
+
+        AssetEditorSettingsNotificationBus::Handler::BusDisconnect();
+        AssetEditorSettingsNotificationBus::Handler::BusConnect(m_editorId);
+
+        UpdateCurveStyle();
+    }
+
+    void ConnectionGraphicsItem::OnSettingsChanged()
+    {        
+        UpdateCurveStyle();
     }
 
     const AZ::EntityId& ConnectionGraphicsItem::GetConnectionEntityId() const
@@ -414,9 +498,34 @@ namespace GraphCanvas
         return targetId;
     }
 
+    EditorId ConnectionGraphicsItem::GetEditorId() const
+    {
+        return m_editorId;
+    }
+
+    void ConnectionGraphicsItem::UpdateCurveStyle()
+    {
+        Styling::ConnectionCurveType oldType = m_curveType;
+
+        m_curveType = GetCurveStyle();
+
+        if (m_curveType != oldType)
+        {
+            UpdateConnectionPath();
+        }
+    }
+
+    Styling::ConnectionCurveType ConnectionGraphicsItem::GetCurveStyle() const
+    {
+        Styling::ConnectionCurveType curveStyle = Styling::ConnectionCurveType::Straight;
+        AssetEditorSettingsRequestBus::EventResult(curveStyle, GetEditorId(), &AssetEditorSettingsRequests::GetConnectionCurveType);
+        return curveStyle;
+    }
+
     void ConnectionGraphicsItem::UpdatePen()
     {
         QPen pen = m_style.GetPen(Styling::Attribute::LineWidth, Styling::Attribute::LineStyle, Styling::Attribute::LineColor, Styling::Attribute::CapStyle);
+
         setPen(pen);
     }
 
@@ -439,30 +548,6 @@ namespace GraphCanvas
         qreal padding = m_style.GetAttribute(Styling::Attribute::LineSelectionPadding, 0);
         stroker.setWidth(padding);
         return stroker.createStroke(path());
-    }
-
-    void ConnectionGraphicsItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* contextMenuEvent)
-    {
-        contextMenuEvent->ignore();
-
-        AZ::EntityId sceneId;
-        SceneMemberRequestBus::EventResult(sceneId, GetEntityId(), &SceneMemberRequests::GetScene);
-
-        bool isCurrentIdAlreadySelected = isSelected();
-        bool shouldAppendSelection = contextMenuEvent->modifiers().testFlag(Qt::ControlModifier);
-
-        // clear the current selection if you are not multi selecting and clicking on an unselected node
-        if (!isCurrentIdAlreadySelected && !shouldAppendSelection)
-        {
-            GraphCanvas::SceneRequestBus::Event(sceneId, &GraphCanvas::SceneRequests::ClearSelection);
-        }
-
-        if (!isCurrentIdAlreadySelected)
-        {
-            setSelected(true);
-        }
-
-        SceneUIRequestBus::Event(sceneId, &SceneUIRequests::OnConnectionContextMenuEvent, GetEntityId(), contextMenuEvent);
     }
  
     void ConnectionGraphicsItem::mousePressEvent(QGraphicsSceneMouseEvent* mouseEvent)
@@ -549,9 +634,14 @@ namespace GraphCanvas
                 AZ::EntityId sceneId;
                 SceneMemberRequestBus::EventResult(sceneId, GetEntityId(), &SceneMemberRequests::GetScene);
                 SceneRequestBus::Event(sceneId, &SceneRequests::ClearSelection);
-            }
 
-            setSelected(true);
+                setSelected(true);
+            }
+            else
+            {
+                setSelected(!isSelected());
+            }            
+            
             m_trackMove = false;
         }
         else
@@ -559,7 +649,6 @@ namespace GraphCanvas
             RootGraphicsItem<QGraphicsPathItem>::mouseReleaseEvent(mouseEvent);
         }
     }
-
 
     void ConnectionGraphicsItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget /*= nullptr*/)
     {

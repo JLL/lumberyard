@@ -11,17 +11,6 @@
 */
 #pragma once
 
-
-#if defined(AZ_RESTRICTED_PLATFORM)
-#undef AZ_RESTRICTED_SECTION
-#define MULTIPLAYERUTILS_H_SECTION_1 1
-#define MULTIPLAYERUTILS_H_SECTION_2 2
-#define MULTIPLAYERUTILS_H_SECTION_3 3
-#define MULTIPLAYERUTILS_H_SECTION_4 4
-#define MULTIPLAYERUTILS_H_SECTION_5 5
-#define MULTIPLAYERUTILS_H_SECTION_6 6
-#endif
-
 #ifndef GEM_MULTIPLAYER_MULTIPLAYERUTILS_H
 #define GEM_MULTIPLAYER_MULTIPLAYERUTILS_H
 
@@ -32,19 +21,19 @@
 
 #include <GridMate/Carrier/Driver.h>
 
+namespace Platform
+{
+    void InitCarrierDesc(GridMate::CarrierDesc& carrierDesc);
+}
 
-#pragma push_macro("max")	// files included through gridmate undef max, which causes later compile issues for modules that have std:max in their header
+
+#pragma push_macro("max")   // files included through gridmate undef max, which causes later compile issues for modules that have std:max in their header
 
 #ifdef NET_SUPPORT_SECURE_SOCKET_DRIVER
 #   include <GridMate/Carrier/SecureSocketDriver.h>
 #endif
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_1
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
-
-#pragma pop_macro("max")	// restore previous disabling of max
+#pragma pop_macro("max")    // restore previous disabling of max
 
 #include <Multiplayer/IMultiplayerGem.h>
 #include <CertificateManager/ICertificateManagerGem.h>
@@ -57,11 +46,11 @@ namespace Multiplayer
         {
             AZ_Assert(str, "Invalid value");
 
-            if (!stricmp(str, "IPv4"))
+            if (!azstricmp(str, "IPv4"))
             {
                 return GridMate::Driver::BSD_AF_INET;
             }
-            else if (!stricmp(str, "IPv6"))
+            else if (!azstricmp(str, "IPv6"))
             {
                 return GridMate::Driver::BSD_AF_INET6;
             }
@@ -76,7 +65,7 @@ namespace Multiplayer
         {
             if (!carrierDesc.m_simulator)
             {
-                EBUS_EVENT_RESULT(carrierDesc.m_simulator,Multiplayer::MultiplayerRequestBus,GetSimulator);                
+                EBUS_EVENT_RESULT(carrierDesc.m_simulator,Multiplayer::MultiplayerRequestBus,GetSimulator);
             }
 
             carrierDesc.m_port = gEnv->pConsole->GetCVar("cl_clientport")->GetIVal();
@@ -90,10 +79,7 @@ namespace Multiplayer
 
             ApplyDisconnectDetectionSettings(carrierDesc);
 
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_2
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
+            Platform::InitCarrierDesc(carrierDesc);
         }
 
         static void ApplyDisconnectDetectionSettings(GridMate::CarrierDesc& carrierDesc)
@@ -141,51 +127,13 @@ namespace Multiplayer
 
                 if (!mapName.empty())
                 {
-                    // If we have an actual level to load, load it.                    
+                    // If we have an actual level to load, load it.
                     AZStd::string loadCommand = "map ";
                     loadCommand += mapName;
                     gEnv->pConsole->ExecuteString(loadCommand.c_str(), false, true);
                 }
             }
         }    
-    };
-
-    struct Durango // ACCEPTED_USE
-    {
-        static void StartSessionService(GridMate::IGridMate* gridMate)
-        {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_3
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
-        }
-
-        static void StopSessionService(GridMate::IGridMate* gridMate)
-        {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_4
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
-        }
-    };
-
-    struct Orbis // ACCEPTED_USE
-    {
-        static void StartSessionService(GridMate::IGridMate* gridMate)
-        {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_5
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
-        }
-
-        static void StopSessionService(GridMate::IGridMate* gridMate)
-        {
-#if defined(AZ_RESTRICTED_PLATFORM)
-#define AZ_RESTRICTED_SECTION MULTIPLAYERUTILS_H_SECTION_6
-#include AZ_RESTRICTED_FILE(MultiplayerUtils_h, AZ_RESTRICTED_PLATFORM)
-#endif
-        }
     };
 
     struct LAN

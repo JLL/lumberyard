@@ -41,6 +41,7 @@ export class AwsContext {
     private _usermanagement: UserManagement; 
     private _cognitoIdentity: any;
     private _cognitoIdentityService: any;
+    private _cognitoUserPool: any;
     private _apigateway: any;
     private _cloudWatchLogs: any;    
     private _projectName: string = '';
@@ -53,21 +54,13 @@ export class AwsContext {
         if (value === undefined || value === null)
             return;
 
-        let configBucketParts = value.split('-');
+        let configBucketParts = value.split('-configuration-');
 
-        let name = []
-        for (var i = 0; i < configBucketParts.length - 2; i++) {
-            name.push(configBucketParts[i])
-        }
-
-        this._projectName = name.join('');
+        this._projectName = configBucketParts[0];
     }
 
     get cognitoUserPool(): any {
-        return new AWSCognito.CognitoIdentityServiceProvider.CognitoUserPool({
-            UserPoolId: this._userPoolId,
-            ClientId: this._cognitoClientId
-        });
+        return this._cognitoUserPool
     }
 
     get clientId(): string {
@@ -202,7 +195,11 @@ export class AwsContext {
         this._region = region;
         this._userPoolId = userPoolId;
         this._cognitoClientId = clientId;
-        this._identityPoolId = identityPoolId;                
+        this._identityPoolId = identityPoolId;
+        this._cognitoUserPool = new AWSCognito.CognitoIdentityServiceProvider.CognitoUserPool({
+            UserPoolId: this._userPoolId,
+            ClientId: this._cognitoClientId
+        });             
         let config = {
             region: region,
             credentials: new AWS.CognitoIdentityCredentials({
@@ -221,7 +218,7 @@ export class AwsContext {
     }
 
     public initializeServices(): void {
-        this.s3 = this.awsClient("S3", { apiVersion: "2006-03-01", region: this.region });
+        this.s3 = this.awsClient("S3", { apiVersion: "2006-03-01", region: this.region, signatureVersion:"v4" });
         this.cloudFormation = this.awsClient("CloudFormation", { apiVersion: "2010-05-15", region: this.region });
         this.cognitoIdentityService = this.awsClient("CognitoIdentityServiceProvider", { apiVersion: "2016-04-18", region: this.region });
         this.cognitoIdentity = this.awsClient("CognitoIdentity", { apiVersion: "2014-06-30", region: this.region });

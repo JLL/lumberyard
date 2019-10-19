@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/Entity.h>
@@ -55,6 +54,17 @@ namespace AZ
 
         AZ_Warning("System", false, "Can't get component %p entity ID as it is not attached to an entity yet!", this);
         return EntityId();
+    }
+
+    NamedEntityId Component::GetNamedEntityId() const
+    {
+        if (m_entity)
+        {
+            return NamedEntityId(m_entity->GetId(), m_entity->GetName());
+        }
+
+        AZ_Warning("System", false, "Can't get component %p entity ID as it is not attached to an entity yet!", this);
+        return NamedEntityId();
     }
 
     //=========================================================================
@@ -167,6 +177,3 @@ namespace AZ
         delete this;
     }
 } // namespace AZ
-
-
-#endif // #ifndef AZ_UNITY_BUILD

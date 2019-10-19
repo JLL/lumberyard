@@ -28,14 +28,12 @@ namespace LmbrCentral
         virtual bool ExecuteSourceTrigger(
             const Audio::TAudioControlID triggerID,
             const Audio::SAudioCallBackInfos& callbackInfo,
-            const Audio::TAudioControlID& sourceId
-        ) = 0;
+            const Audio::SAudioSourceInfo& sourceInfo) = 0;
 
         //! Execute a single ATL trigger on a proxy
         virtual bool ExecuteTrigger(
             const Audio::TAudioControlID triggerID,
-            const Audio::SAudioCallBackInfos& callbackInfo
-            ) = 0;
+            const Audio::SAudioCallBackInfos& callbackInfo) = 0;
 
         //! Kill a single or all ATL triggers on a proxy
         virtual void KillTrigger(const Audio::TAudioControlID triggerID) = 0;
@@ -58,6 +56,9 @@ namespace LmbrCentral
 
         //! Set the position of the audio proxy directly.
         virtual void SetPosition(const Audio::SATLWorldPosition& position) = 0;
+
+        //! Set multiple positions of the audio proxy.
+        virtual void SetMultiplePositions(const Audio::MultiPositionParams& params) = 0;
     };
 
     using AudioProxyComponentRequestBus = AZ::EBus<AudioProxyComponentRequests>;

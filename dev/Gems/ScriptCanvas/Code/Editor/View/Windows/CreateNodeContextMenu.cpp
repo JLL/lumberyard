@@ -20,68 +20,62 @@
 
 #include <Editor/Nodes/NodeUtils.h>
 #include <Editor/View/Widgets/ScriptCanvasNodePaletteDockWidget.h>
+#include <Editor/View/Widgets/VariablePanel/GraphVariablesTableView.h>
 
 #include <ScriptCanvas/Bus/RequestBus.h>
 #include <ScriptCanvas/Bus/NodeIdPair.h>
 
 #include <GraphCanvas/Components/GridBus.h>
 #include <GraphCanvas/Components/Nodes/Comment/CommentBus.h>
+#include <GraphCanvas/Components/Nodes/Group/NodeGroupBus.h>
 #include <GraphCanvas/Components/SceneBus.h>
 #include <GraphCanvas/Components/ViewBus.h>
 #include <GraphCanvas/Components/VisualBus.h>
 #include <GraphCanvas/GraphCanvasBus.h>
+#include <GraphCanvas/Widgets/EditorContextMenu/ContextMenuActions/SceneMenuActions/SceneContextMenuActions.h>
 
-#include "CreateNodeContextMenu.h"
+#include "ScriptCanvasContextMenus.h"
 
 namespace ScriptCanvasEditor
 {
-    /////////////////////
-    // CreateNodeAction
-    /////////////////////
-    CreateNodeAction::CreateNodeAction(const QString& text, QObject* parent)
-        : QAction(text, parent)
-    {
-    }
-
     //////////////////////////////
     // AddSelectedEntitiesAction
     //////////////////////////////
 
     AddSelectedEntitiesAction::AddSelectedEntitiesAction(QObject* parent)
-        : CreateNodeAction("", parent)
+        : GraphCanvas::ContextMenuAction("", parent)
     {
     }
 
-    void AddSelectedEntitiesAction::RefreshAction(const AZ::EntityId&)
+    GraphCanvas::ActionGroupId AddSelectedEntitiesAction::GetActionGroupId() const
+    {
+        return AZ_CRC("EntityActionGroup", 0x17e16dfe);
+    }
+
+    void AddSelectedEntitiesAction::RefreshAction(const GraphCanvas::GraphId&, const AZ::EntityId&)
     {
         AzToolsFramework::EntityIdList selectedEntities;
-
-        EBUS_EVENT_RESULT(selectedEntities,
-            AzToolsFramework::ToolsApplicationRequests::Bus,
-            GetSelectedEntities);
+        AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(selectedEntities, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
 
         setEnabled(!selectedEntities.empty());
 
         if (selectedEntities.size() <= 1)
         {
-            setText("Reference Selected Entity");
+            setText("Reference selected entity");
         }
         else
         {
-            setText("Reference Selected Entities");
+            setText("Reference selected entities");
         }
     }
 
-    bool AddSelectedEntitiesAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
+    GraphCanvas::ContextMenuAction::SceneReaction AddSelectedEntitiesAction::TriggerAction(const AZ::EntityId& graphCanvasGraphId, const AZ::Vector2& scenePos)
     {
         AzToolsFramework::EntityIdList selectedEntities;
+        AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(selectedEntities, &AzToolsFramework::ToolsApplicationRequests::GetSelectedEntities);
 
-        EBUS_EVENT_RESULT(selectedEntities,
-            AzToolsFramework::ToolsApplicationRequests::Bus,
-            GetSelectedEntities);
-
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
+        AZ::EntityId scriptCanvasGraphId;
+        GeneralRequestBus::BroadcastResult(scriptCanvasGraphId, &GeneralRequests::GetScriptCanvasGraphId, graphCanvasGraphId);
 
         GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::ClearSelection);
 
@@ -89,190 +83,12 @@ namespace ScriptCanvasEditor
 
         for (const AZ::EntityId& id : selectedEntities)
         {
-            NodeIdPair nodePair = Nodes::CreateEntityNode(id, scriptCanvasSceneId);
+            NodeIdPair nodePair = Nodes::CreateEntityNode(id, scriptCanvasGraphId);
             GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::AddNode, nodePair.m_graphCanvasId, addPosition);
             addPosition += AZ::Vector2(20, 20);
         }
 
-        return true;
-    }
-
-    ////////////////////////////
-    // CutGraphSelectionAction
-    ////////////////////////////
-
-    CutGraphSelectionAction::CutGraphSelectionAction(QObject* parent)
-        : CreateNodeAction("Cut", parent)
-    {
-    }
-
-    void CutGraphSelectionAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelectedItems = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelectedItems, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-
-        setEnabled(hasSelectedItems);
-    }
-
-    bool CutGraphSelectionAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::CutSelection);
-        return true;
-    }
-
-    /////////////////////////////
-    // CopyGraphSelectionAction
-    /////////////////////////////
-
-    CopyGraphSelectionAction::CopyGraphSelectionAction(QObject* parent)
-        : CreateNodeAction("Copy", parent)
-    {
-    }
-
-    void CopyGraphSelectionAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelectedItems = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelectedItems, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-
-        setEnabled(hasSelectedItems);
-    }
-
-    bool CopyGraphSelectionAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::CopySelection);
-        return false;
-    }
-
-    //////////////////////////////
-    // PasteGraphSelectionAction
-    //////////////////////////////
-
-    PasteGraphSelectionAction::PasteGraphSelectionAction(QObject* parent)
-        : CreateNodeAction("Paste", parent)
-    {
-    }
-
-    void PasteGraphSelectionAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        AZStd::string mimeType;
-        GraphCanvas::SceneRequestBus::EventResult(mimeType, graphCanvasGraphId, &GraphCanvas::SceneRequests::GetCopyMimeType);
-
-        bool isPasteable = QApplication::clipboard()->mimeData()->hasFormat(mimeType.c_str());
-        setEnabled(isPasteable);
-    }
-
-    bool PasteGraphSelectionAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::PasteAt, QPoint(scenePos.GetX(), scenePos.GetY()));
-        return true;
-    }
-
-    //////////////////////////////////
-    // DuplicateGraphSelectionAction
-    //////////////////////////////////
-
-    DuplicateGraphSelectionAction::DuplicateGraphSelectionAction(QObject* parent)
-        : CreateNodeAction("Duplicate", parent)
-    {
-    }
-
-    void DuplicateGraphSelectionAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelectedItems = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelectedItems, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-
-        setEnabled(hasSelectedItems);
-    }
-
-    bool DuplicateGraphSelectionAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::DuplicateSelectionAt, QPoint(scenePos.GetX(), scenePos.GetY()));
-        return true;
-    }
-
-    ///////////////////////////////
-    // DeleteGraphSelectionAction
-    ///////////////////////////////
-
-    DeleteGraphSelectionAction::DeleteGraphSelectionAction(QObject* parent)
-        : CreateNodeAction("Delete", parent)
-    {
-    }
-
-    void DeleteGraphSelectionAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelectedItems = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelectedItems, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-
-        setEnabled(hasSelectedItems);
-    }
-
-    bool DeleteGraphSelectionAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::DeleteSelection);
-        return true;
-    }
-
-    /////////////////////
-    // AddCommentAction
-    /////////////////////
-
-    AddCommentAction::AddCommentAction(QObject* parent)
-        : CreateNodeAction("Add Comment", parent)
-    {
-    }
-
-    void AddCommentAction::RefreshAction(const AZ::EntityId&)
-    {
-    }
-
-    bool AddCommentAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::ClearSelection);
-
-        AZ::Entity* graphCanvasEntity = nullptr;
-        GraphCanvas::GraphCanvasRequestBus::BroadcastResult(graphCanvasEntity, &GraphCanvas::GraphCanvasRequests::CreateCommentNodeAndActivate);
-        AZ_Assert(graphCanvasEntity, "Unable to create GraphCanvas Bus Node");
-
-        if (graphCanvasEntity)
-        {
-            GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::AddNode, graphCanvasEntity->GetId(), scenePos);
-        }
-
-        return graphCanvasEntity != nullptr;
+        return GraphCanvas::ContextMenuAction::SceneReaction::PostUndo;
     }
 
     ////////////////////////////
@@ -298,212 +114,97 @@ namespace ScriptCanvasEditor
         return m_endpoint;
     }
 
-    /////////////////////////////
-    // CreateBlockCommentAction
-    /////////////////////////////
+    ////////////////////////////////////
+    // RemoveUnusedVariablesMenuAction
+    ////////////////////////////////////
 
-    CreateBlockCommentAction::CreateBlockCommentAction(QObject* parent)
-        : CreateNodeAction("Create Block Comment", parent)
+    RemoveUnusedVariablesMenuAction::RemoveUnusedVariablesMenuAction(QObject* parent)
+        : SceneContextMenuAction("Variables", parent)
     {
+        setToolTip("Removes all of the unused variables from the active graph");
     }
 
-    void CreateBlockCommentAction::RefreshAction(const AZ::EntityId& scriptCanvasSceneId)
+    void RemoveUnusedVariablesMenuAction::RefreshAction(const GraphCanvas::GraphId& graphId, const AZ::EntityId& targetId)
     {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelection = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelection, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-
-        if (hasSelection)
-        {
-            setText("Create Block Comment For Selection");
-            setToolTip("Will create a block comment around the selected nodes.");
-        }
-        else
-        {
-            setText("Create Block Comment");
-            setToolTip("Will create a block comment at the specified point.");
-        }
+        setEnabled(true);
     }
 
-    bool CreateBlockCommentAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
+    bool RemoveUnusedVariablesMenuAction::IsInSubMenu() const
     {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        bool hasSelection = false;
-        GraphCanvas::SceneRequestBus::EventResult(hasSelection, graphCanvasGraphId, &GraphCanvas::SceneRequests::HasSelectedItems);
-        AZ::Entity* graphCanvasEntity = nullptr;
-        GraphCanvas::GraphCanvasRequestBus::BroadcastResult(graphCanvasEntity, &GraphCanvas::GraphCanvasRequests::CreateBlockCommentNodeAndActivate);
-
-        if (graphCanvasEntity)
-        {
-            GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::AddNode, graphCanvasEntity->GetId(), scenePos);
-
-            if (hasSelection)
-            {
-                AZStd::vector< AZ::EntityId > selectedNodes;
-                GraphCanvas::SceneRequestBus::EventResult(selectedNodes, graphCanvasGraphId, &GraphCanvas::SceneRequests::GetSelectedNodes);
-                
-                QGraphicsItem* rootItem = nullptr;
-                QRectF boundingArea;
-
-                for (const AZ::EntityId& selectedNode : selectedNodes)
-                {
-                    GraphCanvas::SceneMemberUIRequestBus::EventResult(rootItem, selectedNode, &GraphCanvas::SceneMemberUIRequests::GetRootGraphicsItem);
-
-                    if (rootItem)
-                    {
-                        if (boundingArea.isEmpty())
-                        {
-                            boundingArea = rootItem->sceneBoundingRect();
-                        }
-                        else
-                        {
-                            boundingArea = boundingArea.united(rootItem->sceneBoundingRect());
-                        }
-                    }
-                }
-
-                AZ::Vector2 gridStep;
-                AZ::EntityId grid;
-                GraphCanvas::SceneRequestBus::EventResult(grid, graphCanvasGraphId, &GraphCanvas::SceneRequests::GetGrid);
-
-                GraphCanvas::GridRequestBus::EventResult(gridStep, grid, &GraphCanvas::GridRequests::GetMinorPitch);
-
-                boundingArea.adjust(-gridStep.GetX(), -gridStep.GetY(), gridStep.GetX(), gridStep.GetY());
-                
-                GraphCanvas::BlockCommentRequestBus::Event(graphCanvasEntity->GetId(), &GraphCanvas::BlockCommentRequests::SetBlock, boundingArea);
-            }
-
-            GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::ClearSelection);
-            GraphCanvas::SceneMemberUIRequestBus::Event(graphCanvasEntity->GetId(), &GraphCanvas::SceneMemberUIRequests::SetSelected, true);
-        }
-
-        return graphCanvasEntity != nullptr;
+        return true;
     }
 
-    //////////////////////
-    // AddBookmarkAction
-    //////////////////////
-
-    AddBookmarkAction::AddBookmarkAction(QObject* parent)
-        : CreateNodeAction("Add Bookmark", parent)
+    AZStd::string RemoveUnusedVariablesMenuAction::GetSubMenuPath() const
     {
+        return "Remove Unused";
     }
 
-    void AddBookmarkAction::RefreshAction(const AZ::EntityId&)
+    GraphCanvas::ContextMenuAction::SceneReaction RemoveUnusedVariablesMenuAction::TriggerAction(const GraphCanvas::GraphId& graphId, const AZ::Vector2& scenePos)
     {
-    }
-
-    bool AddBookmarkAction::TriggerAction(const AZ::EntityId& scriptCanvasSceneId, const AZ::Vector2& scenePos)
-    {
-        AZ::EntityId graphCanvasGraphId;
-        GeneralRequestBus::BroadcastResult(graphCanvasGraphId, &GeneralRequests::GetGraphCanvasGraphId, scriptCanvasSceneId);
-
-        GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::ClearSelection);
-
-        AZ::Entity* graphCanvasEntity = nullptr;
-        GraphCanvas::GraphCanvasRequestBus::BroadcastResult(graphCanvasEntity, &GraphCanvas::GraphCanvasRequests::CreateBookmarkAnchorAndActivate);
-        AZ_Assert(graphCanvasEntity, "Unable to create GraphCanvas Bus Node");
-
-        if (graphCanvasEntity)
-        {
-            GraphCanvas::SceneRequestBus::Event(graphCanvasGraphId, &GraphCanvas::SceneRequests::AddBookmarkAnchor, graphCanvasEntity->GetId(), scenePos);
-        }
-
-        return graphCanvasEntity != nullptr;
+        GraphCanvas::SceneRequestBus::Event(graphId, &GraphCanvas::SceneRequests::RemoveUnusedNodes);
+        return SceneReaction::PostUndo;
     }
     
-    //////////////////////////
-    // CreateNodeContextMenu
-    //////////////////////////
+    /////////////////////
+    // SceneContextMenu
+    /////////////////////
 
-    CreateNodeContextMenu::CreateNodeContextMenu()
+    SceneContextMenu::SceneContextMenu(const NodePaletteModel& paletteModel, AzToolsFramework::AssetBrowser::AssetBrowserFilterModel* assetModel)
     {
         QWidgetAction* actionWidget = new QWidgetAction(this);
 
         const bool inContextMenu = true;
-        m_palette = aznew Widget::NodePaletteDockWidget(tr("Node Palette"), this, inContextMenu);
+        m_palette = aznew Widget::NodePaletteDockWidget(paletteModel, tr("Node Palette"), this, assetModel, inContextMenu);
 
         actionWidget->setDefaultWidget(m_palette);
 
-        // Ordering
-        addAction(new CutGraphSelectionAction(this));
-        addAction(new CopyGraphSelectionAction(this));
-        addAction(new PasteGraphSelectionAction(this));
-        addAction(new DuplicateGraphSelectionAction(this));
-        addAction(new DeleteGraphSelectionAction(this));
-        addSeparator();
-        addAction(new AddBookmarkAction(this));
-        addAction(new AddCommentAction(this));
-        addAction(new CreateBlockCommentAction(this));
-        addSeparator();
-        addAction(new AddSelectedEntitiesAction(this));
-        addSeparator();
-        addAction(actionWidget);
+        GraphCanvas::ContextMenuAction* menuAction = aznew AddSelectedEntitiesAction(this);
+        
+        AddActionGroup(menuAction->GetActionGroupId());
+        AddMenuAction(menuAction);
 
-        connect(this, &QMenu::aboutToShow, this, &CreateNodeContextMenu::SetupDisplay);
-        connect(m_palette, &Widget::NodePaletteDockWidget::OnContextMenuSelection, this, &CreateNodeContextMenu::HandleContextMenuSelection);
+        AddMenuAction(actionWidget);
+
+        connect(this, &QMenu::aboutToShow, this, &SceneContextMenu::SetupDisplay);
+        connect(m_palette, &Widget::NodePaletteDockWidget::OnContextMenuSelection, this, &SceneContextMenu::HandleContextMenuSelection);
     }
 
-    void CreateNodeContextMenu::DisableCreateActions()
-    {
-        for (QAction* action : actions())
-        {
-            CreateNodeAction* createNodeAction = qobject_cast<CreateNodeAction*>(action);
-
-            if (createNodeAction)
-            {
-                createNodeAction->setEnabled(false);
-            }
-        }
-    }
-
-    void CreateNodeContextMenu::RefreshActions(const AZ::EntityId& scriptCanvasGraphId)
-    {
-        for (QAction* action : actions())
-        {
-            CreateNodeAction* createNodeAction = qobject_cast<CreateNodeAction*>(action);
-
-            if (createNodeAction)
-            {
-                // Not sure if the action has been disabled or not, so enable everything.
-                // Then let the refresh handle disabling it.
-                createNodeAction->setEnabled(true);
-                createNodeAction->RefreshAction(scriptCanvasGraphId);
-            }
-        }
-    }
-
-    void CreateNodeContextMenu::ResetSourceSlotFilter()
+    void SceneContextMenu::ResetSourceSlotFilter()
     {
         m_palette->ResetSourceSlotFilter();
     }
 
-    void CreateNodeContextMenu::FilterForSourceSlot(const AZ::EntityId& scriptCanvasGraphId, const AZ::EntityId& sourceSlotId)
+    void SceneContextMenu::FilterForSourceSlot(const AZ::EntityId& scriptCanvasGraphId, const AZ::EntityId& sourceSlotId)
     {
         m_palette->FilterForSourceSlot(scriptCanvasGraphId, sourceSlotId);
     }
 
-    const Widget::NodePaletteDockWidget* CreateNodeContextMenu::GetNodePalette() const
+    const Widget::NodePaletteDockWidget* SceneContextMenu::GetNodePalette() const
     {
         return m_palette;
     }
 
-    void CreateNodeContextMenu::HandleContextMenuSelection()
+    void SceneContextMenu::OnRefreshActions(const GraphCanvas::GraphId& graphId, const AZ::EntityId& targetMemberId)
+    {
+        // Don't want to overly manipulate the state. So we only modify this when we know we want to turn it on.
+        if (GraphVariablesTableView::HasCopyVariableData())
+        {
+            m_editorActionsGroup.SetPasteEnabled(true);
+        }
+    }
+
+    void SceneContextMenu::HandleContextMenuSelection()
     {
         close();
     }
 
-    void CreateNodeContextMenu::SetupDisplay()
+    void SceneContextMenu::SetupDisplay()
     {
         m_palette->ResetDisplay();
         m_palette->FocusOnSearchFilter();
     }
 
-    void CreateNodeContextMenu::keyPressEvent(QKeyEvent* keyEvent)
+    void SceneContextMenu::keyPressEvent(QKeyEvent* keyEvent)
     {
         if (!m_palette->hasFocus())
         {
@@ -511,6 +212,60 @@ namespace ScriptCanvasEditor
         }
     }
 
-    #include "Editor/View/Windows/CreateNodeContextMenu.moc"
+    //////////////////////////
+    // ConnectionContextMenu
+    //////////////////////////
+
+    ConnectionContextMenu::ConnectionContextMenu(const NodePaletteModel& nodePaletteModel, AzToolsFramework::AssetBrowser::AssetBrowserFilterModel* assetModel)
+    {
+        QWidgetAction* actionWidget = new QWidgetAction(this);
+
+        const bool inContextMenu = true;
+        m_palette = aznew Widget::NodePaletteDockWidget(nodePaletteModel, tr("Node Palette"), this, assetModel, inContextMenu);
+
+        actionWidget->setDefaultWidget(m_palette);
+
+        AddMenuAction(actionWidget);
+
+        connect(this, &QMenu::aboutToShow, this, &ConnectionContextMenu::SetupDisplay);
+        connect(m_palette, &Widget::NodePaletteDockWidget::OnContextMenuSelection, this, &ConnectionContextMenu::HandleContextMenuSelection);
+    }
+
+    const Widget::NodePaletteDockWidget* ConnectionContextMenu::GetNodePalette() const
+    {
+        return m_palette;
+    }
+
+    void ConnectionContextMenu::OnRefreshActions(const GraphCanvas::GraphId& graphId, const AZ::EntityId& targetMemberId)
+    {
+        GraphCanvas::ConnectionContextMenu::OnRefreshActions(graphId, targetMemberId);
+
+        m_palette->ResetSourceSlotFilter();
+
+        m_connectionId = targetMemberId;
+        
+        // TODO: Filter nodes.
+    }
+
+    void ConnectionContextMenu::HandleContextMenuSelection()
+    {
+        close();
+    }
+
+    void ConnectionContextMenu::SetupDisplay()
+    {
+        m_palette->ResetDisplay();
+        m_palette->FocusOnSearchFilter();
+    }
+
+    void ConnectionContextMenu::keyPressEvent(QKeyEvent* keyEvent)
+    {
+        if (!m_palette->hasFocus())
+        {
+            QMenu::keyPressEvent(keyEvent);
+        }
+    }
+
+    #include "Editor/View/Windows/ScriptCanvasContextMenus.moc"
 }
 

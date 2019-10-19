@@ -17,6 +17,7 @@
 #include "CapsuleShapeComponent.h"
 #include "EditorShapeComponentConverters.h"
 #include "ShapeDisplay.h"
+#include <LmbrCentral/Geometry/GeometrySystemComponentBus.h>
 
 namespace LmbrCentral
 {
@@ -41,7 +42,7 @@ namespace LmbrCentral
                 editContext->Class<EditorCapsuleShapeComponent>("Capsule Shape", "The Capsule Shape component creates a capsule around the associated entity")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Shape")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Capsule_Shape.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Capsule_Shape.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Capsule_Shape.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -52,6 +53,13 @@ namespace LmbrCentral
                         ;
             }
         }
+    }
+
+    void EditorCapsuleShapeComponent::Init()
+    {
+        EditorBaseShapeComponent::Init();
+
+        SetShapeComponentConfig(&m_capsuleShape.ModifyCapsuleConfiguration());
     }
 
     void EditorCapsuleShapeComponent::Activate()
@@ -70,13 +78,15 @@ namespace LmbrCentral
         EditorBaseShapeComponent::Deactivate();
     }
 
-    void EditorCapsuleShapeComponent::DisplayEntity(bool& handled)
+    void EditorCapsuleShapeComponent::DisplayEntityViewport(
+        const AzFramework::ViewportInfo& viewportInfo,
+        AzFramework::DebugDisplayRequests& debugDisplay)
     {
-        DisplayShape(handled,
-            [this]() { return CanDraw(); },
-            [this](AzFramework::EntityDebugDisplayRequests* /*displayContext*/)
+        DisplayShape(
+            debugDisplay, [this]() { return CanDraw(); },
+            [this](AzFramework::DebugDisplayRequests& debugDisplay)
             {
-                DrawShape({ m_shapeColor, m_shapeWireColor, m_displayFilled }, m_capsuleShapeMesh);
+                DrawShape(debugDisplay, { m_shapeColor, m_shapeWireColor, m_displayFilled }, m_capsuleShapeMesh);
             },
             m_capsuleShape.GetCurrentTransform());
     }
@@ -106,18 +116,16 @@ namespace LmbrCentral
         }
     }
 
-    void EditorCapsuleShapeComponent::OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world)
-    {
-        EditorBaseShapeComponent::OnTransformChanged(local, world);
-        GenerateVertices();
-    }
-
     void EditorCapsuleShapeComponent::GenerateVertices()
     {
-        GenerateCapsuleMesh(
-            m_capsuleShape.GetCurrentTransform(), m_capsuleShape.GetCapsuleConfiguration().m_radius,
-            m_capsuleShape.GetCapsuleConfiguration().m_height, g_capsuleDebugShapeSides, g_capsuleDebugShapeCapSegments,
-            m_capsuleShapeMesh.m_vertexBuffer, m_capsuleShapeMesh.m_indexBuffer,m_capsuleShapeMesh.m_lineBuffer);
+        CapsuleGeometrySystemRequestBus::Broadcast(
+            &CapsuleGeometrySystemRequestBus::Events::GenerateCapsuleMesh,
+            m_capsuleShape.GetCapsuleConfiguration().m_radius,
+            m_capsuleShape.GetCapsuleConfiguration().m_height,
+            g_capsuleDebugShapeSides,
+            g_capsuleDebugShapeCapSegments,
+            m_capsuleShapeMesh.m_vertexBuffer,
+            m_capsuleShapeMesh.m_indexBuffer,
+            m_capsuleShapeMesh.m_lineBuffer);
     }
-
 } // namespace LmbrCentral

@@ -10,48 +10,38 @@
 *
 */
 
-// include required headers
-#include "StateGraphNode.h"
-#include "NodeGraph.h"
-#include <MCore/Source/Vector.h>
-#include <MCore/Source/Compare.h>
-#include <EMotionFX/CommandSystem/Source/CommandManager.h>
-#include "../../../../EMStudioSDK/Source/EMStudioManager.h"
+#include <EMotionFX/Source/AnimGraphStateMachine.h>
 #include <EMotionFX/Source/AnimGraphTransitionCondition.h>
-#include <EMotionFX/Source/AnimGraphManager.h>
-#include <QPointF>
-#include <QStaticText>
+#include <EMotionStudio/EMStudioSDK/Source/EMStudioManager.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphModel.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AnimGraphPlugin.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/AttributesWindow.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/NodeGraph.h>
+#include <EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/StateGraphNode.h>
+#include <MCore/Source/Compare.h>
 
 
 namespace EMStudio
 {
-    //--------------------------------------------------------------------------------
-    // class StateConnection
-    //--------------------------------------------------------------------------------
+    const QColor StateMachineColors::s_transitionColor = QColor(125, 125, 125);
+    const QColor StateMachineColors::s_activeColor = QColor(4, 255, 0);
+    const QColor StateMachineColors::s_interruptedColor = QColor(255, 0, 255);
+    const QColor StateMachineColors::s_interruptionCandidateColor = QColor(63, 140, 62);
+    const QColor StateMachineColors::s_selectedColor = QColor(255, 128, 0);
 
-    // constructor
-    StateConnection::StateConnection(EMotionFX::AnimGraphStateMachine* stateMachine, GraphNode* sourceNode, GraphNode* targetNode, const QPoint& startOffset, const QPoint& endOffset, bool isWildcardConnection, uint32 transitionID)
-        : NodeConnection(targetNode, 0, sourceNode, 0)
+    StateConnection::StateConnection(const QModelIndex& modelIndex, GraphNode* sourceNode, GraphNode* targetNode, bool isWildcardConnection)
+        : NodeConnection(modelIndex, targetNode, 0, sourceNode, 0)
     {
-        mStartOffset            = startOffset;
-        mEndOffset              = endOffset;
-        mColor                  = QColor(125, 125, 125);
+        mColor                  = StateMachineColors::s_transitionColor;
         mIsWildcardConnection   = isWildcardConnection;
-        mID                     = transitionID;
-        mStateMachine           = stateMachine;
-
-        MCORE_ASSERT(mStateMachine);
-        mTransition             = mStateMachine->FindTransitionByID(transitionID);
     }
 
 
-    // destructor
     StateConnection::~StateConnection()
     {
     }
 
 
-    // render the connection
     void StateConnection::Render(QPainter& painter, QPen* pen, QBrush* brush, int32 stepSize, const QRect& visibleRect, float opacity, bool alwaysColor)
     {
         MCORE_UNUSED(stepSize);
@@ -62,57 +52,101 @@ namespace EMStudio
         QPoint start, end;
         CalcStartAndEndPoints(start, end);
 
-        // check if we are dealing with a wildcard transition
+        // Adjust the start and end points in case this is a wildcard transition.
         if (mIsWildcardConnection)
         {
             start = end - QPoint(WILDCARDTRANSITION_SIZE, WILDCARDTRANSITION_SIZE);
             end += QPoint(3, 3);
         }
 
-        QColor color;
-
-        // Get the anim graph the rendered state machine belongs to.
-        const EMotionFX::AnimGraph* animGraph = mStateMachine->GetAnimGraph();
-        if (!animGraph)
+        const EMotionFX::AnimGraphStateTransition* transition = m_modelIndex.data(AnimGraphModel::ROLE_TRANSITION_POINTER).value<EMotionFX::AnimGraphStateTransition*>();
+        if (!transition)
         {
+            AZ_Error("EMotionFX", false, "Cannot render transition, model index is invalid.");
             return;
         }
 
-        // check if we're transitioning
-        mIsTransitioning = false;
-        EMotionFX::ActorInstance* actorInstance = CommandSystem::GetCommandManager()->GetCurrentSelection().GetSingleActorInstance();
-        if (actorInstance)
+        const EMotionFX::AnimGraphNode* targetState = transition->GetTargetNode();
+        if (!targetState)
         {
-            EMotionFX::AnimGraphInstance* animGraphInstance = actorInstance->GetAnimGraphInstance();
-            if (animGraphInstance)
+            AZ_Error("EMotionFX", false, "The target state always is expected to be valid. Cannot render transition.");
+            return;
+        }
+
+        EMotionFX::AnimGraphStateMachine* stateMachine = azdynamic_cast<EMotionFX::AnimGraphStateMachine*>(targetState->GetParentNode());
+        if (!stateMachine)
+        {
+            AZ_Error("EMotionFX", false, "Cannot render transition. State machine for transition not valid.");
+            return;
+        }
+
+        EMotionFX::AnimGraphInstance* animGraphInstance = m_modelIndex.data(AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
+
+        bool isActive = false;
+        bool gotInterrupted = false;
+        bool isLatestTransition = false;
+        bool isLastInterruptedTransition = false;
+        bool isInterruptionCandidate = false;
+        float blendWeight = 0.0f;
+        size_t numActiveTransitions = 0;
+        if (animGraphInstance && animGraphInstance->GetAnimGraph() == transition->GetAnimGraph())
+        {
+            const AZStd::vector<EMotionFX::AnimGraphStateTransition*>& activeTransitions = stateMachine->GetActiveTransitions(animGraphInstance);
+            isActive = stateMachine->IsTransitionActive(transition, animGraphInstance);
+            blendWeight = transition->GetBlendWeight(animGraphInstance);
+
+            const EMotionFX::AnimGraphStateTransition* latestActiveTransition = stateMachine->GetLatestActiveTransition(animGraphInstance);
+            isLatestTransition = (transition == latestActiveTransition);
+            numActiveTransitions = activeTransitions.size();
+            gotInterrupted = transition->GotInterrupted(animGraphInstance);
+
+            if (numActiveTransitions > 1)
             {
-                if (mStateMachine->GetActiveTransition(animGraphInstance) == mTransition)
+                isLastInterruptedTransition = (transition == activeTransitions.back());
+            }
+
+            if (latestActiveTransition && latestActiveTransition->CanBeInterruptedBy(transition, animGraphInstance) && !isActive)
+            {
+                isInterruptionCandidate = true;
+            }
+        }
+
+        bool interruptionSelectionMode = false;
+        QModelIndex attributeWindowModelIndex;
+        AttributesWindowRequestBus::BroadcastResult(attributeWindowModelIndex, &AttributesWindowRequests::GetModelIndex);
+        if (attributeWindowModelIndex.isValid() && attributeWindowModelIndex.data(AnimGraphModel::ROLE_MODEL_ITEM_TYPE).value<AnimGraphModel::ModelItemType>() == AnimGraphModel::ModelItemType::TRANSITION)
+        {
+            const EMotionFX::AnimGraphStateTransition* attributeWindowTransition = attributeWindowModelIndex.data(AnimGraphModel::ROLE_TRANSITION_POINTER).value<EMotionFX::AnimGraphStateTransition*>();
+            if (attributeWindowTransition)
+            {
+                bool isLocked = false;
+                AttributesWindowRequestBus::BroadcastResult(isLocked, &AttributesWindowRequests::IsLocked);
+
+                if (isLocked && attributeWindowTransition == transition)
                 {
-                    mIsTransitioning = true;
+                    interruptionSelectionMode = true;
+                }
+
+                if (attributeWindowTransition->CanBeInterruptedBy(transition))
+                {
+                    isInterruptionCandidate = true;
                 }
             }
         }
 
-        // draw some small horizontal lines that go outside of the connection port
+        QColor color = mColor;
+
         if (mIsSelected)
         {
-            pen->setWidth(2);
-            color.setRgb(255, 128, 0);
+            color = StateMachineColors::s_selectedColor;
         }
-        else
+        else if (isInterruptionCandidate)
         {
-            pen->setWidthF(1.5f);
-            color = mColor;
-
-            if (mIsTransitioning)
-            {
-                color.setRgb(255, 0, 255);
-            }
-            else
-            if (mIsSynced)
-            {
-                color.setRgb(115, 125, 200);
-            }
+            color = StateMachineColors::s_interruptionCandidateColor;
+        }
+        else if (mIsSynced)
+        {
+            color.setRgb(115, 125, 200);
         }
 
         // darken the color in case the transition is disabled
@@ -136,109 +170,30 @@ namespace EMStudio
             painter.setOpacity(1.0);
         }
 
-        // set the pen
-        pen->setColor(color);
-        pen->setStyle(Qt::SolidLine);
-        painter.setPen(*pen);
-
-        // set the brush
-        brush->setColor(color);
-        brush->setStyle(Qt::SolidPattern);
-        painter.setBrush(*brush);
-
-        // calculate the line direction
-        AZ::Vector2 lineDir = AZ::Vector2(end.x(), end.y()) - AZ::Vector2(start.x(), start.y());
-
-        // make sure the transition isn't starting and ending at the same position, if so, return directly
-        if (MCore::Compare<float>::CheckIfIsClose(lineDir.GetX(), 0.0f, MCore::Math::epsilon) &&
-            MCore::Compare<float>::CheckIfIsClose(lineDir.GetY(), 0.0f, MCore::Math::epsilon))
+        bool isSelected = mIsSelected;
+        if (interruptionSelectionMode)
         {
-            return;
+            isSelected = true;
+            color = StateMachineColors::s_selectedColor;
+            color.setAlphaF(0.5f);
         }
 
-        // if it is safe, get the length and normalize the direction vector
-        float length = lineDir.GetLength();
-        lineDir.Normalize();
-
-        QPointF direction;
-        direction.setX(lineDir.GetX() * 8.0f);
-        direction.setY(lineDir.GetY() * 8.0f);
-
-        QPointF normalOffset((end.y() - start.y()) / length, (start.x() - end.x()) / length);
-
-        QPointF points[3];
-        points[0] = end;
-        points[1] = end - direction + (normalOffset * 5.0f);
-        points[2] = end - direction - (normalOffset * 5.0f);
-
-        // draw line
-        if (mIsDisabled)
+        QColor activeColor = StateMachineColors::s_activeColor;
+        if (gotInterrupted)
         {
-            /*
-                    QVector<qreal> dashes;
-
-                    qreal space = 4;
-                    if (pen->width() > 1)
-                        space = 2;
-
-                    dashes << space << space;
-                    pen->setDashPattern(dashes);
-                    pen->setStyle( Qt::CustomDashLine );
-                    painter.setPen( *pen );*/
-            pen->setStyle(Qt::DashLine);
-            painter.setPen(*pen);
-        }
-        else
-        {
-            pen->setStyle(Qt::SolidLine);
-            painter.setPen(*pen);
+            activeColor = StateMachineColors::s_interruptedColor;
         }
 
+        const bool showBlendState = isActive &&
+            ((!gotInterrupted && isLatestTransition && numActiveTransitions == 1) || isLastInterruptedTransition);
 
-        // render the transition line
-        if (actorInstance)
-        {
-            EMotionFX::AnimGraphInstance* animGraphInstance = actorInstance->GetAnimGraphInstance();
-
-            // Make sure the anim graph that is currently simulated on the selected actor instance is the same anim graph as the currently
-            // selected and rendered ones in the anim graph window.
-            if (animGraphInstance && animGraphInstance->GetAnimGraph() == animGraph)
-            {
-                const float blendWeight = mTransition->GetBlendWeight(animGraphInstance);
-
-                if (mStateMachine->GetActiveTransition(animGraphInstance) == mTransition)
-                {
-                    // linear gradient for the background
-                    QLinearGradient gradient(start, end);
-
-                    gradient.setColorAt(0.0, color);
-                    gradient.setColorAt(MCore::Clamp(blendWeight - 0.35f, 0.0f, 1.0f), color);
-                    gradient.setColorAt(MCore::Clamp(blendWeight, 0.0f, 1.0f), QColor(255, 255, 255));
-                    gradient.setColorAt(MCore::Clamp(blendWeight + 0.01f, 0.0f, 1.0f), color);
-                    gradient.setColorAt(1.0, color);
-
-                    painter.setBrush(gradient);
-
-                    pen->setBrush(gradient);
-                    painter.setPen(*pen);
-                }
-            }
-        }
-
-        painter.drawLine(start, end);
-
-        // render arrow head triangle
-        if (mIsHeadHighlighted && mIsWildcardConnection == false)
-        {
-            QColor headTailColor(0, 255, 0);
-            brush->setColor(headTailColor);
-            painter.setBrush(*brush);
-            pen->setColor(headTailColor);
-            painter.setPen(*pen);
-        }
-
-        brush->setStyle(Qt::SolidPattern);
-        painter.drawPolygon(points, 3);
+        RenderTransition(painter, *brush, *pen,
+            start, end,
+            color, activeColor,
+            isSelected, /*isDashed=*/mIsDisabled,
+            showBlendState, blendWeight,
+            /*highlightHead=*/mIsHeadHighlighted && mIsWildcardConnection == false,
+            /*gradientActiveIndicator=*/!gotInterrupted);
 
         if (mIsHeadHighlighted)
         {
@@ -248,122 +203,100 @@ namespace EMStudio
             painter.setPen(*pen);
         }
 
-        // visualize the conditions
-        RenderConditions(&painter, pen, brush, start, end);
+        if (!isActive)
+        {
+            RenderConditionsAndActions(animGraphInstance, &painter, pen, brush, start, end);
+        }
     }
 
-
-    // visualize the transition conditions
-    void StateConnection::RenderConditions(QPainter* painter, QPen* pen, QBrush* brush, QPoint& start, QPoint& end)
+    void StateConnection::RenderConditionsAndActions(EMotionFX::AnimGraphInstance* animGraphInstance, QPainter* painter, QPen* pen, QBrush* brush, QPoint& start, QPoint& end)
     {
-        if (!mTransition)
-        {
-            return;
-        }
-
-        EMotionFX::ActorInstance* actorInstance = CommandSystem::GetCommandManager()->GetCurrentSelection().GetSingleActorInstance();
-        if (!actorInstance)
-        {
-            return;
-        }
-
-        // Make sure the anim graph of the transition to render the conditions for is the same anim graph as the
-        // simulated on the single selected actor instance.
-        EMotionFX::AnimGraphInstance* animGraphInstance = actorInstance->GetAnimGraphInstance();
-        if (!animGraphInstance ||
-            animGraphInstance->GetAnimGraph() != mTransition->GetAnimGraph() ||
-            EMotionFX::GetAnimGraphManager().FindAnimGraphInstanceIndex(animGraphInstance) == MCORE_INVALIDINDEX32)
-        {
-            return;
-        }
-
         // disable the dash pattern in case the transition is disabled
         pen->setStyle(Qt::SolidLine);
         painter->setPen(*pen);
 
-        EMotionFX::AnimGraphNode* currentNode = mStateMachine->GetCurrentState(animGraphInstance);
+        const AZ::Vector2   transitionStart(start.rx(), start.ry());
+        const AZ::Vector2   transitionEnd(end.rx(), end.ry());
 
-        // check if the conditions shall be rendered or not
-        // only visualize the conditions in case they are possible to reach from the currently active state in the state machine or if they belong to a wildcard transition
-        // or in case the source or target nodes are either selected or hovered
-        bool renderConditions = false;
-        if (mTransition->GetSourceNode() == currentNode || mTransition->GetIsWildcardTransition() || mStateMachine->GetActiveTransition(animGraphInstance) == mTransition ||
-            (mSourceNode && mSourceNode->GetIsSelected()) || mTargetNode->GetIsSelected() ||     // check for a selected source or target node
-            (mSourceNode && mSourceNode->GetIsHighlighted())  || mTargetNode->GetIsHighlighted() ||// check for a hovered source or target node
-            GetIsSelected() || GetIsHighlighted())                                                          // check if this transition is hovered or selected
+        EMotionFX::AnimGraphStateTransition* transition = m_modelIndex.data(AnimGraphModel::ROLE_TRANSITION_POINTER).value<EMotionFX::AnimGraphStateTransition*>();
+        AZ_Assert(transition, "Expected non-null transition");
+
+        const size_t numConditions = transition->GetNumConditions();
+        const size_t numActions = transition->GetTriggerActionSetup().GetNumActions();
+        const size_t sumSize = numConditions + numActions;
+        EMotionFX::TriggerActionSetup& actionSetup = transition->GetTriggerActionSetup();
+
+        // precalculate some values we need for the condition rendering
+        const float             shapeDiameter = 3.0f;
+        const float             shapeStride = 4.0f;
+        const float             elementSize = shapeDiameter + shapeStride;
+        const AZ::Vector2       localEnd = transitionEnd - transitionStart;
+
+        // only draw the transition conditions in case the arrow has enough space for it, avoid zero rect sized crashes as well
+        if (localEnd.GetLength() > sumSize * elementSize)
         {
-            renderConditions = true;
-        }
+            const AZ::Vector2   transitionMid = transitionStart + localEnd * 0.5;
+            const AZ::Vector2   transitionDir = localEnd.GetNormalized();
+            const AZ::Vector2   conditionStart = transitionMid - transitionDir * (elementSize * 0.5f * (float)(sumSize));
+            const AZ::Vector2   actionStart = transitionMid - transitionDir * (elementSize * 0.5f * (float)sumSize) + transitionDir * elementSize * numConditions;
 
-        //if (renderConditions)
-        {
-            const AZ::Vector2   transitionStart(start.rx(), start.ry());
-            const AZ::Vector2   transitionEnd(end.rx(), end.ry());
-
-            // get the number of conditions
-            const uint32 numConditions = mTransition->GetNumConditions();
-
-            // precalculate some values we need for the condition rendering
-            const float             circleDiameter  = 3.0f;
-            const float             circleStride    = 4.0f;
-            const float             elementSize     = circleDiameter + circleStride;
-            const AZ::Vector2   localEnd        = transitionEnd - transitionStart;
-
-            // only draw the transition conditions in case the arrow has enough space for it, avoid zero rect sized crashes as well
-            if (localEnd.GetLength() > numConditions * elementSize)
+            for (size_t i = 0; i < numConditions; ++i)
             {
-                const AZ::Vector2   transitionMid   = transitionStart + localEnd * 0.5;
-                const AZ::Vector2   transitionDir   = localEnd.GetNormalized();
-                //const float               halfLength      = localEnd.Length() * 0.5f;
-                const AZ::Vector2   conditionStart  = transitionMid - transitionDir * (elementSize * 0.5f * (float)numConditions);
+                EMotionFX::AnimGraphTransitionCondition* condition = transition->GetCondition(i);
 
-                // iterate through the conditions and render them
-                for (uint32 i = 0; i < numConditions; ++i)
+                // set the condition color either green if the test went okay or red if the test returned false
+                QColor conditionColor;
+                if (animGraphInstance)
                 {
-                    // get access to the condition
-                    EMotionFX::AnimGraphTransitionCondition* condition = mTransition->GetCondition(i);
-
-                    // set the condition color either green if the test went okay or red if the test returned false
-                    QColor conditionColor;
-                    if (condition->TestCondition(animGraphInstance))
-                    {
-                        conditionColor = Qt::green;
-                    }
-                    else
-                    {
-                        conditionColor = Qt::red;
-                    }
-
-                    // darken the color in case the transition is disabled
-                    if (mIsDisabled)
-                    {
-                        conditionColor = conditionColor.darker(185);
-                    }
-
-                    if (renderConditions == false)
-                    {
-                        conditionColor = conditionColor.darker(250);
-                    }
-
-                    brush->setColor(conditionColor);
-
-                    // calculate the circle middle point
-                    const AZ::Vector2 circleMid = conditionStart  + transitionDir * (elementSize * (float)i);
-
-                    // render the circle per condition
-                    painter->setBrush(*brush);
-                    painter->drawEllipse(QPointF(circleMid.GetX(), circleMid.GetY()), circleDiameter, circleDiameter);
+                    conditionColor = condition->TestCondition(animGraphInstance) ? Qt::green : Qt::red;
                 }
+                else
+                {
+                    conditionColor = Qt::gray;
+                }
+
+                // darken the color in case the transition is disabled
+                if (mIsDisabled)
+                {
+                    conditionColor = conditionColor.darker(185);
+                }
+
+                brush->setColor(conditionColor);
+
+                // calculate the circle middle point
+                const AZ::Vector2 circleMid = conditionStart + transitionDir * (elementSize * (float)i);
+
+                // render the circle per condition
+                painter->setBrush(*brush);
+                painter->drawEllipse(QPointF(circleMid.GetX(), circleMid.GetY()), shapeDiameter, shapeDiameter);
+            }
+
+            QColor actionColor = Qt::yellow;
+            // darken the color in case the transition is disabled
+            if (mIsDisabled)
+            {
+                actionColor = actionColor.darker(185);
+            }
+
+            for (size_t i = 0; i < numActions; ++i)
+            {
+                EMotionFX::AnimGraphTriggerAction* action = actionSetup.GetAction(i);
+                brush->setColor(actionColor);
+
+                // calculate the rect left top
+                const AZ::Vector2 recLeft = actionStart + transitionDir * (elementSize * (float)i) - AZ::Vector2(shapeDiameter, shapeDiameter);
+
+                // render the rect per action
+                painter->setBrush(*brush);
+                painter->drawRect(recLeft.GetX(), recLeft.GetY(), shapeDiameter * 2.0f, shapeDiameter * 2.0f);
             }
         }
     }
 
-
-    // find the condition at the mouse position
     EMotionFX::AnimGraphTransitionCondition* StateConnection::FindCondition(const QPoint& mousePos)
     {
         // if the transition is invalid, return directly
-        if (mTransition == nullptr)
+        if (!m_modelIndex.isValid())
         {
             return nullptr;
         }
@@ -378,59 +311,40 @@ namespace EMStudio
             end += QPoint(3, 3);
         }
 
-        // get the selected actor instance
-        CommandSystem::SelectionList& selectionList = EMStudio::GetCommandManager()->GetCurrentSelection();
-        EMotionFX::ActorInstance* actorInstance = selectionList.GetSingleActorInstance();
-        if (actorInstance == nullptr)
+        const AZ::Vector2   transitionStart(start.rx(), start.ry());
+        const AZ::Vector2   transitionEnd(end.rx(), end.ry());
+
+        EMotionFX::AnimGraphStateTransition* transition = m_modelIndex.data(AnimGraphModel::ROLE_TRANSITION_POINTER).value<EMotionFX::AnimGraphStateTransition*>();
+        AZ_Assert(transition, "Expected non-null transition");
+
+        const size_t numConditions = transition->GetNumConditions();
+
+        // precalculate some values we need for the condition rendering
+        const float             circleDiameter  = 3.0f;
+        const float             circleStride    = 4.0f;
+        const float             elementSize     = circleDiameter + circleStride;
+        const AZ::Vector2   localEnd        = transitionEnd - transitionStart;
+
+        // only draw the transition conditions in case the arrow has enough space for it, avoid zero rect sized crashes as well
+        if (localEnd.GetLength() > numConditions * elementSize)
         {
-            return nullptr;
-        }
+            const AZ::Vector2   transitionMid   = transitionStart + localEnd * 0.5f;
+            const AZ::Vector2   transitionDir   = localEnd.GetNormalized();
+            const AZ::Vector2   conditionStart  = transitionMid - transitionDir * (elementSize * 0.5f * (float)numConditions);
 
-        // get the anim graph instance
-        EMotionFX::AnimGraphInstance* animGraphInstance = actorInstance->GetAnimGraphInstance();
-        if (animGraphInstance == nullptr)
-        {
-            return nullptr;
-        }
-
-        // only visualize the conditions in case they are possible to reach from the currently active state in the state machine or if they belong to a wildcard transition
-        //EMotionFX::AnimGraphNode* currentNode = mStateMachine->GetCurrentState(animGraphInstance);
-        //if (mTransition->GetSourceNode() == currentNode || mTransition->IsWildcardTransition() || mStateMachine->GetActiveTransition(animGraphInstance) == mTransition)
-        {
-            const AZ::Vector2   transitionStart(start.rx(), start.ry());
-            const AZ::Vector2   transitionEnd(end.rx(), end.ry());
-
-            // get the number of conditions
-            const uint32 numConditions = mTransition->GetNumConditions();
-
-            // precalculate some values we need for the condition rendering
-            const float             circleDiameter  = 3.0f;
-            const float             circleStride    = 4.0f;
-            const float             elementSize     = circleDiameter + circleStride;
-            const AZ::Vector2   localEnd        = transitionEnd - transitionStart;
-
-            // only draw the transition conditions in case the arrow has enough space for it, avoid zero rect sized crashes as well
-            if (localEnd.GetLength() > numConditions * elementSize)
+            // iterate through the conditions and render them
+            for (size_t i = 0; i < numConditions; ++i)
             {
-                const AZ::Vector2   transitionMid   = transitionStart + localEnd * 0.5f;
-                const AZ::Vector2   transitionDir   = localEnd.GetNormalized();
-                //const float               halfLength      = localEnd.Length() * 0.5f;
-                const AZ::Vector2   conditionStart  = transitionMid - transitionDir * (elementSize * 0.5f * (float)numConditions);
+                // get access to the condition
+                EMotionFX::AnimGraphTransitionCondition* condition = transition->GetCondition(i);
 
-                // iterate through the conditions and render them
-                for (uint32 i = 0; i < numConditions; ++i)
+                // calculate the circle middle point
+                const AZ::Vector2 circleMid = conditionStart  + transitionDir * (elementSize * (float)i);
+
+                const float distance = AZ::Vector2(AZ::Vector2(mousePos.x(), mousePos.y()) - circleMid).GetLength();
+                if (distance <= circleDiameter)
                 {
-                    // get access to the condition
-                    EMotionFX::AnimGraphTransitionCondition* condition = mTransition->GetCondition(i);
-
-                    // calculate the circle middle point
-                    const AZ::Vector2 circleMid = conditionStart  + transitionDir * (elementSize * (float)i);
-
-                    const float distance = AZ::Vector2(AZ::Vector2(mousePos.x(), mousePos.y()) - circleMid).GetLength();
-                    if (distance <= circleDiameter)
-                    {
-                        return condition;
-                    }
+                    return condition;
                 }
             }
         }
@@ -438,8 +352,6 @@ namespace EMStudio
         return nullptr;
     }
 
-
-    // does it intersects the rect
     bool StateConnection::Intersects(const QRect& rect)
     {
         QPoint start, end;
@@ -447,8 +359,6 @@ namespace EMStudio
         return NodeGraph::LineIntersectsRect(rect, start.x(), start.y(), end.x(), end.y());
     }
 
-
-    //
     bool StateConnection::CheckIfIsCloseTo(const QPoint& point)
     {
         QPoint start, end;
@@ -458,8 +368,6 @@ namespace EMStudio
         //QRect testRect(point.x() - 1, point.y() - 1, 2, 2);
         //return Intersects(testRect);
     }
-
-
 
     bool StateConnection::CheckIfIsCloseToHead(const QPoint& point) const
     {
@@ -471,34 +379,7 @@ namespace EMStudio
         AZ::Vector2 newStart = AZ::Vector2(end.x(), end.y()) - dir * 5.0f;
 
         return (NodeGraph::DistanceToLine(newStart.GetX(), newStart.GetY(), end.x(), end.y(), point.x(), point.y()) <= 7.0f);
-
-        /*AZ::Vector2 dir = AZ::Vector2( end.x()-start.x(), end.y()-start.y() );
-        dir.Normalize();
-        AZ::Vector2 newEnd = AZ::Vector2(end.x(), end.y()) - dir * 3.0f;
-
-        return (AZ::Vector2(newEnd - AZ::Vector2(point.x(), point.y())).GetLength() <= 3.0f);*/
-
-        // calculate the line direction
-        /*AZ::Vector2 lineDir = AZ::Vector2(end.x(), end.y()) - AZ::Vector2(start.x(), start.y());
-        float length = lineDir.Length();
-        lineDir.Normalize();
-
-        QPointF direction;
-        direction.setX( lineDir.x * 8.0f );
-        direction.setY( lineDir.y * 8.0f );
-
-        QPointF normalOffset((end.y() - start.y()) / length, (start.x() - end.x()) / length);
-
-        QPointF posB = end - direction + (normalOffset * 5.0f);
-        QPointF posC = end - direction - (normalOffset * 5.0f);
-
-        QPolygon arrowHead(3);
-        arrowHead.setPoint( 0, end.x(), end.y() );
-        arrowHead.setPoint( 0, (int32)posB.x(), (int32)posB.x() );
-        arrowHead.setPoint( 0, (int32)posC.x(), (int32)posC.x() );
-        return arrowHead.containsPoint(point, Qt::OddEvenFill);*/
     }
-
 
     bool StateConnection::CheckIfIsCloseToTail(const QPoint& point) const
     {
@@ -510,23 +391,16 @@ namespace EMStudio
         AZ::Vector2 newStart = AZ::Vector2(start.x(), start.y()) + dir * 6.0f;
 
         return (AZ::Vector2(newStart - AZ::Vector2(point.x(), point.y())).GetLength() <= 6.0f);
-
-        /*QPoint start, end;
-        CalcStartAndEndPoints(start, end);
-
-        AZ::Vector2 dir = AZ::Vector2( end.x()-start.x(), end.y()-start.y() );
-        dir.Normalize();
-        AZ::Vector2 newStart = AZ::Vector2(start.x(), start.y()) + dir * 5.0f;
-
-        return (NodeGraph::DistanceToLine(newStart.x, newStart.y, start.x(), start.y(), point.x(), point.y()) <= 5.0f);*/
     }
 
-
-    // calc the start and end point
     void StateConnection::CalcStartAndEndPoints(QPoint& outStart, QPoint& outEnd) const
     {
-        QPoint end      = mTargetNode->GetRect().topLeft() + mEndOffset;
-        QPoint start    = mStartOffset;
+        EMotionFX::AnimGraphStateTransition* transition = m_modelIndex.data(AnimGraphModel::ROLE_TRANSITION_POINTER).value<EMotionFX::AnimGraphStateTransition*>();
+        const QPoint startOffset = QPoint(transition->GetVisualStartOffsetX(), transition->GetVisualStartOffsetY());
+        const QPoint endOffset = QPoint(transition->GetVisualEndOffsetX(), transition->GetVisualEndOffsetY());
+
+        QPoint start = startOffset;
+        QPoint end = mTargetNode->GetRect().topLeft() + endOffset;
         if (mSourceNode)
         {
             start += mSourceNode->GetRect().topLeft();
@@ -541,7 +415,6 @@ namespace EMStudio
         {
             sourceRect = mSourceNode->GetRect();
         }
-        //  sourceRect.adjust(-2,-2,2,2);
 
         QRect targetRect = mTargetNode->GetRect();
         targetRect.adjust(-2, -2, 2, 2);
@@ -565,14 +438,217 @@ namespace EMStudio
         outEnd      = end;
     }
 
+    void StateConnection::RenderTransition(QPainter& painter, QBrush& brush, QPen& pen,
+        QPoint start, QPoint end,
+        const QColor& color, const QColor& activeColor,
+        bool isSelected, bool isDashed, bool isActive, float weight, bool highlightHead, bool gradientActiveIndicator)
+    {
+        const AZ::Vector2 azStart = AZ::Vector2(start.x(), start.y());
+        const AZ::Vector2 azEnd = AZ::Vector2(end.x(), end.y());
+        AZ::Vector2 azStartEnd = azEnd - azStart;
+
+        // Skip degenerated transitions (in case nodes are moved close or over each other).
+        if (MCore::Compare<float>::CheckIfIsClose(azStartEnd.GetX(), 0.0f, MCore::Math::epsilon) &&
+            MCore::Compare<float>::CheckIfIsClose(azStartEnd.GetY(), 0.0f, MCore::Math::epsilon))
+        {
+            return;
+        }
+
+        const float length = azStartEnd.GetLength();
+        AZ::Vector2 lineDir = azStartEnd;
+        lineDir.Normalize();
+
+        QPointF direction;
+        direction.setX(lineDir.GetX() * 8.0f);
+        direction.setY(lineDir.GetY() * 8.0f);
+
+        QPointF normalOffset((end.y() - start.y()) / length, (start.x() - end.x()) / length);
+
+        QPointF headPoints[3];
+        headPoints[0] = end;
+        headPoints[1] = end - direction + (normalOffset * 5.0f);
+        headPoints[2] = end - direction - (normalOffset * 5.0f);
+
+        pen.setStyle(Qt::SolidLine);
+        brush.setStyle(Qt::SolidPattern);
+
+        if (isDashed)
+        {
+            pen.setStyle(Qt::DashLine);
+            painter.setPen(pen);
+        }
+        else
+        {
+            pen.setStyle(Qt::SolidLine);
+            painter.setPen(pen);
+        }
+
+        if (isActive)
+        {
+            pen.setWidthF(1.0f);
+        }
+        else if (isSelected)
+        {
+            pen.setWidthF(2.0f);
+        }
+        else
+        {
+            pen.setWidthF(1.5f);
+        }
+
+        painter.setBrush(color);
+        pen.setColor(color);
+        pen.setBrush(color);
+        painter.setPen(pen);
+        painter.drawLine(start, end);
+
+        if (highlightHead)
+        {
+            QColor headTailColor(0, 255, 0);
+            brush.setColor(headTailColor);
+            painter.setBrush(brush);
+            pen.setColor(headTailColor);
+            painter.setPen(pen);
+        }
+        else
+        {
+            painter.setBrush(color);
+            pen.setBrush(color);
+            painter.setPen(pen);
+        }
+
+        brush.setStyle(Qt::SolidPattern);
+        painter.drawPolygon(headPoints, 3);
+
+        if (isActive)
+        {
+            pen.setWidthF(3.0f);
+
+            QLinearGradient gradient(start, end);
+
+            if (MCore::Compare<float>::CheckIfIsClose(weight, 1.0f, MCore::Math::epsilon))
+            {
+                painter.setBrush(activeColor);
+                pen.setBrush(activeColor);
+                painter.setPen(pen);
+            }
+            else
+            {
+                float gradientLength = 0.001f;
+                if (gradientActiveIndicator)
+                {
+                    gradientLength = 0.1f;
+                }
+
+                const QColor transparent(0, 0, 0, 0);
+                gradient.setColorAt(0.0, activeColor);
+                gradient.setColorAt(MCore::Clamp(weight, 0.0f, 1.0f), activeColor);
+                gradient.setColorAt(MCore::Clamp(weight + gradientLength, 0.0f, 1.0f), transparent);
+                gradient.setColorAt(1.0, transparent);
+
+                painter.setBrush(gradient);
+                pen.setBrush(gradient);
+                painter.setPen(pen);
+            }
+
+            painter.drawLine(start, end);
+
+            pen.setWidthF(1.0f);
+            painter.setPen(pen);
+            painter.drawPolygon(headPoints, 3);
+        }
+
+        pen.setWidthF(1.0f);
+    }
+
+    void StateConnection::RenderInterruptedTransitions(QPainter& painter, EMStudio::AnimGraphModel& animGraphModel, EMStudio::NodeGraph& nodeGraph)
+    {
+        const QModelIndex& nodeGraphModelIndex = nodeGraph.GetModelIndex();
+        if (!nodeGraphModelIndex.isValid() ||
+            nodeGraphModelIndex.data(EMStudio::AnimGraphModel::ROLE_MODEL_ITEM_TYPE).value<EMStudio::AnimGraphModel::ModelItemType>() != EMStudio::AnimGraphModel::ModelItemType::NODE)
+        {
+            return;
+        }
+
+        const EMotionFX::AnimGraphNode* node = nodeGraphModelIndex.data(EMStudio::AnimGraphModel::ROLE_NODE_POINTER).value<EMotionFX::AnimGraphNode*>();
+        const EMotionFX::AnimGraphStateMachine* stateMachine = azdynamic_cast<const EMotionFX::AnimGraphStateMachine*>(node);
+        if (!stateMachine)
+        {
+            // We might be viewing a blend tree, nothing to do here.
+            return;
+        }
+
+        EMotionFX::AnimGraphInstance* animGraphInstance = nodeGraphModelIndex.data(EMStudio::AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
+        if (!animGraphInstance || animGraphInstance->GetAnimGraph() != stateMachine->GetAnimGraph())
+        {
+            return;
+        }
+
+        const AZStd::vector<EMotionFX::AnimGraphStateTransition*>& activeTransitions = stateMachine->GetActiveTransitions(animGraphInstance);
+        const size_t numActiveTransitions = activeTransitions.size();
+        if (numActiveTransitions < 2)
+        {
+            // No transition interrupted, nothing to do here.
+            return;
+        }
+
+        QBrush brush;
+        QPen pen;
+
+        EMotionFX::AnimGraphStateTransition* latestActiveTransition = activeTransitions[numActiveTransitions - 1];
+        QModelIndex latestActiveTransitionModelIndex = animGraphModel.FindModelIndex(latestActiveTransition, animGraphInstance);
+        EMStudio::StateConnection* latestActiveVisualTransition = nodeGraph.FindStateConnection(latestActiveTransitionModelIndex);
+
+        float previousTransitionBlendWeight = latestActiveTransition->GetBlendWeight(animGraphInstance);
+        QPoint previousTransitionStart;
+        QPoint previousTransitionEnd;
+        latestActiveVisualTransition->CalcStartAndEndPoints(previousTransitionStart, previousTransitionEnd);
+
+        // Iterate the transition stack back to front, starting at the first started and interrupted transition and going towards the latest one.
+        for (size_t i = 1; i < numActiveTransitions; ++i)
+        {
+            const size_t activeTransitionIndex = numActiveTransitions - 1 - i;
+            EMotionFX::AnimGraphStateTransition* currentTransition = activeTransitions[activeTransitionIndex];
+            const QModelIndex& currentTransitionModelIndex = animGraphModel.FindModelIndex(currentTransition, animGraphInstance);
+            EMStudio::StateConnection* currentVisualTransition = nodeGraph.FindStateConnection(currentTransitionModelIndex);
+            if (currentVisualTransition)
+            {
+                const float blendWeight = currentTransition->GetBlendWeight(animGraphInstance);
+                QPoint transitionStart;
+                QPoint transitionEnd;
+                currentVisualTransition->CalcStartAndEndPoints(transitionStart, transitionEnd);
+
+                QColor activeColor = EMStudio::StateMachineColors::s_activeColor;
+                if (activeTransitionIndex != 0)
+                {
+                    activeColor = EMStudio::StateMachineColors::s_interruptedColor;
+                }
+
+                const QPoint renderedStart = previousTransitionStart + (previousTransitionEnd - previousTransitionStart) * previousTransitionBlendWeight;
+
+                RenderTransition(painter, brush, pen,
+                    renderedStart, transitionEnd,
+                    EMStudio::StateMachineColors::s_transitionColor, activeColor,
+                    /*isSelected=*/ false, /*isDashed=*/ false, /*isActive=*/ true, blendWeight, /*highlightHead=*/ false,
+                    /*gradientActiveIndicator=*/ activeTransitionIndex == 0);
+
+                previousTransitionBlendWeight = blendWeight;
+                previousTransitionStart = renderedStart;
+                previousTransitionEnd = transitionEnd;
+            }
+            else
+            {
+                previousTransitionBlendWeight = 0.0f;
+                previousTransitionEnd = QPoint(0, 0);
+            }
+        }
+    }
 
     //--------------------------------------------------------------------------------
     // class StateGraphNode
     //--------------------------------------------------------------------------------
-
-    // the constructor
-    StateGraphNode::StateGraphNode(AnimGraphPlugin* plugin, EMotionFX::AnimGraphNode* node)
-        : AnimGraphVisualNode(plugin, node, false)
+    StateGraphNode::StateGraphNode(const QModelIndex& modelIndex, AnimGraphPlugin* plugin, EMotionFX::AnimGraphNode* node)
+        : AnimGraphVisualNode(modelIndex, plugin, node)
     {
         ResetBorderColor();
         SetCreateConFromOutputOnly(true);
@@ -581,86 +657,77 @@ namespace EMStudio
 
         mInputPorts.Resize(1);
         mOutputPorts.Resize(4);
-
-        Sync();
     }
 
-
-    // the destructor
     StateGraphNode::~StateGraphNode()
     {
     }
 
-
-    // update port names and number of ports etc
-    void StateGraphNode::SyncWithEMFX()
+    void StateGraphNode::Sync()
     {
-        //mEMFXNode->OnUpdateAttributes();
+        AnimGraphVisualNode::Sync();
 
-        // set visualization flag
-        SetIsVisualized(mEMFXNode->GetIsVisualizationEnabled());
-        SetCanVisualize(mEMFXNode->GetSupportsVisualization());
-        SetIsEnabled(mEMFXNode->GetIsEnabled());
-        SetVisualizeColor(mEMFXNode->GetVisualizeColor());
+        EMotionFX::AnimGraphStateMachine* parentStateMachine = static_cast<EMotionFX::AnimGraphStateMachine*>(mEMFXNode->GetParentNode());
+        if (parentStateMachine->GetEntryState() == mEMFXNode)
+        {
+            mParentGraph->SetEntryNode(this);
+        }
     }
 
-
-    // render the node
     void StateGraphNode::Render(QPainter& painter, QPen* pen, bool renderShadow)
     {
-        // only render if the given node is visible
-        if (mIsVisible == false)
+        if (!mIsVisible)
         {
             return;
         }
 
-        // render node shadow
         if (renderShadow)
         {
             RenderShadow(painter);
         }
 
-        // figure out the border color
-        mBorderColor.setRgb(0, 0, 0);
-        EMotionFX::ActorInstance* actorInstance = CommandSystem::GetCommandManager()->GetCurrentSelection().GetSingleActorInstance();
-        if (actorInstance)
+        EMotionFX::AnimGraphInstance* animGraphInstance = m_modelIndex.data(AnimGraphModel::ROLE_ANIM_GRAPH_INSTANCE).value<EMotionFX::AnimGraphInstance*>();
+
+        bool isActive = false;
+        bool gotInterrupted = false;
+        if (animGraphInstance && mEMFXNode && animGraphInstance->GetAnimGraph() == mEMFXNode->GetAnimGraph())
         {
-            EMotionFX::AnimGraphInstance* animGraphInstance = actorInstance->GetAnimGraphInstance();
-            if (animGraphInstance)
+            AZ_Assert(azrtti_typeid(mEMFXNode->GetParentNode()) == azrtti_typeid<EMotionFX::AnimGraphStateMachine>(), "Expected a valid state machine.");
+            const EMotionFX::AnimGraphStateMachine* stateMachine = static_cast<EMotionFX::AnimGraphStateMachine*>(mEMFXNode->GetParentNode());
+
+            const AZStd::vector<EMotionFX::AnimGraphNode*>& activeStates = stateMachine->GetActiveStates(animGraphInstance);
+            if (AZStd::find(activeStates.begin(), activeStates.end(), mEMFXNode) != activeStates.end())
             {
-                MCORE_ASSERT(mEMFXNode->GetParentNode()->GetType() == EMotionFX::AnimGraphStateMachine::TYPE_ID);
-                EMotionFX::AnimGraphStateMachine* stateMachine = static_cast<EMotionFX::AnimGraphStateMachine*>(mEMFXNode->GetParentNode());
-                EMotionFX::AnimGraphStateTransition* transition = stateMachine->GetActiveTransition(animGraphInstance);
-                EMotionFX::AnimGraphNode* nodeA = nullptr;
-                EMotionFX::AnimGraphNode* nodeB = nullptr;
-                stateMachine->GetActiveStates(animGraphInstance, &nodeA, &nodeB);
-                if (transition)
+                isActive = true;
+
+                const AZStd::vector<EMotionFX::AnimGraphStateTransition*>& activeTransitions = stateMachine->GetActiveTransitions(animGraphInstance);
+                const EMotionFX::AnimGraphStateTransition* latestActiveTransition = stateMachine->GetLatestActiveTransition(animGraphInstance);
+                for (const EMotionFX::AnimGraphStateTransition* activeTransition : activeTransitions)
                 {
-                    if (transition->GetTargetNode() == mEMFXNode)
+                    if (activeTransition != latestActiveTransition && activeTransition->GetTargetNode() == mEMFXNode)
                     {
-                        mBorderColor.setRgb(0, 255, 0);
-                    }
-                    else
-                    if (transition->GetSourceNode() == mEMFXNode)
-                    {
-                        mBorderColor.setRgb(255, 0, 255);
-                    }
-                }
-                else
-                {
-                    if (nodeA == mEMFXNode)
-                    {
-                        mBorderColor.setRgb(0, 255, 0);
+                        gotInterrupted = true;
+                        break;
                     }
                 }
             }
+        }
+
+        mBorderColor.setRgb(0, 0, 0);
+        if (isActive)
+        {
+            mBorderColor = StateMachineColors::s_activeColor;
+        }
+        if (gotInterrupted)
+        {
+            mBorderColor = StateMachineColors::s_interruptedColor;
         }
 
         QColor borderColor;
         pen->setWidth(2);
         if (mIsSelected)
         {
-            borderColor.setRgb(255, 128, 0);
+            borderColor = StateMachineColors::s_selectedColor;
         }
         else
         {
@@ -690,8 +757,6 @@ namespace EMStudio
             {
                 borderColor = Qt::red;
             }
-
-            //bgColor = borderColor;
         }
 
         QColor bgColor2;
@@ -717,13 +782,6 @@ namespace EMStudio
             painter.setBrush(bgGradient);
             painter.setPen(borderColor);
         }
-        /*  else
-            {
-                if (mIsHighlighted == false)
-                    painter.setBrush( QColor(40, 40, 40) );
-                else
-                    painter.setBrush( QColor(50, 50, 50) );
-            }*/
 
         // add 4px to have empty space for the visualize button
         painter.drawRoundedRect(mRect, BORDER_RADIUS, BORDER_RADIUS);
@@ -763,13 +821,10 @@ namespace EMStudio
         RenderDebugInfo(painter);
     }
 
-
-    // return the required height
     int32 StateGraphNode::CalcRequiredHeight() const
     {
         return 40;
     }
-
 
     int32 StateGraphNode::CalcRequiredWidth()
     {
@@ -779,27 +834,14 @@ namespace EMStudio
         return MCore::Max<uint32>(headerWidth, 100);
     }
 
-
-    // get the rect for a given input port
     QRect StateGraphNode::CalcInputPortRect(uint32 portNr)
     {
         MCORE_UNUSED(portNr);
         return mRect.adjusted(10, 10, -10, -10);
-        //return QRect( mRect.left()+10, mRect.top()+10, mRect.width()-10, mRect.height()-10 );
     }
 
-
-    // get the rect for the output ports
     QRect StateGraphNode::CalcOutputPortRect(uint32 portNr)
     {
-        /*switch (portNr)
-        {
-            case 0: return QRect( mRect.topLeft().x(), mRect.topLeft().y(), mRect.width(), 5);              // top
-            case 1: return QRect( mRect.bottomLeft().x(), mRect.bottomLeft().y()-5, mRect.width(), 5);      // bottom
-            case 2: return QRect( mRect.topLeft().x(), mRect.topLeft().y(), 5, mRect.height());             // left
-            default: return QRect( mRect.topRight().x()-10, mRect.topRight().y(), 5, mRect.height());       // right
-        };*/
-
         switch (portNr)
         {
         case 0:
@@ -822,41 +864,6 @@ namespace EMStudio
         //MCore::LOG("CalcOutputPortRect: (%i, %i, %i, %i)", rect.top(), rect.left(), rect.bottom(), rect.right());
     }
 
-
-    // remove a given connection
-    bool StateGraphNode::RemoveConnection(uint32 targetPortNr, GraphNode* sourceNode, uint32 sourcePortNr, uint32 connectionID)
-    {
-        const uint32 numConnections = mConnections.GetLength();
-        for (uint32 i = 0; i < numConnections; ++i)
-        {
-            // if this is the connection we're searching for
-            if (mConnections[i]->GetSourceNode() == sourceNode &&
-                mConnections[i]->GetOutputPortNr() == sourcePortNr &&
-                mConnections[i]->GetInputPortNr() == targetPortNr &&
-                mConnections[i]->GetID() == connectionID)
-            {
-                delete mConnections[i];
-                mConnections.Remove(i);
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-
-    // update
-    /*void StateGraphNode::Update(const QRect& visibleRect, const QPoint& mousePos)
-    {
-        GraphNode::Update(visibleRect, mousePos);
-
-        // update the visualize rect
-        mVisualizeRect.setCoords( mRect.left() + 5, mRect.top() + 5, mRect.left() + 12, mRect.top() + 12 );
-        //mVisualizeRect.setCoords( mRect.right() - 14, mRect.top() + 5, mRect.right() - 3, mRect.top() + 16 );
-    }*/
-
-
-    // render the visualize rect
     void StateGraphNode::RenderVisualizeRect(QPainter& painter, const QColor& bgColor, const QColor& bgColor2)
     {
         MCORE_UNUSED(bgColor2);
@@ -871,21 +878,19 @@ namespace EMStudio
             vizBorder = bgColor.darker(225);
         }
 
-        painter.setPen(mVisualizeHighlighted ? QColor(255, 128, 0) : vizBorder);
+        painter.setPen(mVisualizeHighlighted ? StateMachineColors::s_selectedColor : vizBorder);
         if (mIsSelected == false)
         {
             painter.setBrush(mVisualize ? mVisualizeColor : bgColor);
         }
         else
         {
-            painter.setBrush(mVisualize ? QColor(255, 128, 0) : bgColor);
+            painter.setBrush(mVisualize ? StateMachineColors::s_selectedColor : bgColor);
         }
 
         painter.drawRect(mVisualizeRect);
     }
 
-
-    // update the transparent pixmap that contains all text for the node
     void StateGraphNode::UpdateTextPixmap()
     {
         mTitleText.setTextOption(mTextOptionsCenter);
@@ -894,30 +899,5 @@ namespace EMStudio
         mTitleText.setTextWidth(mRect.width());
         mTitleText.setText(mElidedName);
         mTitleText.prepare(QTransform(), mHeaderFont);
-        /*
-            // create a new pixmap with the new and correct resolution
-            const uint32 nodeWidth  = mRect.width();
-            const uint32 nodeHeight = mRect.height();
-            mTextPixmap = QPixmap( nodeWidth, nodeHeight );
-
-            // make the pixmap fully transparent
-            mTextPixmap.fill(Qt::transparent);
-
-            mTextPainter.begin( &mTextPixmap );
-
-            // some rects we need for the text
-            QRect nameRect( 0, 0, mRect.width(), mRect.height() );
-
-            // draw header text
-            QColor textColor = mIsSelected ? Qt::black : Qt::white;
-            mTextPainter.setBrush( Qt::NoBrush );
-            mTextPainter.setPen( textColor );
-            mTextPainter.setFont( mHeaderFont );
-            mTextPainter.drawText( nameRect, mElidedName, mTextOptionsCenter );
-
-            mTextPainter.end();
-        */
     }
-}   // namespace EMStudio
-
-#include <EMotionFX/Tools/EMotionStudio/Plugins/StandardPlugins/Source/AnimGraph/StateGraphNode.moc>
+} // namespace EMStudio

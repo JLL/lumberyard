@@ -148,8 +148,15 @@ def wrap_compiled_task(classname):
                     resolved_nodes.append(node)
 
 
-        bld.node_deps[self.uid()] = resolved_nodes
-        bld.raw_deps[self.uid()] = unresolved_names
+        # Bug workaround.  With VS2015, compiling a pch with /showIncludes with a pre-existing .pch/.obj that doesn't
+        # need updates, results in no include file output.  If we save that empty list, subsequent builds will fail to
+        # rebuild properly.  Only update the save dependencies for pch files if output was detected; otherwise use the
+        # existing dependency set.  This doesn't affect VS2017.
+        if 0 == len(resolved_nodes) and self.__class__.__name__ == 'pch_msvc':
+            Logs.warn("no dependencies returned for {}, using last known dependencies instead".format(str(self)))
+        else:
+            bld.node_deps[self.uid()] = resolved_nodes
+            bld.raw_deps[self.uid()] = unresolved_names
 
         # Free memory (200KB for each file in CryEngine, without UberFiles, this accumulates to 1 GB)
         del self.src_deps_paths
@@ -255,16 +262,19 @@ def wrap_compiled_task(classname):
                         # normcase will change '/' to '\\' and lowercase everything, use sparingly
                         # normpath is safer, but we really want to ignore all permutations of these roots
                         norm_path = os.path.normpath(inc_path)
+                        norm_path_len = len(norm_path)
                         # The bld node may be embedded under the source node, eg dev/BinTemp/flavor.
                         # check if the path is in the src node first, and bld node second, allowing for this overlap
-                        if norm_path[:srcnode_abspath_lower_len].lower() == srcnode_abspath_lower:
-                            subpath = norm_path[srcnode_abspath_lower_len + 1:]
-                            self.src_deps_paths.add(subpath)
-                            continue
-                        if norm_path[:bldnode_abspath_lower_len].lower() == bldnode_abspath_lower:
-                            subpath = norm_path[bldnode_abspath_lower_len + 1:]
-                            self.bld_deps_paths.add(subpath)
-                            continue
+                        if (srcnode_abspath_lower_len + 1) < norm_path_len:
+                            if norm_path[srcnode_abspath_lower_len] == os.sep and norm_path[:srcnode_abspath_lower_len].lower() == srcnode_abspath_lower:
+                                subpath = norm_path[srcnode_abspath_lower_len + 1:]
+                                self.src_deps_paths.add(subpath)
+                                continue
+                        if (bldnode_abspath_lower_len + 1) < norm_path_len:
+                            if norm_path[bldnode_abspath_lower_len] == os.sep and norm_path[:bldnode_abspath_lower_len].lower() == bldnode_abspath_lower:
+                                subpath = norm_path[bldnode_abspath_lower_len + 1:]
+                                self.bld_deps_paths.add(subpath)
+                                continue
                         # System library
                         if Logs.verbose:
                             Logs.debug('msvcdeps: Ignoring system include %r' % inc_path)
@@ -309,17 +319,9 @@ def wrap_compiled_task(classname):
             # Use base class's version of this method for linker tasks
             return super(derived_class, self).exec_response_command(cmd, **kw)
 
-    def can_retrieve_cache(self):        
-        # msvcdeps and netcaching are incompatible, so disable the cache
-        if self.env.CC_NAME not in supported_compilers:
-            return super(derived_class, self).can_retrieve_cache()
-        self.nocache = True # Disable sending the file to the cache
-        return False
-
     derived_class.post_run = post_run
     derived_class.scan = scan
     derived_class.exec_response_command = exec_response_command
-    derived_class.can_retrieve_cache = can_retrieve_cache
 
 
 for compile_task in ('c', 'cxx','pch_msvc'):

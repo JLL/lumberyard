@@ -17,6 +17,7 @@
 #include "BaseObject.h"
 #include "MemoryCategories.h"
 #include <MCore/Source/MultiThreadManager.h>
+#include <MCore/Source/Array.h>
 
 
 namespace EMotionFX
@@ -37,7 +38,7 @@ namespace EMotionFX
     class EMFX_API ActorManager
         : public BaseObject
     {
-        MCORE_MEMORYOBJECTCATEGORY(ActorManager, EMFX_DEFAULT_ALIGNMENT, EMFX_MEMCATEGORY_ACTORMANAGER);
+        AZ_CLASS_ALLOCATOR_DECL
         friend class Initializer;
         friend class EMotionFXManager;
 

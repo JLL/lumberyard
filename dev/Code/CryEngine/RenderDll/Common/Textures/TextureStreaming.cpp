@@ -19,7 +19,6 @@
 #include "Image/DDSImage.h"
 #include "StringUtils.h"                                // stristr()
 #include "ILocalMemoryUsage.h"
-#include <IJobManager_JobDelegator.h>
 
 #include "TextureManager.h"
 #include "TextureStreamPool.h"
@@ -92,7 +91,7 @@ ITextureStreamer* CTexture::s_pTextureStreamer;
 CryCriticalSection CTexture::s_streamFormatLock;
 SStreamFormatCode CTexture::s_formatCodes[256];
 uint32 CTexture::s_nFormatCodes = 1;
-CTexture::TStreamFormatCodeKeyMap CTexture::s_formatCodeMap;
+StaticInstance<CTexture::TStreamFormatCodeKeyMap> CTexture::s_formatCodeMap;
 
 const int CTexture::LOW_SPEC_PC = 5;
 const int CTexture::MEDIUM_SPEC_PC = 6;
@@ -151,7 +150,11 @@ void STexStreamOutState::Reset()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_1
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 }
 
@@ -161,7 +164,11 @@ bool STexStreamOutState::TryCommit()
     {
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_2
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 
         if (!m_bAborted)
@@ -256,7 +263,11 @@ void STexStreamInState::StreamAsyncOnComplete(IReadStream* pStream, unsigned nEr
 #define AZ_RESTRICTED_SECTION_IMPLEMENTED
 #elif defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_3
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -298,29 +309,34 @@ void STexStreamInState::StreamAsyncOnComplete(IReadStream* pStream, unsigned nEr
         {
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_4
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 
 #if defined(TEXSTRM_DEFERRED_UPLOAD)
-
-            ID3D11CommandList* pCmdList = tp->StreamCreateDeferred(m_nHigherUploadedMip, m_nLowerUploadedMip, m_pNewPoolItem, tp->m_pFileTexMips->m_pPoolItem);
-
-            if (pCmdList)
+            if (tp->m_pFileTexMips->m_pPoolItem)    ///< Don't upload if the source is nullptr it'll just cause an exception
             {
-                m_pCmdList = pCmdList;
-                m_bValidLowMips = true;
+                ID3D11CommandList* pCmdList = tp->StreamCreateDeferred(m_nHigherUploadedMip, m_nLowerUploadedMip, m_pNewPoolItem, tp->m_pFileTexMips->m_pPoolItem);
 
-                for (int i = 0, c = m_nLowerUploadedMip - m_nHigherUploadedMip + 1; i != c; ++i)
+                if (pCmdList)
                 {
-                    m_mips[i].m_bExpanded = false;
-                }
+                    m_pCmdList = pCmdList;
+                    m_bValidLowMips = true;
 
-                if (CTexture::s_bStreamDontKeepSystem)
-                {
-                    tp->StreamReleaseMipsData(m_nHigherUploadedMip, m_nLowerUploadedMip);
+                    for (int i = 0, c = m_nLowerUploadedMip - m_nHigherUploadedMip + 1; i != c; ++i)
+                    {
+                        m_mips[i].m_bExpanded = false;
+                    }
+
+                    if (CTexture::s_bStreamDontKeepSystem)
+                    {
+                        tp->StreamReleaseMipsData(m_nHigherUploadedMip, m_nLowerUploadedMip);
+                    }
                 }
             }
-
 #endif
 
 #if defined(TEXSTRM_ASYNC_TEXCOPY)
@@ -399,7 +415,11 @@ bool STexStreamInState::TryCommit()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_5
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 
         if (!m_bValidLowMips)
@@ -1463,7 +1483,11 @@ bool CTexture::CanStreamInPlace(int nMip, STexPoolItem* pNewPoolItem)
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_6
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 
 #if TEXTURESTREAMING_CPP_TRAIT_CANSTREAMINPLACE_SRCTILEMODE_CHECK && !defined(NULL_RENDERER)
@@ -1572,7 +1596,11 @@ bool CTexture::StartStreaming(CTexture* pTex, STexPoolItem* pNewPoolItem, const 
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION TEXTURESTREAMING_CPP_SECTION_7
-#include AZ_RESTRICTED_FILE(TextureStreaming_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/TextureStreaming_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/TextureStreaming_cpp_provo.inl"
+    #endif
 #endif
 
                     if (pBaseAddress)
@@ -1600,7 +1628,7 @@ bool CTexture::StartStreaming(CTexture* pTex, STexPoolItem* pNewPoolItem, const 
                 nSizeToSubmit += pTex->m_pFileTexMips->m_pMipHeader[nChunkMip].m_SideSize * nSides;
             }
 
-            std::function<void()> updateTextureByteCounterAtomic = [&nSizeToSubmit]()
+            AZStd::function<void()> updateTextureByteCounterAtomic = [&nSizeToSubmit]()
                 {
                     CryInterlockedAdd(s_nBytesSubmittedToStreaming.Addr(), nSizeToSubmit);
                 };
@@ -1698,13 +1726,13 @@ void CTexture::InitStreaming()
     if (CRenderer::CV_r_texturesstreaming)
     {
         int nMinTexStreamPool = 192;
-        int nMaxTexStreamPool = 1536;
-
-#if defined(WIN32) && !defined(WIN64)
-        if (!pEnv->pi.win64Bit)  // 32 bit executable
-        {
-            nMaxTexStreamPool = 512;
-        }
+#ifdef NULL_RENDERER
+        // Dedicated server uses CNULLRenderer, which doesn't report any available 
+        // memory via gRenDev->m_MaxTextureMemory, so use a magic number. It's OK 
+        // to use it here, as a dedicated server will not load textures anyway.
+        int nMaxTexStreamPool = 8192; 
+#else
+        int nMaxTexStreamPool = (gRenDev->m_MaxTextureMemory / 1024 / 1024);
 #endif
 
         ICVar* pICVarTexRes = iConsole->GetCVar("sys_spec_TextureResolution");
@@ -1737,6 +1765,8 @@ void CTexture::InitStreaming()
                 pICVarTexRes->Set(valTexRes);
             }
         }
+
+        AZ_WarningOnce("TextureStreaming", CRenderer::CV_r_TexturesStreamPoolSize <= (nMaxTexStreamPool * 0.75f), "Warning!  You are assigning more than 75 percent of total available GPU memory to texture streaming!");
 
         CRenderer::CV_r_TexturesStreamPoolSize = clamp_tpl(CRenderer::CV_r_TexturesStreamPoolSize, nMinTexStreamPool, nMaxTexStreamPool);
 

@@ -22,6 +22,7 @@
 #include <GraphCanvas/Components/Nodes/NodeConfiguration.h>
 #include <GraphCanvas/Components/SceneBus.h>
 #include <GraphCanvas/Components/StyleBus.h>
+#include <GraphCanvas/Components/VisualBus.h>
 
 namespace GraphCanvas
 {
@@ -32,12 +33,13 @@ namespace GraphCanvas
         , public SceneMemberNotificationBus::Handler
         , public SceneNotificationBus::Handler
         , public AZ::EntityBus::Handler
+        , public SlotNotificationBus::MultiHandler
     {
         friend class NodeSerializer;
     public:
         AZ_COMPONENT(NodeComponent, "{7385AAC3-18F0-4BCE-BD9B-C17798C899EC}", GraphCanvasPropertyComponent);
         static void Reflect(AZ::ReflectContext*);
-		
+
         static AZ::Entity* CreateCoreNodeEntity(const NodeConfiguration& config = NodeConfiguration());
 
         NodeComponent();
@@ -66,13 +68,19 @@ namespace GraphCanvas
             required.push_back(AZ_CRC("GraphCanvas_GeometryService", 0x80981600));
             required.push_back(StyledGraphicItemServiceCrc);
         }
-		
-		void Init() override;
+
+        void Init() override;
         void Activate() override;
         void Deactivate() override;
-        ////    
+        ////
+
+        // SlotNotificationBus
+        void OnConnectedTo(const AZ::EntityId& connectionId, const Endpoint& endpoint) override;
+        void OnDisconnectedFrom(const AZ::EntityId& connectionId, const Endpoint& endpoint) override;
+        ////
 
         // AZ::EntityBus
+        void OnEntityExists(const AZ::EntityId&) override;
         void OnEntityActivated(const AZ::EntityId&) override;
         ////
 
@@ -107,12 +115,21 @@ namespace GraphCanvas
         void RemoveSlot(const AZ::EntityId& slotId) override;
 
         AZStd::vector<AZ::EntityId> GetSlotIds() const override;
+        AZStd::vector<SlotId> GetVisibleSlotIds() const override;
+        AZStd::vector<SlotId> FindVisibleSlotIdsByType(const ConnectionType& connectionType, const SlotType& slotType) const override;
+
+        bool HasConnections() const override;
 
         AZStd::any* GetUserData() override;
 
         bool IsWrapped() const override;
         void SetWrappingNode(const AZ::EntityId& wrappingNode) override;
         AZ::EntityId GetWrappingNode() const override;
+
+        void SignalBatchedConnectionManipulationBegin() override;
+        void SignalBatchedConnectionManipulationEnd() override;
+
+        RootGraphicsItemEnabledState UpdateEnabledState() override;
         ////
 
     protected:

@@ -18,15 +18,18 @@
 #pragma once
 
 #include <AzCore/EBus/EBus.h>
-
 #include <AzCore/Math/Aabb.h>
+#include <AzCore/Math/Uuid.h>
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/Component/ComponentBus.h>
 #include <AzCore/std/containers/vector.h>
+#include <AzCore/Slice/SliceComponent.h>
 #include <AzCore/Outcome/Outcome.h>
 #include <AzToolsFramework/UI/PropertyEditor/PropertyEditorAPI.h>
 #include <AzToolsFramework/SourceControl/SourceControlAPI.h>
+
+#include <AzFramework/Entity/EntityContextBus.h>
 
 namespace AZ
 {
@@ -83,9 +86,10 @@ namespace AzToolsFramework
 
         /*!
          * Fired after committing a change in entity selection set.
+         * \param EntityIdList the list of newly selected entity Ids
+         * \param EntityIdList the list of newly deselected entity Ids
          */
-        virtual void AfterEntitySelectionChanged() {}
-
+        virtual void AfterEntitySelectionChanged(const EntityIdList& /*newlySelectedEntities*/, const EntityIdList& /*newlyDeselectedEntities*/) {}
 
         /*!
         * Fired before committing a change in entity highlighting set.
@@ -169,12 +173,29 @@ namespace AzToolsFramework
         /*!
          * Event sent when the editor is set to Isolation Mode where only selected entities are visible
          */
-        virtual void OnEnterEditorIsolationMode() {};
+        virtual void OnEnterEditorIsolationMode() {}
 
         /*!
          * Event sent when the editor quits Isolation Mode
          */
-        virtual void OnExitEditorIsolationMode() {};
+        virtual void OnExitEditorIsolationMode() {}
+
+        /*!
+         * Sets  the position of the next entity to be instantiated, used by the EditorEntityModel when dragging from asset browser
+         */
+        virtual void SetEntityInstantiationPosition(const AZ::EntityId& /*parent*/, const AZ::EntityId& /*beforeEntity*/) {}
+
+        /*!
+        * Clears the position of the next entity to be instantiated, used by the EditorEntityModel if entity instantiation fails
+        * after SetEntityInstantiationPosition is called. This makes sure entities created after the initial event don't end up with a parent out of
+        * sync in the outliner and transform component.
+        */
+        virtual void ClearEntityInstantiationPosition() {}
+
+        /*!
+         * Called when the level is saved.
+         */
+        virtual void OnSaveLevel() {}
     };
 
     using ToolsApplicationNotificationBus = AZ::EBus<ToolsApplicationEvents>;
@@ -238,16 +259,37 @@ namespace AzToolsFramework
         virtual void FlushUndo() = 0;
 
         /*!
-         * Notifies the application that the user has selected an entity.
+        * Notifies the application that the redo stack needs to be sliced (removed)
+        */
+        virtual void FlushRedo() = 0;
+
+        /*!
+         * Notifies the application that the user intends to select an entity.
          * \param entityId - the Id of the newly selected entity.
          */
         virtual void MarkEntitySelected(AZ::EntityId entityId) = 0;
 
         /*!
-         * Notifies the application that the user has deselected an entity.
+         * Notifies the application that the user intends to select a list of entities.
+         * This should be used any time multiple entities are selected, as this is 
+         * a large performance improvement over calling MarkEntitySelected more than once.
+         * \param entitiesToSelect - the vector of newly selected entities
+         */
+        virtual void MarkEntitiesSelected(const EntityIdList& entitiesToSelect) = 0;
+
+        /*!
+         * Notifies the application that the user intends to deselect an entity.
          * \param entityId - the Id of the now deselected entity.
          */
         virtual void MarkEntityDeselected(AZ::EntityId entityId) = 0;
+
+        /*!
+         * Notifies the application that the user intends to deselect a list of entities.
+         * This should be used any time multiple entities are deselected, as this is
+         * a large performance improvement over calling MarkEntityDeselected more than once.
+         * \param entitiesToDeselect - the vector of newly deselected entities
+         */
+        virtual void MarkEntitiesDeselected(const EntityIdList& entitiesToDeselect) = 0;
 
         /*!
          * Notifies the application that editor has highlighted an entity, or removed
@@ -301,6 +343,11 @@ namespace AzToolsFramework
         virtual SourceControlFileInfo GetSceneSourceControlInfo() = 0;
 
         /*!
+         * Returns true if any entities are selected, false if no entities are selected.
+         */
+        virtual bool AreAnyEntitiesSelected() = 0;
+
+        /*!
          * Retrieves the set of selected entities.
          * \return a list of entity Ids.
          */
@@ -319,9 +366,9 @@ namespace AzToolsFramework
         virtual void SetSelectedEntities(const EntityIdList& selectedEntities) = 0;
 
         /*!
-         * Returns true if the specified entity is able to be selected (not locked).
-         * \param entityId
-         */
+        * Functionality removed, function call left in to prevent compile issues if anybody's using it.
+        * \param entityId
+        */
         virtual bool IsSelectable(const AZ::EntityId& entityId) = 0;
 
         /*!
@@ -363,6 +410,8 @@ namespace AzToolsFramework
         * Deletes all entities in the provided list, as well as their transform descendants.
         */
         virtual void DeleteEntitiesAndAllDescendants(const EntityIdList& entities) = 0;
+
+        virtual bool DetachEntities(const AZStd::vector<AZ::EntityId>& entitiesToDetach, AZStd::vector<AZStd::pair<AZ::EntityId, AZ::SliceComponent::EntityRestoreInfo>>& restoreInfos) = 0;
 
         /*!
         * \brief Finds the Common root of an entity list; Also finds the top level entities in a given list of active entities (who share the common root)
@@ -418,6 +467,21 @@ namespace AzToolsFramework
         virtual void FindTopLevelEntityIdsInactive(const EntityIdList& entityIdsToCheck, EntityIdList& topLevelEntityIds) = 0;
 
         /**
+         * Check every entity to see if they all belong to the same slice instance, if so return that slice instance address, otherwise return null.
+         * @param entityIds An group of EntityIds.
+         * @return The slice instance address if all of \ref entityIds belongs to the same slice instance, otherwise null.
+         */
+        virtual AZ::SliceComponent::SliceInstanceAddress FindCommonSliceInstanceAddress(const EntityIdList& entityIds) = 0;
+
+        /**
+         * Get the id of the root entity of a slice instance. 
+         * This function ignores any unpushed change made to the transform hierarchy of the entities in the slice instance in question.
+         * @param sliceAddress The address of a slice instance.
+         * @return The root entity id.
+         */
+        virtual AZ::EntityId GetRootEntityIdOfSliceInstance(AZ::SliceComponent::SliceInstanceAddress sliceAddress) = 0;
+
+        /**
         * Prepares a file for editability. Interacts with source-control if the asset is not already writable, in a blocking fashion.
         * \param path full path of the asset to be made editable.
         * \param progressMessage progress message to display during checkout operation.
@@ -428,6 +492,16 @@ namespace AzToolsFramework
         virtual bool RequestEditForFileBlocking(const char* assetPath, const char* progressMessage, const RequestEditProgressCallback& progressCallback) = 0;
 
         /**
+        * Same as RequestEditForBlocking, but intentionally fails operation when source control is offline
+        * We add this function as convenience to side step the behavior of removing write protection when LocalFileSCComponent is used
+        * \param path full path of the asset to be made editable.
+        * \param progressMessage progress message to display during checkout operation.
+        * \param progressCallback user callback for retrieving progress information, provide RequestEditProgressCallback() if no progress reporting is required.
+        * \return boolean value indicating if the file is writable after the operation.
+        */
+        virtual bool CheckSourceControlConnectionAndRequestEditForFileBlocking(const char* assetPath, const char* progressMessage, const RequestEditProgressCallback& progressCallback) = 0;
+
+        /**
         * Prepares a file for editability. Interacts with source-control if the asset is not already writable.
         * \param path full path of the asset to be made editable.
         * \param resultCallback user callback to be notified when source control operation is complete. Callback will be invoked with a true success value if the file was made writable.
@@ -435,6 +509,15 @@ namespace AzToolsFramework
         */
         using RequestEditResultCallback = AZStd::function<void(bool success)>;
         virtual void RequestEditForFile(const char* assetPath, RequestEditResultCallback resultCallback) = 0;
+
+        /**
+        * Same as RequestEditForFile, but intentionally fails operation when source control is offline
+        * We add this function as convenience to side step the behavior of removing write protection when LocalFileSCComponent is used
+        * \param path full path of the asset to be made editable.
+        * \param resultCallback user callback to be notified when source control operation is complete. Callback will be invoked with a true success value if the file was made writable.
+        *        If the file is already writable at the time the function is called, resultCallback(true) will be invoked immediately.
+        */
+        virtual void CheckSourceControlConnectionAndRequestEditForFile(const char* assetPath, RequestEditResultCallback resultCallback) = 0;
 
         /*!
          * Enter the Isolation Mode and hide entities that are not selected.
@@ -474,9 +557,31 @@ namespace AzToolsFramework
         virtual void CreateAndAddEntityFromComponentTags(const AZStd::vector<AZ::Crc32>& requiredTags, const char* entityName) = 0;
 
         /**
-        * TEMP
+        * Attempts to resolve a path to an executable using these known locations:
+        *   1) The current executable's folder
+        *   2) The Tools/LmbrSetup folder
         */
-        virtual AZ::Outcome<AZStd::string, AZStd::string> ResolveToolPath(const char* currentExecutablePath, const char* toolApplicationName) const = 0;
+        using ResolveToolPathOutcome = AZ::Outcome<AZStd::string, AZStd::string>;
+        virtual ResolveToolPathOutcome ResolveConfigToolsPath(const char* toolApplicationName) const = 0;
+
+        /**
+         * LUMBERYARD INTERNAL USE ONLY.
+         *
+         * Run a specific redo command separate from the undo/redo system.
+         * In many cases before a modifcation on an entity takes place, it is first packaged into 
+         * undo/redo commands. Running the modification's redo command separete from the undo/redo 
+         * system simulates its execution, and avoids some code duplication.
+         */
+        virtual void RunRedoSeparately(UndoSystem::URSequencePoint* redoCommand) = 0;
+
+        /**
+        * @deprecated
+        */
+        AZ_DEPRECATED(ResolveToolPathOutcome ResolveToolPath(const char* currentExecutablePath, const char* toolApplicationName) const, "ToolsApplicationRequests::ResolveToolPath is deprecated. Please use ToolsApplicationRequests::ResolveConfigToolsPath")
+        {
+            AZ_UNUSED(currentExecutablePath);
+            return ResolveConfigToolsPath(toolApplicationName);
+        };
     };
 
     using ToolsApplicationRequestBus = AZ::EBus<ToolsApplicationRequests>;
@@ -521,26 +626,63 @@ namespace AzToolsFramework
     };
 
     /**
-    * Bus for editor requests related to pick mode
-    */
+     * Bus for editor requests related to Pick Mode.
+     */
     class EditorPickModeRequests
         : public AZ::EBusTraits
     {
     public:
-
         using Bus = AZ::EBus<EditorPickModeRequests>;
 
-        //////////////////////////////////////////////////////////////////////////
         // EBusTraits overrides
-        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Multiple;
-        //////////////////////////////////////////////////////////////////////////
+        using BusIdType = AzFramework::EntityContextId;
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+        static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
 
-        /// Starts object pick mode -- next object selection will broadcasted via EntitySelectionEventBus::OnPickModeSelect,
-        /// and will not affect general object selection.
-        virtual void StartObjectPickMode() {};
-        virtual void StopObjectPickMode() {};
-        virtual void OnPickModeSelect(AZ::EntityId /*id*/) {}
+        /**
+         * Move the Editor out of Pick Mode.
+         * Note: The Editor is moved into Pick Mode by a button in the Entity Inspector UI.
+         */
+        virtual void StopEntityPickMode() = 0;
+        /**
+         * When in Pick Mode, set the picked entity to the assigned slot(s).
+         * @note It is only valid to make this request when the editor is in Pick Mode.
+         */
+        virtual void PickModeSelectEntity(AZ::EntityId entityId) = 0;
+    
+    protected:
+        ~EditorPickModeRequests() = default;
     };
+
+    /// Type to inherit to implement EditorPickModeRequests
+    using EditorPickModeRequestBus = AZ::EBus<EditorPickModeRequests>;
+
+    /**
+     * Bus for editor notifications related to Pick Mode.
+     */
+    class EditorPickModeNotifications
+        : public AZ::EBusTraits
+    {
+    public:
+        // EBusTraits overrides
+        using BusIdType = AzFramework::EntityContextId;
+        static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::ById;
+
+        /**
+         * Notify other systems that the editor has entered Pick Mode select.
+         */
+        virtual void OnEntityPickModeStarted() {}
+        /**
+         * Notify other systems that the editor has left Pick Mode select.
+         */
+        virtual void OnEntityPickModeStopped() {}
+
+    protected:
+        ~EditorPickModeNotifications() = default;
+    };
+
+    /// Type to inherit to implement EditorPickModeNotifications
+    using EditorPickModeNotificationBus = AZ::EBus<EditorPickModeNotifications>;
 
     /**
      * Bus for general editor requests to be intercepted by the application (e.g. Sandbox).
@@ -574,6 +716,10 @@ namespace AzToolsFramework
         /// \param name - the name of the pane to be unregistered. This must match the name used for registration.
         virtual void UnregisterViewPane(const char* /*name*/) {};
 
+        /// Returns the widget contained/wrapped in a view pane.
+        /// \param viewPaneName - the name of the pane which contains the widget to be retrieved. This must match the name used for registration.
+        virtual QWidget* GetViewPaneWidget(const char* /*viewPaneName*/) { return nullptr; }
+
         /// Show an Editor window by name.
         void ShowViewPane(const char* paneName) { OpenViewPane(paneName); }
 
@@ -596,6 +742,7 @@ namespace AzToolsFramework
         /// \param cubemapOutputPath path to a image file to generate
         /// \param hideEntity Indicates whether the entity should be hidden during cubemap generation. Controls whether the entity's current cubemap output is baked into the new cubemap.
         virtual void GenerateCubemapForEntity(AZ::EntityId /*entityId*/, AZStd::string* /*cubemapOutputPath*/, bool /*hideEntity*/) {}
+        virtual void GenerateCubemapWithIDForEntity(AZ::EntityId /*entityId*/, AZ::Uuid /*cubemapId*/, AZStd::string* /*cubemapOutputPath*/, bool /*hideEntity*/, bool /*hasCubemapId*/) {}
 
         //! Spawn asset browser for the appropriate asset types.
         virtual void BrowseForAssets(AssetBrowser::AssetSelectionModel& /*selection*/) = 0;
@@ -605,11 +752,6 @@ namespace AzToolsFramework
 
         /// Allow interception of cursor, for customizing selection behavior.
         virtual void UpdateObjectModeCursor(AZ::u32& /*cursorId*/, AZStd::string& /*cursorStr*/) {}
-
-        /// Starts object pick mode -- next object selection will broadcasted via EntitySelectionEventBus::OnPickModeSelect,
-        /// and will not affect general object selection.
-        virtual void StartObjectPickMode() {};
-        virtual void StopObjectPickMode() {};
 
         /// Creates editor-side representation of an underlying entity.
         virtual void CreateEditorRepresentation(AZ::Entity* /*entity*/) { }
@@ -632,11 +774,21 @@ namespace AzToolsFramework
         /// Create a new entity at a specified position
         virtual AZ::EntityId CreateNewEntityAtPosition(const AZ::Vector3& /*pos*/, AZ::EntityId parentId = AZ::EntityId()) { (void)parentId; return AZ::EntityId(); }
 
+        virtual AzFramework::EntityContextId GetEntityContextId() { return AzFramework::EntityContextId::CreateNull(); }
+
         /// Retrieve the main application window.
         virtual QWidget* GetMainWindow() { return nullptr; }
 
         /// Retrieve main editor interface.
         virtual IEditor* GetEditor() { return nullptr; }
+
+        virtual bool GetUndoSliceOverrideSaveValue() { return false; }
+
+        /// Retrieve the setting for messaging
+        virtual bool GetShowCircularDependencyError() { return true; }
+
+        /// Hide or show the circular dependency error when saving slices
+        virtual void SetShowCircularDependencyError(const bool& /*showCircularDependencyError*/) {}
 
         virtual void SetEditTool(const char* /*tool*/) {}
 
@@ -645,6 +797,9 @@ namespace AzToolsFramework
 
         /// Returns whether a level document is open.
         virtual bool IsLevelDocumentOpen() { return false; }
+
+        /// Return the name of a level document.
+        virtual AZStd::string GetLevelName() { return AZStd::string(); }
 
         /// Return default icon to show in the viewport for components that haven't specified an icon.
         virtual AZStd::string GetDefaultComponentViewportIcon() { return AZStd::string(); }
@@ -693,8 +848,29 @@ namespace AzToolsFramework
         /// Return all available agent types defined in the Navigation xml file.
         virtual AZStd::vector<AZStd::string> GetAgentTypes() { return AZStd::vector<AZStd::string>(); }
 
-        /// Focus all viewports on the list of entities
+        /// Focus all viewports on the selected and highlighted entities
         virtual void GoToSelectedOrHighlightedEntitiesInViewports() { }
+
+        /// Focus all viewports on the selected entities
+        virtual void GoToSelectedEntitiesInViewports() { }
+
+        /// Returns true if the selected entities can be moved to, and false if not.
+        virtual bool CanGoToSelectedEntitiesInViewports() { return true; }
+
+        /// Returns the world-space position under the center of the render viewport.
+        virtual AZ::Vector3 GetWorldPositionAtViewportCenter() { return AZ::Vector3::CreateZero(); }
+
+        virtual void InstantiateSliceFromAssetId(const AZ::Data::AssetId& /*assetId*/) {}
+
+        /// Clears current redo stack
+        virtual void ClearRedoStack() {}
+        
+        /// Return the icon texture id (from internal IconManager) for a given entity icon path.
+        /// This can be passed to DrawTextureLabel to draw an entity icon.
+        virtual int GetIconTextureIdFromEntityIconPath(const AZStd::string& entityIconPath) = 0;
+
+        /// Returns if the Display Helpers option is toggled on in the Editor.
+        virtual bool DisplayHelpersVisible() = 0;
     };
 
     using EditorRequestBus = AZ::EBus<EditorRequests>;
@@ -708,7 +884,6 @@ namespace AzToolsFramework
     public:
         using Bus = AZ::EBus<EditorEvents>;
 
-        virtual void OnPickModeSelect(AZ::EntityId /*id*/) {}
         virtual void OnEscape() {}
 
         /// The editor has changed performance specs.
@@ -724,6 +899,9 @@ namespace AzToolsFramework
         /// Populate global edit-time context menu.
         virtual void PopulateEditorGlobalContextMenu(QMenu * /*menu*/, const AZ::Vector2& /*point*/, int /*flags*/) {}
 
+        /// Populate slice portion of edit-time context menu
+        virtual void PopulateEditorGlobalContextMenu_SliceSection(QMenu * /*menu*/, const AZ::Vector2& /*point*/, int /*flags*/) {}
+
         /// Anything can override this and return true to skip over the WelcomeScreenDialog
         virtual bool SkipEditorStartupUI() { return false; }
 
@@ -732,7 +910,15 @@ namespace AzToolsFramework
 
         /// Notify that the Qt Application object is now ready to be used
         virtual void NotifyQtApplicationAvailable(QApplication* /* application */) {}
+
+        /// Notify that the IEditor is ready
+        virtual void NotifyIEditorAvailable(IEditor* /*editor*/) {}
+
+        /// Signal that an asset should be highlighted / selected
+        virtual void SelectAsset(const QString& /* assetPath */) {}
     };
+
+    using EditorEventsBus = AZ::EBus<EditorEvents>;
 
     /**
      * RAII Helper class for undo batches.
@@ -771,7 +957,7 @@ namespace AzToolsFramework
     private:
         AZ_DISABLE_COPY_MOVE(ScopedUndoBatch);
 
-        UndoSystem::URSequencePoint* m_undoBatch;
+        UndoSystem::URSequencePoint* m_undoBatch = nullptr;
     };
 
     /// Registers a view pane with the main editor. It will be listed under the "Tools" menu on the main window's menubar.
@@ -820,6 +1006,17 @@ namespace AzToolsFramework
         EditorRequests::Bus::Broadcast(&EditorRequests::UnregisterViewPane, viewPaneName);
     }
 
+    /// Returns the widget contained/wrapped in a view pane.
+    /// \param name - the name of the pane which contains the widget to be retrieved. This must match the name used for registration.
+    template <typename TWidget>
+    inline TWidget* GetViewPaneWidget(const char* viewPaneName)
+    {
+        QWidget* ret = nullptr;
+        EditorRequests::Bus::BroadcastResult(ret, &EditorRequests::GetViewPaneWidget, viewPaneName);
+
+        return qobject_cast<TWidget*>(ret);
+    }
+
     /// Opens a view pane if not already open, and activating the view pane if it was already opened.
     ///
     /// \param viewPaneName - name of the pane to open/activate. Must be the same as the name previously registered with RegisterViewPane.
@@ -845,6 +1042,17 @@ namespace AzToolsFramework
     inline void CloseViewPane(const char* viewPaneName)
     {
         EditorRequests::Bus::Broadcast(&EditorRequests::CloseViewPane, viewPaneName);
+    }
+
+    /**
+     * Helper to wrap checking if an undo/redo operation is in progress.
+     */
+    inline bool UndoRedoOperationInProgress()
+    {
+        bool isDuringUndoRedo = false;
+        ToolsApplicationRequestBus::BroadcastResult(
+            isDuringUndoRedo, &ToolsApplicationRequests::IsDuringUndoRedo);
+        return isDuringUndoRedo;
     }
 } // namespace AzToolsFramework
 

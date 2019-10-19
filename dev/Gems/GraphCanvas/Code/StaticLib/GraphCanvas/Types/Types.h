@@ -11,22 +11,116 @@
 */
 #pragma once
 
+#include <qcolor.h>
 #include <qfont.h>
 #include <qfontinfo.h>
 
 #include <AzCore/Math/Color.h>
+#include <AzCore/std/string/string.h>
+#include <AzCore/std/containers/vector.h>
+
+#include <GraphCanvas/Editor/EditorTypes.h>
 
 namespace GraphCanvas
 {
+    enum class ConstructType
+    {
+        Unknown,
+        CommentNode,
+        BookmarkAnchor,
+        NodeGroup
+    };    
+
     enum RootGraphicsItemDisplayState
     {
         // Order of this enum, also determines the priority, and which states
         // are stacked over each other.
         Neutral     = 0,
         Preview,
+        PartialDisabled,
+        Disabled,
+        GroupHighlight,
         Inspection,
         InspectionTransparent,
         Deletion
+    };
+
+    enum RootGraphicsItemEnabledState
+    {
+        ES_Enabled = 0,
+
+        // Partial Disabled implies that the node will not be acted upon in the current 
+        // chain because of a previously disabled node in the chain. But the node itself is still in the 'active' state
+        ES_PartialDisabled,
+
+        // A node that has been explicitly disabled and will not run in the specified graph.
+        ES_Disabled
+    };
+
+    class EnumStringifier
+    {
+    public:
+        static AZStd::string GetConstructTypeString(ConstructType constructType)
+        {
+            if (constructType == ConstructType::CommentNode)
+            {
+                return "Comment";
+            }
+            else if (constructType == ConstructType::BookmarkAnchor)
+            {
+                return "Bookmark";
+            }
+            else if (constructType == ConstructType::NodeGroup)
+            {
+                return "Node Group";
+            }
+
+            return "???";
+        }
+    };
+    
+    class CandyStripeConfiguration
+    {
+    public:
+        int m_maximumSize = 5;
+        int m_minStripes = 1;
+        
+        // How much to offset the stripe from vertical
+        int m_stripeAngle = 10;
+
+        QColor m_stripeColor;
+
+        // Control field for improving visuals and just offsetting the initial drawing point
+        int m_initialOffset;
+    };
+
+    class PatternFillConfiguration
+    {
+    public:
+        // Controls the minimum number of tile repetitions to fit into the fill area
+        // Horizontally
+        int m_minimumTileRepetitions = 1;
+
+        // Offset to even rows specified in percent of tile width
+        float m_evenRowOffsetPercent = 0.0f;
+
+        // Offset to odd rows specified in percent of tile width
+        float m_oddRowOffsetPercent = 0.0f;
+    };
+
+    class PatternedFillGenerator
+    {
+    public:
+        // Editor Target
+        EditorId m_editorId;
+
+        /// Icon Information
+        AZStd::string m_id;
+        AZStd::vector< AZStd::string > m_palettes;
+        AZStd::vector< QColor > m_colors;
+
+        // Pattern Information
+        PatternFillConfiguration m_configuration;
     };
 
     class FontConfiguration
@@ -54,7 +148,6 @@ namespace GraphCanvas
                 m_pixelSize = defaultFontInfo.pixelSize();
             }
         }
-
 
         AZ::Color               m_fontColor;
         AZStd::string           m_fontFamily;

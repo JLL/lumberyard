@@ -38,6 +38,7 @@
 
 #include <ParseEngineConfig.h>
 
+#include <AzCore/std/string/string_view.h>
 #include <AzGameFramework/Application/GameApplication.h>
 #include <AzCore/Debug/StackTracer.h>
 
@@ -154,7 +155,14 @@ static void LoadLauncherConfig(void)
         exit(EXIT_FAILURE);
     }
 
-    strncat(conf_filename, LINUX_LAUNCHER_CONF, strlen(LINUX_LAUNCHER_CONF));
+    // ensure that the dir ends in a /
+    int cwdLen = strlen(conf_filename);
+    if (conf_filename[cwdLen-1] != '/')
+    {
+        azstrncat(conf_filename, MAX_PATH, "/", 1);
+    }
+
+    azstrncat(conf_filename, MAX_PATH, LINUX_LAUNCHER_CONF, strlen(LINUX_LAUNCHER_CONF));
 
     conf_filename[sizeof conf_filename - 1] = 0;
     FILE* fp = fopen(conf_filename, "r");
@@ -220,7 +228,16 @@ static void SignalHandler(int sig, siginfo_t* info, void* secret)
         ftrace = stderr;
     }
 
-    AZ::Debug::StackPrinter::Print(ftrace);
+    AZ::Debug::StackFrame frames[25];
+    unsigned int frameCount = AZ_ARRAY_SIZE(frames);
+    frameCount = AZ::Debug::StackRecorder::Record(frames, frameCount);
+    AZ::Debug::SymbolStorage::StackLine lines[25];
+    AZ::Debug::SymbolStorage::DecodeFrames(frames, frameCount, lines);
+
+    for (unsigned int frame = 0; frame < frameCount; ++frame)
+    {
+        fprintf(ftrace, "%s", lines[frame]);
+    }
 
     if (ftrace != stderr)
     {
@@ -302,12 +319,6 @@ int RunGame(const char* commandLine)
     }
 #endif
 
-    // We need pass the full command line, including the filename
-    // lpCmdLine does not contain the filename.
-#if CAPTURE_REPLAY_LOG
-    CryGetIMemReplay()->StartOnCommandLine(commandLine);
-#endif
-
     // If there are no handlers for the editor game bus, attempt to load the legacy gamedll instead
     bool legacyGameDllStartup = (EditorGameRequestBus::GetTotalNumOfEventHandlers()==0);
     HMODULE gameDll = 0;
@@ -354,15 +365,24 @@ int RunGame(const char* commandLine)
         EditorGameRequestBus::BroadcastResult(pGameStartup, &EditorGameRequestBus::Events::CreateGameStartup);
     }
 
-    if (!pGameStartup)
+    // The legacy IGameStartup and IGameFramework are now optional,
+    // if they don't exist we need to create CrySystem here instead.
+    if (!pGameStartup || !pGameStartup->Init(startupParams))
     {
-        fprintf(stderr, "ERROR: Failed to create the GameStartup Interface!\n");
-        RunGame_EXIT(1);
+    #if !defined(AZ_MONOLITHIC_BUILD)
+        HMODULE systemLib = CryLoadLibraryDefName("CrySystem");
+        PFNCREATESYSTEMINTERFACE CreateSystemInterface = systemLib ? (PFNCREATESYSTEMINTERFACE)CryGetProcAddress(systemLib, "CreateSystemInterface") : nullptr;
+        if (CreateSystemInterface)
+        {
+            startupParams.pSystem = CreateSystemInterface(startupParams);
+        }
+    #else
+        startupParams.pSystem = CreateSystemInterface(startupParams);
+    #endif // AZ_MONOLITHIC_BUILD
     }
 
     // run the game
-    IGame* game = pGameStartup->Init(startupParams);
-    if (game)
+    if (startupParams.pSystem)
     {
 #if !defined(SYS_ENV_AS_STRUCT)
         gEnv = startupParams.pSystem->GetGlobalEnvironment();
@@ -372,16 +392,20 @@ int RunGame(const char* commandLine)
         gEnv->pConsole->ExecuteString("exec autoexec.cfg");
 
         // Run the main loop
-        LumberyardLauncher::RunMainLoop(gameApp, *gEnv->pGame->GetIGameFramework());
+        LumberyardLauncher::RunMainLoop(gameApp);
     }
     else
     {
-        fprintf(stderr, "ERROR: Failed to initialize the GameStartup Interface!\n");
+        fprintf(stderr, "ERROR: Failed to initialize the CrySystem Interface!\n");
+        exitCode = 1;
     }
 
     // if initialization failed, we still need to call shutdown
-    pGameStartup->Shutdown();
-    pGameStartup = 0;
+    if (pGameStartup)
+    {
+        pGameStartup->Shutdown();
+        pGameStartup = 0;
+    }
 
     gameApp.Stop();
 
@@ -450,18 +474,27 @@ void AttachGDB(const char* program)
 //-------------------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
-
-#if defined(_DEBUG)
     // If the first command line option is -debug, then we'll attach GDB.
     for (int i = 1; i < argc; ++i)
     {
+#if defined(_DEBUG)
         if (!strcmp(argv[i], "-debug"))
         {
             AttachGDB(argv[0]);
             break;
         }
-    }
 #endif
+        if (!strcmp(argv[i], "-wait"))
+        {
+            while(!AZ::Debug::Trace::IsDebuggerPresent())
+            {
+                AZStd::this_thread::sleep_for(AZStd::chrono::milliseconds(50));
+            }
+        }
+    }
+
+    AZ::AllocatorInstance<AZ::LegacyAllocator>::Create();
+    AZ::AllocatorInstance<CryStringAllocator>::Create();
 
     LoadLauncherConfig();
 
@@ -552,7 +585,15 @@ int main(int argc, char** argv)
 
     int result = RunGame(cmdLine);
 
+    AZ::AllocatorInstance<CryStringAllocator>::Destroy();
+    AZ::AllocatorInstance<AZ::LegacyAllocator>::Destroy();
+
     return result;
 }
+
+
+#if defined(AZ_MONOLITHIC_BUILD)
+#include <StaticModules.inl>
+#endif
 
 // vim:sw=2:ts=2:si

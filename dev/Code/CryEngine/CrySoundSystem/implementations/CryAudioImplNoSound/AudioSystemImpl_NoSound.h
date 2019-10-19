@@ -77,7 +77,7 @@ namespace Audio
             IATLAudioObjectData* const pAudioObjectData,
             const IATLTriggerImplData* const pTriggerData,
             IATLEventData* const pEventData,
-            const TAudioSourceId sourceId) override;
+            const SATLSourceData* const pSourceData) override;
         EAudioRequestStatus StopEvent(
             IATLAudioObjectData* const pAudioObjectData,
             const IATLEventData* const pEventData) override;
@@ -86,6 +86,9 @@ namespace Audio
         EAudioRequestStatus SetPosition(
             IATLAudioObjectData* const pAudioObjectData,
             const SATLWorldPosition& sWorldPosition) override;
+        EAudioRequestStatus SetMultiplePositions(
+            IATLAudioObjectData* const pAudioObjectData,
+            const MultiPositionParams& multiPositions) override;
         EAudioRequestStatus SetEnvironment(
             IATLAudioObjectData* const pAudioObjectData,
             const IATLEnvironmentImplData* const pEnvironmentImplData,
@@ -114,7 +117,6 @@ namespace Audio
         EAudioRequestStatus ParseAudioFileEntry(const XmlNodeRef pAudioFileEntryNode, SATLAudioFileEntryInfo* const pFileEntryInfo) override;
         void DeleteAudioFileEntryData(IATLAudioFileEntryData* const pOldAudioFileEntryData) override;
         const char* const GetAudioFileLocation(SATLAudioFileEntryInfo* const pFileEntryInfo) override;
-
         const IATLTriggerImplData* NewAudioTriggerImplData(const XmlNodeRef pAudioTriggerNode) override;
         void DeleteAudioTriggerImplData(const IATLTriggerImplData* const pOldTriggerImplData) override;
 
@@ -131,8 +133,8 @@ namespace Audio
         IATLAudioObjectData* NewAudioObjectData(const TAudioObjectID nObjectID) override;
         void DeleteAudioObjectData(IATLAudioObjectData* const pOldObjectData) override;
 
-        IATLListenerData* NewDefaultAudioListenerObjectData() override;
-        IATLListenerData* NewAudioListenerObjectData(const uint nIndex) override;
+        IATLListenerData* NewDefaultAudioListenerObjectData(const TATLIDType nListenerID) override;
+        IATLListenerData* NewAudioListenerObjectData(const TATLIDType nListenerID) override;
         void DeleteAudioListenerObjectData(IATLListenerData* const pOldListenerData) override;
 
         IATLEventData* NewAudioEventData(const TAudioEventID nEventID) override;
@@ -145,6 +147,7 @@ namespace Audio
         // Below data is only used when INCLUDE_AUDIO_PRODUCTION_CODE is defined!
         const char* const GetImplementationNameString() const override { return s_nosoundLongName; }
         void GetMemoryInfo(SAudioImplMemoryInfo& oMemoryInfo) const override;
+        AZStd::vector<AudioImplMemoryPoolInfo> GetMemoryPoolInfo() override { return m_debugMemoryPoolInfo; }
 
         bool CreateAudioSource(const SAudioInputConfig& sourceConfig) override { return false; }
         void DestroyAudioSource(TAudioSourceId sourceId) override {}
@@ -182,6 +185,7 @@ namespace Audio
         static const float s_obstructionOcclusionMax;
 
         AudioSet<IATLAudioFileEntryData*> m_soundBanks;
+        AZStd::vector<AudioImplMemoryPoolInfo> m_debugMemoryPoolInfo;
     };
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////

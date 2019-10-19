@@ -83,6 +83,14 @@ namespace LmbrCentral
         // CryCharacterPhysicsRagdollRequestBus::Handler
         void EnterRagdoll() override;
         void ExitRagdoll() override;
+        void EnableSimulation(const Physics::RagdollState& initialState) override;
+        void DisableSimulation() override;
+        Physics::Ragdoll* GetRagdoll() override;
+        void GetState(Physics::RagdollState& ragdollState) const override;
+        void SetState(const Physics::RagdollState& ragdollState) override;
+        void GetNodeState(size_t nodeIndex, Physics::RagdollNodeState& nodeState) const override;
+        void SetNodeState(size_t nodeIndex, const Physics::RagdollNodeState& nodeState) override;
+        Physics::RagdollNode* GetNode(size_t nodeIndex) const override;
         ////////////////////////////////////////////////////////////////////////
 
         ////////////////////////////////////////////////////////////////////////
@@ -136,7 +144,7 @@ namespace LmbrCentral
         // Damping
         float m_timeUntilAtRest = 0.025f;
         float m_damping = 0.3f;
-        float m_dampingDuringFreefall = 0.1;
+        float m_dampingDuringFreefall = 0.1f;
         int   m_groundedRequiredPointsOfContact = 4;
         float m_groundedTimeUntilAtRest = 0.065f;
         float m_groundedDamping = 1.5f;

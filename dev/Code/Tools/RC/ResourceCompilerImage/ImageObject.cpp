@@ -698,7 +698,7 @@ void ImageToProcess::ConvertFormatWithSpecifiedCompressor(const CImageProperties
     // convert to CTX1 format
     if (fmtDst == ePixelFormat_CTX1)
     {
-        RCLogError("Failed to convert image to CTX1 format because this version of RC doesn't support Xbox 360 platform"); // ACCEPTED_USE
+        RCLogError("Failed to convert image to CTX1 because that format is not supported.");
         set(0);
         return;
     }
@@ -957,7 +957,8 @@ ImageObject::~ImageObject()
 
 bool ImageObject::SaveImage(const char* filename, bool bForceDX10) const
 {
-    FILE* const out = fopen(filename, "wb");
+    FILE* out = nullptr; 
+    azfopen(&out, filename, "wb");
     if (!out)
     {
         RCLogError("%s: failed to create file %s", __FUNCTION__, filename);
@@ -1087,7 +1088,8 @@ bool ImageObject::SaveExtendedData(FILE* out, bool bForceDX10) const
 
 bool ImageObject::LoadImage(const char* filename, bool bForceDX10)
 {
-    FILE* const out = fopen(filename, "rb");
+    FILE* out = nullptr; 
+    azfopen(&out, filename, "rb");
     if (!out)
     {
         RCLogError("%s: failed to open file %s", __FUNCTION__, filename);

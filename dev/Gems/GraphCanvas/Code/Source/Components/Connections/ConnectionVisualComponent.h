@@ -16,10 +16,12 @@
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
+#include <AzCore/std/chrono/chrono.h>
 
 #include <GraphCanvas/Components/Connections/ConnectionBus.h>
 #include <GraphCanvas/Components/ViewBus.h>
 #include <GraphCanvas/Components/VisualBus.h>
+#include <GraphCanvas/Editor/AssetEditorBus.h>
 #include <GraphCanvas/Widgets/RootGraphicsItem.h>
 #include <GraphCanvas/Styling/StyleHelper.h>
 
@@ -86,8 +88,13 @@ namespace GraphCanvas
         QGraphicsItem* GetRootGraphicsItem() override;
         QGraphicsLayoutItem* GetRootGraphicsLayoutItem() override;
 
-        void SetSelected(bool selected);
-        bool IsSelected() const;
+        void SetSelected(bool selected) override;
+        bool IsSelected() const override;
+
+        QPainterPath GetOutline() const override;
+
+        void SetZValue(int zValue) override;
+        int GetZValue() const override;
         ////
 
     protected:
@@ -110,6 +117,8 @@ namespace GraphCanvas
         , public VisualNotificationBus::MultiHandler
         , public StyleNotificationBus::Handler
         , public AZ::SystemTickBus::Handler
+        , public SceneMemberNotificationBus::Handler
+        , public AssetEditorSettingsNotificationBus::Handler        
     {
     public:
         AZ_CLASS_ALLOCATOR(ConnectionGraphicsItem, AZ::SystemAllocator, 0);
@@ -156,12 +165,29 @@ namespace GraphCanvas
         void UpdateConnectionPath() override;
         ////
 
+        // SceneMemberNotifications
+        void OnSceneMemberHidden() override;
+        void OnSceneMemberShown() override;
+
+        void OnSceneSet(const GraphId& graphId) override;
+        ////
+
+        // AssetEditorSettingsNotifications
+        void OnSettingsChanged() override;
+        ////
+
     protected:
 
         const AZ::EntityId& GetConnectionEntityId() const;
 
         AZ::EntityId GetSourceSlotEntityId() const;
         AZ::EntityId GetTargetSlotEntityId() const;
+
+        EditorId GetEditorId() const;
+
+        void UpdateCurveStyle();
+
+        virtual Styling::ConnectionCurveType GetCurveStyle() const;
 
         virtual void UpdatePen();
         virtual void OnActivate();
@@ -170,11 +196,10 @@ namespace GraphCanvas
         
         // QGraphicsItem
         QPainterPath shape() const override;
-        void contextMenuEvent(QGraphicsSceneContextMenuEvent* contextMenuEvent) override;
 
         void mousePressEvent(QGraphicsSceneMouseEvent* mouseEvent) override;
         void mouseMoveEvent(QGraphicsSceneMouseEvent* mouseEvent) override;
-        void mouseReleaseEvent(QGraphicsSceneMouseEvent* mouseEvent) override;        
+        void mouseReleaseEvent(QGraphicsSceneMouseEvent* mouseEvent) override;
         ////
 
         void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget = nullptr) override;
@@ -188,11 +213,14 @@ namespace GraphCanvas
         
         QPointF m_initialPoint;
 
+        Styling::ConnectionCurveType m_curveType;
         Styling::StyleHelper m_style;
         QPen m_pen;
 
+        AZStd::chrono::milliseconds m_lastUpdate;
         double m_offset;
 
-        AZ::EntityId m_connectionEntityId;
+        AZ::EntityId m_connectionEntityId;        
+        EditorId     m_editorId;
     };
 }

@@ -14,7 +14,6 @@
 #define __EMSTUDIO_RENDERVIEWWIDGET_H
 
 #include "../EMStudioConfig.h"
-#include "../PreferencesWindow.h"
 #include "RenderWidget.h"
 #include <QWidget>
 #include <QMenu>
@@ -61,10 +60,15 @@ namespace EMStudio
             RENDER_GRID                     = 15,
             RENDER_BACKFACECULLING          = 16,
             RENDER_ACTORBINDPOSE            = 17,
-            RENDER_PHYSICS                  = 18,
-            RENDER_USE_GRADIENTBACKGROUND   = 19,
-            RENDER_MOTIONEXTRACTION         = 20,
-            NUM_RENDER_OPTIONS              = 21
+            RENDER_RAGDOLL_COLLIDERS        = 18,
+            RENDER_RAGDOLL_JOINTLIMITS      = 19,
+            RENDER_HITDETECTION_COLLIDERS   = 20,
+            RENDER_USE_GRADIENTBACKGROUND   = 21,
+            RENDER_MOTIONEXTRACTION         = 22,
+            RENDER_CLOTH_COLLIDERS          = 23,
+            RENDER_SIMULATEDOBJECT_COLLIDERS= 24,
+            RENDER_SIMULATEJOINTS           = 25,
+            NUM_RENDER_OPTIONS              = 26
         };
 
         MCORE_INLINE bool GetRenderFlag(ERenderFlag option)     { return mActions[(uint32)option]->isChecked(); }
@@ -76,7 +80,7 @@ namespace EMStudio
         void SaveOptions(QSettings* settings);
         void LoadOptions(QSettings* settings);
 
-        bool GetIsCharacterFollowModeActive()                   { return mFollowCharacterAction->isChecked(); }
+        bool GetIsCharacterFollowModeActive() const             { return mFollowCharacterAction->isChecked(); }
         void SetCharacterFollowModeActive(bool active);
 
         void OnContextMenuEvent(QWidget* renderWidget, bool ctrlPressed, int32 localMouseX, int32 localMouseY, QPoint globalMousePos, RenderPlugin* plugin, MCommon::Camera* camera);
@@ -107,6 +111,7 @@ namespace EMStudio
 
     private:
         void CreateEntry(QMenu* menu, const char* menuEntryName, const char* toolbarIconFileName, int32 actionIndex, bool visible = true);
+        void CreateEntry(QMenu* menu, const char* menuEntryName, const QIcon& icon, bool addToToolbar, int32 actionIndex, bool visible = true);
         void Reset();
 
         QMenuBar*                           mMenu;

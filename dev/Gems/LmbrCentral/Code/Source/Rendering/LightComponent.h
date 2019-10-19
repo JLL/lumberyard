@@ -16,6 +16,7 @@
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/ComponentBus.h>
 #include <AzCore/Math/Color.h>
+#include <AzCore/Math/Uuid.h>
 #include <AzFramework/Asset/SimpleAsset.h>
 
 #include <LmbrCentral/Rendering/LightComponentBus.h>
@@ -96,7 +97,7 @@ namespace LmbrCentral
         AZ::Vector3 m_probeArea;
         AZ::u32 m_probeSortPriority;
         ResolutionSetting m_probeCubemapResolution;
-        AZStd::string m_probeCubemap;
+        AzFramework::SimpleAssetReference<TextureAsset> m_probeCubemap;
         //parameter to enable box projection  
         bool m_isBoxProjected;
         float m_boxWidth;
@@ -133,6 +134,9 @@ namespace LmbrCentral
         float m_shadowUpdateMinRadius;
         float m_shadowUpdateRatio;
 
+        // Need to keep a unique Id to use as cubemap name
+        AZ::Uuid m_cubemapId;
+
         // \todo clip bounds - artists aren't using it. Includes fade dimensions.
 
         AZ::EntityId m_editorEntityId; // Editor-only, not reflected.
@@ -148,6 +152,8 @@ namespace LmbrCentral
         virtual AZ::Crc32 MinorPropertyChanged() { return 0; }
         virtual AZ::Crc32 MajorPropertyChanged() { return 0; }
         virtual AZ::Crc32 OnAnimationSettingChanged() { return 0; }
+        virtual AZ::Crc32 OnCubemapAssetChanged() { return 0; }
+        virtual bool CanGenerateCubemap() const { return false; }
 
     private:
 

@@ -179,7 +179,7 @@ namespace LmbrCentral
 
     AZ::u32 SkinnedMeshComponentRenderNode::GetJointIndexByName(const char* jointName) const
     {
-        if (m_characterInstance)
+        if (m_characterInstance && jointName)
         {
             const IDefaultSkeleton& skeleton = m_characterInstance->GetIDefaultSkeleton();
             const int jointIndex = skeleton.GetJointIDByName(jointName);
@@ -230,8 +230,9 @@ namespace LmbrCentral
         , m_lodDistance(0.f)
         , m_isRegisteredWithRenderer(false)
         , m_objectMoved(false)
-        , m_characterDefinitionAsset(static_cast<AZ::u8>(AZ::Data::AssetFlags::OBJECTSTREAM_QUEUE_LOAD))
+        , m_characterDefinitionAsset(AZ::Data::AssetLoadBehavior::QueueLoad)
         , m_visible(true)
+        , m_isQueuedForDestroyMesh(false)
     {
         m_localBoundingBox.Reset();
         m_worldBoundingBox.Reset();
@@ -382,6 +383,7 @@ namespace LmbrCentral
             EBUS_EVENT_ID(m_attachedToEntityId, MeshComponentNotificationBus, OnMeshDestroyed);
         }
         m_characterDefinitionAsset.Release();
+        m_isQueuedForDestroyMesh = false;
     }
 
     bool SkinnedMeshComponentRenderNode::HasMesh() const
@@ -419,6 +421,16 @@ namespace LmbrCentral
         // That behavior is driven by SkinnedMeshAsset::IsRegisterReadonlyAndShareable()==false.
         if (asset.Get() == m_characterDefinitionAsset.Get())
         {
+            // Here is the soonest we can intercept an asset-load for cancelling (AssetLoadJob does not currently support cancelling).
+            // We release the asset and return before altering any ebus connections or calls related to asset-loading completion because,
+            // in reality, we've already cancelled the loading operation. Functions further below invoke loading logic to finalize
+            // asset loading state - we want to avoid this; bail early instead.
+            if (m_isQueuedForDestroyMesh)
+            {
+                DestroyMesh();
+                return;
+            }
+
             if (m_characterInstance.get() != nullptr)
             {
                 if (AZ::CharacterBoundsNotificationBus::Handler::BusIsConnectedId(m_characterInstance.get()))
@@ -557,6 +569,7 @@ namespace LmbrCentral
     {
         using SkinnedMeshInternal::UpdateRenderFlag;
         unsigned int flags = GetRndFlags();
+        flags |= ERF_COMPONENT_ENTITY;
 
         // Turn off any flag which has ever been set via auxiliary render flags.
         UpdateRenderFlag(false, m_auxiliaryRenderFlagsHistory, flags);
@@ -829,9 +842,10 @@ namespace LmbrCentral
         MaterialOwnerRequestBus::Handler::BusConnect(m_entity->GetId());
         MeshComponentRequestBus::Handler::BusConnect(m_entity->GetId());
         RenderNodeRequestBus::Handler::BusConnect(m_entity->GetId());
-        m_skinnedMeshRenderNode.CreateMesh();
         SkinnedMeshComponentRequestBus::Handler::BusConnect(GetEntityId());
         SkeletalHierarchyRequestBus::Handler::BusConnect(GetEntityId());
+
+        m_skinnedMeshRenderNode.CreateMesh();
     }
 
     void SkinnedMeshComponent::Deactivate()

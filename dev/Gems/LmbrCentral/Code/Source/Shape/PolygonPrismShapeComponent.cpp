@@ -19,41 +19,70 @@
 
 namespace LmbrCentral
 {
+    void PolygonPrismShapeConfig::Reflect(AZ::ReflectContext* context)
+    {
+        if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
+        {
+            serializeContext->Class<PolygonPrismShapeConfig, ShapeComponentConfig>()
+                ->Version(1)
+            ;
+        }
+    }
+
     void PolygonPrismShapeDebugDisplayComponent::Reflect(AZ::ReflectContext* context)
     {
         if (auto serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             serializeContext->Class<PolygonPrismShapeDebugDisplayComponent, EntityDebugDisplayComponent>()
-                ->Version(1)
+                ->Version(2)
                 ->Field("PolygonPrism", &PolygonPrismShapeDebugDisplayComponent::m_polygonPrism)
+                ->Field("PolygonShapeConfig", &PolygonPrismShapeDebugDisplayComponent::m_polygonShapeConfig)
                 ;
         }
+    }
+
+    void PolygonPrismShapeDebugDisplayComponent::SetShapeConfig(const PolygonPrismShapeConfig& shapeConfig)
+    {
+        m_polygonShapeConfig = shapeConfig;
     }
 
     void PolygonPrismShapeDebugDisplayComponent::Activate()
     {
         EntityDebugDisplayComponent::Activate();
+        ShapeComponentNotificationsBus::Handler::BusConnect(GetEntityId());
         GenerateVertices();
     }
 
-    void PolygonPrismShapeDebugDisplayComponent::OnTransformChanged(const AZ::Transform& local, const AZ::Transform& world)
+    void PolygonPrismShapeDebugDisplayComponent::Deactivate()
     {
-        EntityDebugDisplayComponent::OnTransformChanged(local, world);
-        GenerateVertices();
+        ShapeComponentNotificationsBus::Handler::BusDisconnect();
+        EntityDebugDisplayComponent::Deactivate();
     }
 
-    void PolygonPrismShapeDebugDisplayComponent::Draw(AzFramework::EntityDebugDisplayRequests* displayContext)
+    void PolygonPrismShapeDebugDisplayComponent::Draw(AzFramework::DebugDisplayRequests& debugDisplay)
     {
-        DrawPolygonPrismShape(g_defaultShapeDrawParams, m_polygonPrismMesh, *displayContext);
+        DrawPolygonPrismShape(m_polygonShapeConfig.GetDrawParams(), m_polygonPrismMesh, debugDisplay);
+    }
+
+    void PolygonPrismShapeDebugDisplayComponent::OnShapeChanged(ShapeChangeReasons changeReason)
+    {
+        if (changeReason == ShapeChangeReasons::ShapeChanged)
+        {
+            AZ::PolygonPrismPtr polygonPrismPtr = nullptr;
+            PolygonPrismShapeComponentRequestBus::EventResult(polygonPrismPtr, GetEntityId(), &PolygonPrismShapeComponentRequests::GetPolygonPrism);
+            if (polygonPrismPtr)
+            {
+                m_polygonPrism = *polygonPrismPtr;
+                GenerateVertices();
+            }
+        }
     }
 
     void PolygonPrismShapeDebugDisplayComponent::GenerateVertices()
     {
         GeneratePolygonPrismMesh(
-            GetCurrentTransform(),
             m_polygonPrism.m_vertexContainer.GetVertices(),
-            m_polygonPrism.GetHeight(),
-            m_polygonPrismMesh);
+            m_polygonPrism.GetHeight(), m_polygonPrismMesh);
     }
 
     void PolygonPrismShapeComponent::Reflect(AZ::ReflectContext* context)
@@ -72,6 +101,7 @@ namespace LmbrCentral
         {
             behaviorContext->EBus<PolygonPrismShapeComponentRequestBus>("PolygonPrismShapeComponentRequestBus")
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
+                ->Attribute(AZ::Edit::Attributes::Category, "Shape")
                 ->Event("GetPolygonPrism", &PolygonPrismShapeComponentRequestBus::Events::GetPolygonPrism)
                 ->Event("SetHeight", &PolygonPrismShapeComponentRequestBus::Events::SetHeight)
                 ->Event("AddVertex", &PolygonPrismShapeComponentRequestBus::Events::AddVertex)

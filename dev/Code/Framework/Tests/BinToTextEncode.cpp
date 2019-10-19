@@ -10,10 +10,9 @@
 *
 */
 
-#include <Tests/TestTypes.h>
-
 #include <AzCore/Component/ComponentApplication.h>
 #include <AzCore/Memory/PoolAllocator.h>
+#include <AzCore/UnitTest/TestTypes.h>
 
 #include <AzFramework/StringFunc/StringFunc.h>
 
@@ -28,7 +27,8 @@ namespace UnitTest
     {
     public:
         Base64Test()
-            : AllocatorsFixture(15, false)
+            : AllocatorsFixture()
+            , m_systemEntity(nullptr)
         {
         }
 
@@ -39,11 +39,13 @@ namespace UnitTest
             AllocatorInstance<ThreadPoolAllocator>::Create();
             ComponentApplication::Descriptor desc;
             desc.m_useExistingAllocator = true;
-            m_app.Create(desc);
+            desc.m_enableDrilling = false; // we already created a memory driller for the test (AllocatorsFixture)
+            m_systemEntity = m_app.Create(desc);
         }
 
         void TearDown() override
         {
+            delete m_systemEntity;
             m_app.Destroy();
             AllocatorInstance<PoolAllocator>::Destroy();
             AllocatorInstance<ThreadPoolAllocator>::Destroy();
@@ -55,6 +57,7 @@ namespace UnitTest
             
         }
 
+        AZ::Entity* m_systemEntity;
         ComponentApplication m_app;
     };
 

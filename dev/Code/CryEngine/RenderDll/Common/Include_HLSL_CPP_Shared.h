@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -70,10 +70,6 @@ hlsl_cbuffer(PerPassConstantBuffer_Svo)
 {
     hlsl_float4(PerPass_SvoTreeSettings0);
     hlsl_float4(PerPass_SvoTreeSettings1);
-    hlsl_float4(PerPass_SvoTreeSettings2);
-    hlsl_float4(PerPass_SvoTreeSettings3);
-    hlsl_float4(PerPass_SvoTreeSettings4);
-    hlsl_float4(PerPass_SvoTreeSettings5);
     hlsl_float4(PerPass_SvoParams0);
     hlsl_float4(PerPass_SvoParams1);
     hlsl_float4(PerPass_SvoParams2);

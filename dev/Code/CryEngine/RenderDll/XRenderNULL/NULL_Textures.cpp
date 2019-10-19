@@ -42,6 +42,13 @@ bool CNULLRenderer::EF_PrecacheResource(ITexture* pTP, float fDist, float fTimeT
     return false;
 }
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+bool CTexture::RenderToTexture(int handle, const CCamera& camera, AzRTT::RenderContextId contextId)
+{
+    return true;
+}
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+
 bool CTexture::RenderEnvironmentCMHDR(int size, Vec3& Pos, TArray<unsigned short>& vecData)
 {
     return true;
@@ -217,7 +224,10 @@ bool CTexture::RT_CreateDeviceTexture(const byte* pData[6])
     return true;
 }
 
-void CTexture::RT_UpdateTextureRegion(const byte* data, int X, int Y, int Z, int USize, int VSize, int ZSize, ETEX_Format eTFSrc)
+void CTexture::UpdateTextureRegion(const uint8_t* data, int X, int Y, int Z, int USize, int VSize, int ZSize, ETEX_Format eTFSrc)
+{
+}
+void CTexture::RT_UpdateTextureRegion(const uint8_t* data, int X, int Y, int Z, int USize, int VSize, int ZSize, ETEX_Format eTFSrc)
 {
 }
 

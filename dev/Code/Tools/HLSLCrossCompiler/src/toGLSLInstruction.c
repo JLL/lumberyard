@@ -215,6 +215,9 @@ static void AddComparision(HLSLCrossCompilerContext* psContext, Instruction* psI
             constructor = "uvec";
         }
 
+        bstring varName = bfromcstr(GetAuxArgumentName(SVT_UINT));
+        bcatcstr(varName, "1");
+
         //Component-wise compare
         AddIndentation(psContext);
         if (psContext->psShader->ui32MajorVersion < 4)
@@ -223,8 +226,13 @@ static void AddComparision(HLSLCrossCompilerContext* psContext, Instruction* psI
         }
         else
         {
-            BeginAssignment(psContext, &psInst->asOperands[0], TO_FLAG_UNSIGNED_INTEGER, psInst->bSaturate);
+            // Qualcomm driver workaround. Save the operation result into
+            // a temporary variable before assigning it to the register.
+            bconcat(glsl, varName);
+            AddSwizzleUsingElementCount(psContext, minElemCount);
+            bcatcstr(glsl, " = ");
         }
+
         bformata(glsl, "uvec%d(%s(%s4(", minElemCount, glslOpcode[eType], constructor);
         TranslateOperand(psContext, &psInst->asOperands[1], typeFlag);
         bcatcstr(glsl, ")");
@@ -243,7 +251,11 @@ static void AddComparision(HLSLCrossCompilerContext* psContext, Instruction* psI
         }
         else
         {
-            bcatcstr(glsl, ")) * 0xFFFFFFFFu");
+            bcatcstr(glsl, ")) * 0xFFFFFFFFu;\n");
+            AddIndentation(psContext);
+            BeginAssignment(psContext, &psInst->asOperands[0], TO_FLAG_UNSIGNED_INTEGER, psInst->bSaturate);
+            bconcat(glsl, varName);
+            AddSwizzleUsingElementCount(psContext, minElemCount);
             EndAssignment(psContext, &psInst->asOperands[0], TO_FLAG_UNSIGNED_INTEGER, psInst->bSaturate);
         }
         bcatcstr(glsl, ";\n");
@@ -2591,7 +2603,6 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
     int32_t i;
 
     SHADER_VARIABLE_TYPE aeTempVecType[MAX_TEMP_VEC4 * 4];
-    SHADER_VARIABLE_TYPE eNewType;
 
     for (i = 0; i < MAX_TEMP_VEC4 * 4; ++i)
     {
@@ -2758,6 +2769,7 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
             }
         }
 
+        SHADER_VARIABLE_TYPE eNewType = SVT_FORCE_DWORD;
 
         switch (psInst->eOpcode)
         {
@@ -2901,6 +2913,10 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
             {
                 eNewType = GetOperandDataType(psContext, &psInst->asOperands[1]);
             }
+            else
+            {
+                continue;
+            }
             break;
         }
         case OPCODE_MOVC:
@@ -2915,6 +2931,10 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
                 {
                     ASSERT(GetOperandDataType(psContext, &psInst->asOperands[2]) == GetOperandDataType(psContext, &psInst->asOperands[3]));
                 }
+            }
+            else
+            {
+                continue;
             }
             break;
         }
@@ -2978,6 +2998,10 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
                         }
                     }
                 }
+            }
+            else
+            {
+                continue;
             }
             break;
         }
@@ -3081,6 +3105,7 @@ void SetDataTypes(HLSLCrossCompilerContext* psContext, Instruction* psInst, cons
                 }
             }
         }
+        ASSERT(eNewType != SVT_FORCE_DWORD);
     }
 }
 
@@ -4397,7 +4422,7 @@ void TranslateInstruction(HLSLCrossCompilerContext* psContext, Instruction* psIn
         AddIndentation(psContext);
 
         bcatcstr(glsl, "case ");
-        TranslateOperand(psContext, &psInst->asOperands[0], TO_FLAG_NONE);
+        TranslateOperand(psContext, &psInst->asOperands[0], TO_FLAG_INTEGER);
         bcatcstr(glsl, ":\n");
 
         ++psContext->indent;

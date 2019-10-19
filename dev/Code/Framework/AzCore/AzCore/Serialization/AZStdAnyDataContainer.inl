@@ -14,6 +14,7 @@
 
 #include <AzCore/std/any.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
+#include <AzCore/Serialization/Utils.h>
 
 namespace AZ
 {
@@ -176,12 +177,14 @@ namespace AZ
         {       
             if (auto serializeContext = azrtti_cast<SerializeContext*>(reflectContext))
             {
-                auto *dataContainer =  &Serialize::StaticInstance<AZStdAnyContainer>::s_instance;
+                auto dataContainer = AZStd::make_unique<AZStdAnyContainer>();
                 dataContainer->SetSerializeContext(serializeContext);
                 serializeContext->Class<AZStd::any>()
-                    ->DataContainer(dataContainer)
+                    ->DataContainer(dataContainer.get())
                     ;
-                    // Value data is injected into the hierarchy per-instance, since type is dynamic.
+                // serializeContext owns each dataContainer instance, it is destroyed once serializeContext is destroyed
+                serializeContext->RegisterDataContainer(AZStd::move(dataContainer));
+                // Value data is injected into the hierarchy per-instance, since type is dynamic.
                 if (EditContext* editContext = serializeContext->GetEditContext())
                 {
                     editContext->Class<AZStd::any>("any", "Type safe container which can store a type that specializes the TypeInfo template")
@@ -190,6 +193,50 @@ namespace AZ
                         ;
                 }
             }
+        }
+    }
+
+
+    namespace Helpers
+    {
+        //! Used to compare the data inside an AZStd::any when the types are not known at compile time.
+        //! This method may rely on serialization to determine if the values are equal, avoid using it in 
+        //! performance sensitive code.
+        AZ_INLINE bool CompareAnyValue(const AZStd::any& lhs, const AZStd::any& rhs)
+        {
+            bool isEqual = false;
+
+            if (lhs.type() != rhs.type())
+            {
+                return false;
+            }
+
+            AZ::SerializeContext* serializeContext = nullptr;
+            AZ::ComponentApplicationBus::BroadcastResult(serializeContext, &AZ::ComponentApplicationRequests::GetSerializeContext);
+
+            const AZ::SerializeContext::ClassData* classData = serializeContext->FindClassData(lhs.type());
+            if (classData)
+            {
+                if (classData->m_serializer)
+                {
+                    isEqual = classData->m_serializer->CompareValueData(AZStd::any_cast<void>(&lhs), AZStd::any_cast<void>(&rhs));
+                }
+                else
+                {
+                    AZStd::vector<AZ::u8> myData;
+                    AZ::IO::ByteContainerStream<decltype(myData)> myDataStream(&myData);
+
+                    AZ::Utils::SaveObjectToStream(myDataStream, AZ::ObjectStream::ST_BINARY, AZStd::any_cast<void>(&lhs), lhs.type());
+
+                    AZStd::vector<AZ::u8> otherData;
+                    AZ::IO::ByteContainerStream<decltype(otherData)> otherDataStream(&otherData);
+
+                    AZ::Utils::SaveObjectToStream(otherDataStream, AZ::ObjectStream::ST_BINARY, AZStd::any_cast<void>(&rhs), rhs.type());
+                    isEqual = (myData.size() == otherData.size()) && (memcmp(myData.data(), otherData.data(), myData.size()) == 0);
+                }
+            }
+
+            return isEqual;
         }
     }
 }

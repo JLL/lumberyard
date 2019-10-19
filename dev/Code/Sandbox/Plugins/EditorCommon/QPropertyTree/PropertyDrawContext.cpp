@@ -69,7 +69,7 @@ bool IconXPMCache::parseXPM(RGBAImage* out, const Serialization::IconXPM& icon)
     int hotSpotX = -1;
     int hotSpotY = -1;
 
-    int scanResult = sscanf(icon.source[0], "%d %d %d %d %d %d", &width, &height, &colorCount, &charsPerPixel, &hotSpotX, &hotSpotY);
+    int scanResult = azsscanf(icon.source[0], "%d %d %d %d %d %d", &width, &height, &colorCount, &charsPerPixel, &hotSpotX, &hotSpotY);
     if (scanResult != 4 && scanResult != 6)
         return false;
 
@@ -116,7 +116,7 @@ bool IconXPMCache::parseXPM(RGBAImage* out, const Serialization::IconXPM& icon)
             ++p;
             if (strlen(p) == 6) {
                 int colorCode;
-                if(sscanf(p, "%x", &colorCode) != 1)
+                if(azsscanf(p, "%x", &colorCode) != 1)
                     return false;
                 Color color((colorCode & 0xff0000) >> 16,
                             (colorCode & 0xff00) >> 8,
@@ -381,11 +381,16 @@ void PropertyDrawContext::drawEntry(const wchar_t* text, bool pathEllipsis, bool
     // the drawing context requires context so that the style sheet can be used:
     QFrame frameForContext;
     QLineEdit forContext;
+#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
     QStyleOptionFrameV2 option;
+    option.features = QStyleOptionFrameV2::None;
+#else
+    QStyleOptionFrame option;
+    option.features = QStyleOptionFrame::None;
+#endif
     option.state = QStyle::State_Sunken;
     option.lineWidth = tree->style()->pixelMetric(QStyle::PM_DefaultFrameWidth, &option, &frameForContext);
     option.midLineWidth = 0;
-    option.features = QStyleOptionFrameV2::None;
     if (!grayBackground)
         option.state |= QStyle::State_Enabled;
 	else {

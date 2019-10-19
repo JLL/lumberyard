@@ -38,7 +38,7 @@ namespace Rain
                 editContext->Class<EditorRainComponent>("Rain", "Defines rain settings for the level ")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Environment")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Rain.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Rain.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Rain.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::HelpPageURL, "http://docs.aws.amazon.com/console/lumberyard/userguide/rain-component")
@@ -46,7 +46,7 @@ namespace Rain
                     ->DataElement(AZ::Edit::UIHandlers::Default, &EditorRainComponent::m_enabled, "Enabled", "Sets if the rain is enabled")
                     ->DataElement(AZ::Edit::UIHandlers::Default, &EditorRainComponent::m_rainOptions, "Options", "Options for rain simulation")
                     ;
-                
+
                 editContext->Class<RainOptions>("Rain Options", "Options for rain simulation")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
@@ -141,19 +141,12 @@ namespace Rain
         }
     }
 
-    void EditorRainComponent::DisplayEntity(bool& handled)
+    void EditorRainComponent::DisplayEntityViewport(
+        const AzFramework::ViewportInfo& viewportInfo,
+        AzFramework::DebugDisplayRequests& debugDisplay)
     {
-        auto dc = AzFramework::EntityDebugDisplayRequestBus::FindFirstHandler();
-        if (dc == nullptr)
-        {
-            handled = false;
-            return;
-        }
-
-        dc->SetColor(AZ::Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-        dc->DrawWireSphere(m_currentWorldPos, m_rainOptions.m_radius);
-
-        handled = true;
+        debugDisplay.SetColor(AZ::Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+        debugDisplay.DrawWireSphere(m_currentWorldPos, m_rainOptions.m_radius);
     }
 
     AZ::LegacyConversion::LegacyConversionResult RainConverter::ConvertEntity(CBaseObject* pEntityToConvert)
@@ -176,7 +169,7 @@ namespace Rain
         //Retrieve the underlying legacy CRain object
         using namespace LYGame;
         IEntity* legacyEntity = entityObject->GetIEntity();
-        std::shared_ptr<CRain> rain = legacyEntity->GetComponent<CRain>();
+        AZStd::shared_ptr<CRain> rain = legacyEntity->GetComponent<CRain>();
         if (!rain)
         {
             //Entity did not have a CRain component

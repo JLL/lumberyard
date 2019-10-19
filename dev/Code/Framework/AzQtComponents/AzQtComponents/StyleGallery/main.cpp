@@ -1,3 +1,14 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
 #include "mainwidget.h"
 #include <AzQtComponents/Components/EditorProxyStyle.h>
 #include <AzQtComponents/Components/StyledDockWidget.h>
@@ -171,6 +182,7 @@ int main(int argv, char **argc)
     AzQtComponents::PrepareQtPaths();
 
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     QApplication app(argv, argc);
     AzQtComponents::LumberyardStylesheet stylesheet(&app);
@@ -193,14 +205,14 @@ int main(int argv, char **argc)
     auto fileMenu = new QMenu();
     action->setMenu(fileMenu);
     auto openDock = fileMenu->addAction("Open dockwidget");
-    QObject::connect(openDock, &QAction::triggered, [&w] {
+    QObject::connect(openDock, &QAction::triggered, w, [&w] {
         auto dock = new AzQtComponents::StyledDockWidget(QLatin1String("Amazon Lumberyard"), w);
         auto button = new QPushButton("Click to dock");
         auto wid = new QWidget();
         auto widLayout = new QVBoxLayout(wid);
         widLayout->addWidget(button);
         wid->resize(300, 200);
-        QObject::connect(button, &QPushButton::clicked, [dock]{
+        QObject::connect(button, &QPushButton::clicked, dock, [dock]{
             dock->setFloating(!dock->isFloating());
         });
         w->addDockWidget(Qt::BottomDockWidgetArea, dock);
@@ -213,7 +225,7 @@ int main(int argv, char **argc)
 
     QAction* newAction = fileMenu->addAction("Test StyledDetailsTableView");
     newAction->setShortcut(QKeySequence::Delete);
-    QObject::connect(newAction, &QAction::triggered, [w]() {
+    QObject::connect(newAction, &QAction::triggered, w, [w]() {
         QDialog temp(w);
         temp.setWindowTitle("StyleTableWidget Test");
 
@@ -268,7 +280,7 @@ int main(int argv, char **argc)
     });
 
     QAction* refreshAction = fileMenu->addAction("Refresh Stylesheet");
-    QObject::connect(refreshAction, &QAction::triggered, [&stylesheet, &app]() {
+    QObject::connect(refreshAction, &QAction::triggered, refreshAction, [&stylesheet, &app]() {
         stylesheet.Refresh(&app);
     });
 
@@ -279,7 +291,7 @@ int main(int argv, char **argc)
 
     w->addToolBar(toolBar());
 
-    QObject::connect(widget, &MainWidget::reloadCSS, [] {
+    QObject::connect(widget, &MainWidget::reloadCSS, widget, [] {
         qDebug() << "Reloading CSS";
         qApp->setStyleSheet(QString());
         qApp->setStyleSheet("file:///style.qss");

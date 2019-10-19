@@ -9,14 +9,13 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <AzCore/Debug/Profiler.h>
 #include <AzCore/Jobs/Internal/JobManagerBase.h>
 #include <AzCore/Jobs/Job.h>
 
 using namespace AZ;
-using namespace Internal;
+using namespace AZ::Internal;
 
 void JobManagerBase::Process(Job* job)
 {
@@ -28,6 +27,7 @@ void JobManagerBase::Process(Job* job)
     Job* dependent = job->GetDependent();
     bool isDelete = job->IsAutoDelete();
 
+    AZ_PROFILE_INTERVAL_END(AZ::Debug::ProfileCategory::JobManagerDetailed, job);
     if (!job->IsCancelled())
     {
         AZ_PROFILE_SCOPE(AZ::Debug::ProfileCategory::AzCore, "AZ::JobManagerBase::Process Job");
@@ -44,5 +44,3 @@ void JobManagerBase::Process(Job* job)
         dependent->DecrementDependentCount();
     }
 }
-
-#endif // #ifndef AZ_UNITY_BUILD

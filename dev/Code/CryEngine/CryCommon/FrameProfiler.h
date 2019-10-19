@@ -28,7 +28,7 @@
     X(PROFILE_ANIMATION,    "Animation")    \
     X(PROFILE_MOVIE,        "Movie")        \
     X(PROFILE_ENTITY,       "Entity")       \
-    X(PROFILE_FONT,         "Font")         \
+    X(PROFILE_UI,           "UI")           \
     X(PROFILE_NETWORK,      "Network")      \
     X(PROFILE_PHYSICS,      "Physics")      \
     X(PROFILE_SCRIPT,       "Script")       \
@@ -411,6 +411,8 @@ public:
 
     bool const m_bAlwaysCollect;
 
+    bool m_addedSelf = false;
+
     CFrameProfiler(ISystem* pSystem, const char* sCollectorName, EProfiledSubsystem subsystem = PROFILE_ANY, bool const bAlwaysCollect = false)
         :   m_pISystem(pSystem)
         ,   m_name(sCollectorName)
@@ -433,16 +435,22 @@ public:
         ,   m_pOfflineHistory(NULL)
         ,   m_bAlwaysCollect(bAlwaysCollect)
     {
-        if (IFrameProfileSystem* const pFrameProfileSystem = m_pISystem->GetIProfileSystem())
+        if (m_pISystem)
         {
-            pFrameProfileSystem->AddFrameProfiler(this);
+            if (IFrameProfileSystem* const pFrameProfileSystem = m_pISystem->GetIProfileSystem())
+            {
+                pFrameProfileSystem->AddFrameProfiler(this);
+                m_addedSelf = true;
+            }
         }
     }
 
     ~CFrameProfiler()
     {
         // This is needed for when modules get unloaded at runtime.
-        if (m_pISystem != NULL)
+        // this might happen very late (atexit) so it needs to only happen if we actually added ourself
+        // at this point "m_pISystem" might actually be invalid.
+        if (m_addedSelf && m_pISystem)
         {
             if (IFrameProfileSystem* const pFrameProfileSystem = m_pISystem->GetIProfileSystem())
             {
@@ -470,7 +478,7 @@ public:
 
     ILINE CFrameProfilerSection(CFrameProfiler* profiler)
     {
-        if ((gEnv->bProfilerEnabled || profiler->m_bAlwaysCollect) && (gEnv->callbackStartSection))
+        if (gEnv && ((gEnv->bProfilerEnabled || profiler->m_bAlwaysCollect) && (gEnv->callbackStartSection)))
         {
             m_pFrameProfiler = profiler;
             gEnv->callbackStartSection(this);

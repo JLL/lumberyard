@@ -15,6 +15,7 @@
 
 #include <AzCore/EBus/EBus.h>
 
+#include <AzCore/std/containers/set.h>
 #include <AzCore/std/smart_ptr/shared_ptr.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 
@@ -37,7 +38,7 @@ namespace Projects
         AZStd::string m_description;
 
         /// The contents of a #if which is used at runtime to choose this ProjectPlatform.
-        /// \example "AZ_PLATFORM_APPLE_IOS || AZ_PLATFORM_ANDROID"
+        /// \example "AZ_PLATFORM_IOS || AZ_PLATFORM_ANDROID"
         AZStd::string m_cppConditional;
 
         /// The BuildPlatformIds which correspond to this ProjectPlatform.

@@ -36,7 +36,7 @@ namespace LmbrCentral
                     "Simple Animation", "The Simple Animation component provides basic animation functionality for the entity")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Animation (Legacy)")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/SimpleAnimation.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/SimpleAnimation.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Animation.png")
 #ifndef ENABLE_LEGACY_ANIMATION
                         ->Attribute(AZ::Edit::Attributes::AddableByUser, false)
@@ -48,15 +48,6 @@ namespace LmbrCentral
                     "Playback Settings", "A set of configured animation layers that can be played on this entity")
                         ->Attribute(AZ::Edit::Attributes::AddNotify, &EditorSimpleAnimationComponent::OnLayersChanged);
             }
-        }
-    }
-
-    void EditorSimpleAnimationComponent::DisplayEntity(bool& handled)
-    {
-        // Don't draw extra visualization unless selected.
-        if (!IsSelected())
-        {
-            handled = true;
         }
     }
 
@@ -74,14 +65,12 @@ namespace LmbrCentral
 
         AnimationInformationBus::Handler::BusConnect(GetEntityId());
         MeshComponentNotificationBus::Handler::BusConnect(GetEntityId());
-        AzFramework::EntityDebugDisplayEventBus::Handler::BusConnect(GetEntityId());
     }
 
     void EditorSimpleAnimationComponent::Deactivate()
     {
         AnimationInformationBus::Handler::BusDisconnect();
         MeshComponentNotificationBus::Handler::BusDisconnect();
-        AzFramework::EntityDebugDisplayEventBus::Handler::BusDisconnect();
 
         EditorComponentBase::Deactivate();
     }
@@ -158,7 +147,7 @@ namespace LmbrCentral
     {
         UpdateCharacterInstance();
     }
-    
+
     void EditorSimpleAnimationComponent::OnAnimationSetRemovedAnimation(const char* /*animationPath*/, const char* /*animationName*/)
     {
         UpdateCharacterInstance();

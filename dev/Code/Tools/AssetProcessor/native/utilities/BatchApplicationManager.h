@@ -42,6 +42,8 @@ namespace AssetProcessor
     class AssetCatalog;
     class InternalAssetBuilderInfo;
     class AssetRequestHandler;
+    class AssetServerHandler;
+    class FileProcessor;
 }
 
 class ApplicationServer;
@@ -77,8 +79,6 @@ public:
 
     AssetProcessor::RCController* GetRCController() const;
 
-    AzToolsFramework::AssetDatabase::AssetDatabaseConnection* GetAssetDatabaseConnection() const;
-
     ConnectionManager* GetConnectionManager() const;
     ApplicationServer* GetApplicationServer() const;
 
@@ -97,7 +97,8 @@ public:
     void UnRegisterBuilderDescriptor(const AZ::Uuid& builderId) override;
 
     //! AssetProcessor::AssetBuilderInfoBus Interface
-    void GetMatchingBuildersInfo(const AZStd::string& assetPath, AssetProcessor::BuilderInfoList& builderInfoList);
+    void GetMatchingBuildersInfo(const AZStd::string& assetPath, AssetProcessor::BuilderInfoList& builderInfoList) override;
+    void GetAllBuildersInfo(AssetProcessor::BuilderInfoList& builderInfoList) override;
 
     //! TraceMessageBus Interface
     bool OnError(const char* window, const char* message) override;
@@ -108,10 +109,15 @@ public:
 
     void RemoveOldTempFolders();
 
+    void Rescan();
+
 Q_SIGNALS:
     void CheckAssetProcessorManagerIdleState();
     void ConnectionStatusMsg(QString message);
-    public Q_SLOTS:
+
+    void OnBuildersRegistered();
+
+public Q_SLOTS:
     void OnAssetProcessorManagerIdleState(bool isIdle);
 
 protected:
@@ -138,6 +144,10 @@ protected:
     void ShutdownBuilderManager();
     bool InitAssetDatabase();
     void ShutDownAssetDatabase();
+    void InitAssetServerHandler();
+    void DestroyAssetServerHandler();
+    void InitFileProcessor();
+    void ShutDownFileProcessor();
 
     // IMPLEMENTATION OF -------------- AzToolsFramework::AssetDatabase::AssetDatabaseRequests::Bus::Listener
     bool GetAssetDatabaseLocation(AZStd::string& location) override;
@@ -159,10 +169,6 @@ private Q_SLOTS:
     void CheckForIdle();
 
 private:
-#ifdef UNIT_TEST
-    bool RunUnitTests();
-#endif
-
     int m_processedAssetCount = 0;
     int m_failedAssetsCount = 0;
     bool m_AssetProcessorManagerIdleState = false;
@@ -175,9 +181,11 @@ private:
     AssetProcessor::AssetCatalog* m_assetCatalog = nullptr;
     AssetProcessor::AssetScanner* m_assetScanner = nullptr;
     AssetProcessor::RCController* m_rcController = nullptr;
-    AssetProcessor::AssetDatabaseConnection* m_assetDatabaseConnection = nullptr;
     AssetProcessor::AssetRequestHandler* m_assetRequestHandler = nullptr;
     AssetProcessor::BuilderManager* m_builderManager = nullptr;
+    AssetProcessor::AssetServerHandler* m_assetServerHandler = nullptr;
+
+    AZStd::unique_ptr<AssetProcessor::FileProcessor> m_fileProcessor;
 
     // The internal builder
     AZStd::shared_ptr<AssetProcessor::InternalRecognizerBasedBuilder> m_internalBuilder;

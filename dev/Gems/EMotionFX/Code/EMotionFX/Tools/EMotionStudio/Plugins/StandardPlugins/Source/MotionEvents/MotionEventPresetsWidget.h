@@ -17,7 +17,6 @@
 #include "../../../../EMStudioSDK/Source/MotionEventPresetManager.h"
 #include <MysticQt/Source/DialogStack.h>
 #include <MysticQt/Source/ButtonGroup.h>
-#include <MysticQt/Source/ColorLabel.h>
 #include "../TimeView/TimeViewPlugin.h"
 #include "../MotionWindow/MotionWindowPlugin.h"
 #include "../MotionWindow/MotionListWindow.h"
@@ -45,7 +44,6 @@ namespace EMStudio
 
     public:
         MotionEventPresetsWidget(QWidget* parent, MotionEventsPlugin* plugin);
-        ~MotionEventPresetsWidget();
 
         // overloaded main init function
         void Init();
@@ -59,19 +57,14 @@ namespace EMStudio
         void RemoveMotionEventPresets();
         void RemoveMotionEventPreset(uint32 index);
         void ClearMotionEventPresetsButton();
-        void UpdateMotionEventPreset(QTableWidgetItem* item);
         void SavePresets(bool showSaveDialog = false);
         void SaveWithDialog();
         void LoadPresets(bool showDialog = true);
         void SelectionChanged()                                                                             { UpdateInterface(); }
-        void OnPresetColorChanged(const QColor& newColor);
-
-    signals:
-        void UpdateTimeView();
 
     private:
-        virtual void keyPressEvent(QKeyEvent* event) override;
-        virtual void keyReleaseEvent(QKeyEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
+        void keyReleaseEvent(QKeyEvent* event) override;
 
         void ClearMotionEventPresets();
         void contextMenuEvent(QContextMenuEvent* event) override;

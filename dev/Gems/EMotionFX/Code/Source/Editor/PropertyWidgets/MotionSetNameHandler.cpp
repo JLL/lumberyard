@@ -17,6 +17,8 @@
 
 namespace EMotionFX
 {
+    AZ_CLASS_ALLOCATOR_IMPL(MotionSetNameHandler, AZ::SystemAllocator, 0)
+
     AZ::u32 MotionSetNameHandler::GetHandlerName() const
     {
         return AZ_CRC("MotionSetName", 0xcf534ea6);
@@ -64,21 +66,26 @@ namespace EMotionFX
 
     void MotionSetNameHandler::WriteGUIValuesIntoProperty(size_t index, QComboBox* GUI, property_t& instance, AzToolsFramework::InstanceDataNode* node)
     {
-        instance = AZStd::string(GUI->currentText().toUtf8().data());
+        AZ_UNUSED(index);
+        AZ_UNUSED(node);
+        const QString& currentText = GUI->currentText();
+        instance = AZStd::string(currentText.toUtf8().data(), currentText.length());
     }
 
 
     bool MotionSetNameHandler::ReadValuesIntoGUI(size_t index, QComboBox* GUI, const property_t& instance, AzToolsFramework::InstanceDataNode* node)
     {
+        AZ_UNUSED(index);
+        AZ_UNUSED(node);
         QSignalBlocker signalBlocker(GUI);
         GUI->clear();
         if (m_motionSetAsset && m_motionSetAsset->Get() && m_motionSetAsset->Get()->m_emfxMotionSet)
         {
-            const EMotionFX::Integration::EMotionFXPtr<EMotionFX::MotionSet>& emfxMotionSet = m_motionSetAsset->Get()->m_emfxMotionSet;
+            const AZStd::unique_ptr<EMotionFX::MotionSet>& emfxMotionSet = m_motionSetAsset->Get()->m_emfxMotionSet;
             AZStd::vector<const MotionSet*> motionSets;
-            emfxMotionSet->RecursiveGetMotionSets(motionSets, true);
+            const bool isOwnedByRutime = emfxMotionSet->GetIsOwnedByRuntime();
+            emfxMotionSet->RecursiveGetMotionSets(motionSets, isOwnedByRutime);
 
-            GUI->clear();
             for (const EMotionFX::MotionSet* motionSet : motionSets)
             {
                 GUI->addItem(motionSet->GetName());

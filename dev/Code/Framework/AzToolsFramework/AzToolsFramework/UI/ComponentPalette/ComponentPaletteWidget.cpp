@@ -25,7 +25,9 @@
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 
 #include <QAction>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QPushButton>
@@ -35,6 +37,10 @@
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
+AZ_PUSH_DISABLE_WARNING(4244 4251, "-Wunknown-warning-option") // 4244: conversion from 'int' to 'float', possible loss of data
+                                                               // 4251: 'QInputEvent::modState': class 'QFlags<Qt::KeyboardModifier>' needs to have dll-interface to be used by clients of class 'QInputEvent'
+#include <QKeyEvent>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -149,47 +155,45 @@ namespace AzToolsFramework
 
         // Populate the context menu.
         AZStd::map<QString, QStandardItem*> categoryItemMap;
-        if (!applyFilter)
+
+        for (const auto& categoryPair : componentDataTable)
         {
-            for (const auto& categoryPair : componentDataTable)
+            //get the full category name/path and split it by separators for iteration
+            const QString& categoryPath = categoryPair.first;
+            const QStringList& categoryPathSegments = categoryPath.split('/', QString::SkipEmptyParts);
+            QString categoryPathBuilder;
+
+            //for every segment of the category path, create an expandable header
+            auto parentItem = m_componentModel->invisibleRootItem();
+            for (const QString& categoryName : categoryPathSegments)
             {
-                //get the full category name/path and split it by separators for iteration
-                const QString& categoryPath = categoryPair.first;
-                const QStringList& categoryPathSegments = categoryPath.split('/', QString::SkipEmptyParts);
-                QString categoryPathBuilder;
+                categoryPathBuilder += categoryName + "/";
 
-                //for every segment of the category path, create an expandable header
-                auto parentItem = m_componentModel->invisibleRootItem();
-                for (const QString& categoryName : categoryPathSegments)
+                QStandardItem* categoryItem = nullptr;
+                auto categoryItemItr = categoryItemMap.find(categoryPathBuilder);
+                if (categoryItemItr == categoryItemMap.end())
                 {
-                    categoryPathBuilder += categoryName + "/";
+                    categoryItem = new QStandardItem(categoryName);
+                    categoryItem->setCheckable(false);
+                    categoryItem->setEditable(false);
+                    categoryItem->setSelectable(true);
+                    categoryItem->setData((qulonglong)nullptr, Qt::ItemDataRole::UserRole + 1);
 
-                    QStandardItem* categoryItem = nullptr;
-                    auto categoryItemItr = categoryItemMap.find(categoryPathBuilder);
-                    if (categoryItemItr == categoryItemMap.end())
-                    {
-                        categoryItem = new QStandardItem(categoryName);
-                        categoryItem->setCheckable(false);
-                        categoryItem->setEditable(false);
-                        categoryItem->setSelectable(true);
-                        categoryItem->setData((qulonglong)nullptr, Qt::ItemDataRole::UserRole + 1);
+                    //make groups bold
+                    QFont font = categoryItem->font();
+                    font.setBold(true);
+                    categoryItem->setFont(font);
 
-                        //make groups bold
-                        QFont font = categoryItem->font();
-                        font.setBold(true);
-                        categoryItem->setFont(font);
+                    parentItem->appendRow(categoryItem);
 
-                        parentItem->appendRow(categoryItem);
-
-                        categoryItemMap[categoryPathBuilder] = categoryItem;
-                    }
-                    else
-                    {
-                        categoryItem = categoryItemItr->second;
-                    }
-
-                    parentItem = categoryItem;
+                    categoryItemMap[categoryPathBuilder] = categoryItem;
                 }
+                else
+                {
+                    categoryItem = categoryItemItr->second;
+                }
+
+                parentItem = categoryItem;
             }
         }
 
@@ -223,6 +227,12 @@ namespace AzToolsFramework
                     componentItem->setData((qulonglong)componentClass, Qt::ItemDataRole::UserRole + 1);
                     parentItem->appendRow(componentItem);
                 }
+            }
+
+            // Remove categories that have all of their entries filtered
+            if (parentItem != m_componentModel->invisibleRootItem() && parentItem->rowCount() == 0)
+            {
+                delete parentItem;
             }
         }
 
@@ -345,7 +355,13 @@ namespace AzToolsFramework
         if (!m_componentTree->hasFocus())
         {
             m_componentTree->setFocus();
-            m_componentTree->setCurrentIndex(m_componentModel->index(0, 0));
+            // Focus the first actual component (leaf node)
+            QModelIndex indexToSelect = m_componentModel->index(0, 0);
+            while (indexToSelect.isValid() && m_componentModel->rowCount(indexToSelect) > 0)
+            {
+                indexToSelect = indexToSelect.child(0, 0);
+            }
+            m_componentTree->setCurrentIndex(indexToSelect);
         }
     }
 

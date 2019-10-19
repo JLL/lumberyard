@@ -27,6 +27,8 @@
 #include <AzGameFramework/Application/GameApplication.h>
 #include <Foundation/Foundation.h>
 
+#include <LegacyAllocator.h>
+
 #if defined(AZ_MONOLITHIC_BUILD)
     // Include common type defines for static linking
     // Manually instantiate templates as needed here.
@@ -114,18 +116,26 @@ namespace AppleLauncher
             return EXIT_CODE_FAILURE;
         }
 
+        AZ::AllocatorInstance<AZ::LegacyAllocator>::Create();
+        AZ::AllocatorInstance<CryStringAllocator>::Create();
+
         // Engine Config (bootstrap.cfg)
         char pathToAssets[AZ_MAX_PATH_LEN] = { 0 };
         const char* pathToResources = [[[NSBundle mainBundle] resourcePath] UTF8String];
         azsnprintf(pathToAssets, AZ_MAX_PATH_LEN, "%s/%s", pathToResources, "assets");
         const char* sourcePaths[] = { pathToAssets };
         CEngineConfig engineConfig(sourcePaths, 1);
+        engineConfig.m_gameFolder.MakeLower();
 
         // Game Application (AzGameFramework)
         AzGameFramework::GameApplication gameApplication;
         {
             char pathToGameDescriptorFile[AZ_MAX_PATH_LEN] = { 0 };
             AzGameFramework::GameApplication::GetGameDescriptorPath(pathToGameDescriptorFile, engineConfig.m_gameFolder);
+
+            // this lowercasing is temporary until we fix packaging for Apple platforms and read Game.xml from
+            // the project root instead of from the asset cache, it is not an asset
+            AZStd::to_lower(pathToGameDescriptorFile, pathToGameDescriptorFile + strlen(pathToGameDescriptorFile));
 
             char fullPathToGameDescriptorFile[AZ_MAX_PATH_LEN] = { 0 };
             azsnprintf(fullPathToGameDescriptorFile, AZ_MAX_PATH_LEN, "%s/%s", pathToAssets, pathToGameDescriptorFile);
@@ -217,24 +227,32 @@ namespace AppleLauncher
             EditorGameRequestBus::BroadcastResult(gameStartup, &EditorGameRequestBus::Events::CreateGameStartup);
         }
 
-        if (!gameStartup)
+        // The legacy IGameStartup and IGameFramework are now optional,
+        // if they don't exist we need to create CrySystem here instead.
+        if (!gameStartup || !gameStartup->Init(systemInitParams))
         {
-            AZ_TracePrintf("AppleLauncher", "Failed to create the GameStartup Interface");
-            if (legacyGameDllStartup)
+        #if !defined(AZ_MONOLITHIC_BUILD)
+            PFNCREATESYSTEMINTERFACE CreateSystemInterface = (PFNCREATESYSTEMINTERFACE)CryGetProcAddress(systemLib, "CreateSystemInterface");
+            if (CreateSystemInterface)
             {
-                CryFreeLibrary(gameLib);
+                systemInitParams.pSystem = CreateSystemInterface(systemInitParams);
             }
-            return EXIT_CODE_FAILURE;
+        #else
+            systemInitParams.pSystem = CreateSystemInterface(systemInitParams);
+        #endif // AZ_MONOLITHIC_BUILD
+
         }
 
-        // Init the legacy CryEngine startup interface
-        if (!gameStartup->Init(systemInitParams))
+        if (!systemInitParams.pSystem)
         {
-            AZ_TracePrintf("AppleLauncher", "Failed to initialize the GameStartup Interface");
+            AZ_TracePrintf("AppleLauncher", "Failed to initialize the CrySystem Interface");
 
             // If initialization failed, we still need to call shutdown.
-            gameStartup->Shutdown();
-            gameStartup = nullptr;
+            if (gameStartup)
+            {
+                gameStartup->Shutdown();
+                gameStartup = nullptr;
+            }
             if (legacyGameDllStartup)
             {
                 CryFreeLibrary(gameLib);
@@ -247,13 +265,16 @@ namespace AppleLauncher
 #endif
 
         // Ensure the various global environment pointers are valid
-        if (!gEnv || !gEnv->pConsole || !gEnv->pGame || !gEnv->pGame->GetIGameFramework())
+        if (!gEnv || !gEnv->pConsole)
         {
             AZ_TracePrintf("AppleLauncher", "Failed to initialize the CryEngine global environment");
 
             // If initialization failed, we still need to call shutdown.
-            gameStartup->Shutdown();
-            gameStartup = nullptr;
+            if (gameStartup)
+            {
+                gameStartup->Shutdown();
+                gameStartup = nullptr;
+            }
             if (legacyGameDllStartup)
             {
                 CryFreeLibrary(gameLib);
@@ -265,17 +286,24 @@ namespace AppleLauncher
         gEnv->pConsole->ExecuteString("exec autoexec.cfg");
 
         // Run the main loop
-        LumberyardLauncher::RunMainLoop(gameApplication, *gEnv->pGame->GetIGameFramework());
+        LumberyardLauncher::RunMainLoop(gameApplication);
 
         // Shutdown
-        gameStartup->Shutdown();
-        gameStartup = nullptr;
+        if (gameStartup)
+        {
+            gameStartup->Shutdown();
+            gameStartup = nullptr;
+        }
         gameApplication.Stop();
 
         if (legacyGameDllStartup)
         {
             CryFreeLibrary(gameLib);
         }
+
+        AZ::AllocatorInstance<CryStringAllocator>::Destroy();
+        AZ::AllocatorInstance<AZ::LegacyAllocator>::Destroy();
+
         return EXIT_CODE_SUCCESS;
     }
 }

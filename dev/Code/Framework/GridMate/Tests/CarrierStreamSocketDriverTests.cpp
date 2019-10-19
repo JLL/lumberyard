@@ -65,11 +65,22 @@ public:
         , m_disconnectID(InvalidConnectionID)
         , m_incommingConnectionID(InvalidConnectionID)
         , m_errorCode(-1)
+        , m_active(false)
     {
+    }
+
+    ~CarrierStreamCallbacksHandler()
+    {
+        if (m_active)
+        {
+            CarrierEventBus::Handler::BusDisconnect();
+            StreamSocketDriverEventsBus::Handler::BusDisconnect();
+        }
     }
 
     void Activate(Carrier* carrier, Driver* driver)
     {
+        m_active = true;
         m_carrier = carrier;
         m_driver = driver;
         CarrierEventBus::Handler::BusConnect(carrier->GetGridMate());
@@ -160,6 +171,7 @@ public:
     ConnectionID    m_disconnectID;
     ConnectionID    m_incommingConnectionID;
     int             m_errorCode;
+    bool            m_active;
 };
 
 namespace UnitTest
@@ -171,11 +183,11 @@ namespace UnitTest
     public:
         void run()
         {
-#ifdef AZ_SOCKET_IPV6_SUPPORT
+#if AZ_TRAIT_GRIDMATE_TEST_SOCKET_IPV6_SUPPORT_ENABLED
             bool useIpv6 = true;
 #else
             bool useIpv6 = false;
-#endif // AZ_SOCKET_IPV6_SUPPORT
+#endif
 
             CarrierStreamCallbacksHandler clientCB, serverCB;
             TestCarrierDesc serverCarrierDesc, clientCarrierDesc;
@@ -846,7 +858,7 @@ namespace UnitTest
                     if (!(numUpdates % 100) && serverCarrier->GetNumConnections() == 1)
                     {
                         TrafficControl::Statistics stats;
-                        serverCarrier->QueryStatistics(serverCarrier->GetConnectionId(0), nullptr, &stats);
+                        serverCarrier->QueryStatistics(serverCarrier->DebugGetConnectionId(0), nullptr, &stats);
                         AZ_TracePrintf("GridMate", "  Server -> Client: rtt=%.0f msec, packetLoss=%.0f%%\n", stats.m_rtt, stats.m_packetLoss  * 100.f);
                     }
 
@@ -946,7 +958,7 @@ namespace UnitTest
                     {
                         for (unsigned int iConn = 0; iConn < carriers[iCarrier]->GetNumConnections(); ++iConn)
                         {
-                            ConnectionID connId = carriers[iCarrier]->GetConnectionId(iConn);
+                            ConnectionID connId = carriers[iCarrier]->DebugGetConnectionId(iConn);
                             for (unsigned char iChannel = 0; iChannel < 3; ++iChannel)
                             {
                                 char buf[kMaxPacketSize];
@@ -993,7 +1005,6 @@ namespace UnitTest
 GM_TEST_SUITE(CarrierStreamSuite)
     GM_TEST(Integ_CarrierStreamBasicTest)
     GM_TEST(Integ_CarrierStreamTest)
-    GM_TEST(Integ_CarrierStreamDisconnectDetectionTest)
     GM_TEST(Integ_CarrierStreamAsyncHandshakeTest)
     GM_TEST(Integ_CarrierStreamMultiChannelTest)
 GM_TEST_SUITE_END()

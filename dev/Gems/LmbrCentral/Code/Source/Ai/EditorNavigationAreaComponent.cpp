@@ -54,10 +54,10 @@ namespace LmbrCentral
                 editContext->Class<EditorNavigationAreaComponent>("Navigation Area", "Navigation Area configuration")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "AI")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NavigationArea.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/NavigationArea.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/NavigationArea.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
-                        ->Attribute(AZ::Edit::Attributes::HelpPageURL, "http://docs.aws.amazon.com/console/lumberyard/userguide/nav-area-component")
+                        ->Attribute(AZ::Edit::Attributes::HelpPageURL, "https://docs.aws.amazon.com/lumberyard/latest/userguide/component-nav-area.html")
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(AZ::Edit::UIHandlers::CheckBox, &EditorNavigationAreaComponent::m_exclusion, "Exclusion", "Does this area add or subtract from the Navigation Mesh")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &EditorNavigationAreaComponent::OnNavigationAreaChanged)
@@ -92,6 +92,8 @@ namespace LmbrCentral
         ShapeComponentNotificationsBus::Handler::BusConnect(entityId);
         NavigationAreaRequestBus::Handler::BusConnect(entityId);
         AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusConnect();
+        AzToolsFramework::EntityCompositionNotificationBus::Handler::BusConnect();
+        AZ::TickBus::Handler::BusConnect();
 
         // use the entity id as unique name to register area
         m_name = GetEntityId().ToString();
@@ -108,18 +110,22 @@ namespace LmbrCentral
                 }
             }
         }
-        
+
         // reset switching to game mode on activate
         m_switchingToGameMode = false;
 
-        // update the area to refresh the nav mesh
-        UpdateGameArea();
+        // We must relink during entity activation or the NavigationSystem will throw 
+        // errors in SpawnJob. Don't force an unnecessary update of the game area.  
+        // RelinkWithMesh will still update the game area if the volume hasn't been created.
+        const bool updateGameArea = false;
+        RelinkWithMesh(updateGameArea);
     }
 
     void EditorNavigationAreaComponent::Deactivate()
     {
         // only destroy the area if we know we're not currently switching to game mode
-        if (!m_switchingToGameMode)
+        // or changing our composition during scrubbing
+        if (!m_switchingToGameMode && !m_compositionChanging)
         {
             DestroyArea();
         }
@@ -129,6 +135,8 @@ namespace LmbrCentral
         ShapeComponentNotificationsBus::Handler::BusDisconnect(entityId);
         NavigationAreaRequestBus::Handler::BusDisconnect(entityId);
         AzToolsFramework::EditorEntityContextNotificationBus::Handler::BusDisconnect();
+        AzToolsFramework::EntityCompositionNotificationBus::Handler::BusDisconnect();
+        AZ::TickBus::Handler::BusDisconnect();
 
         EditorComponentBase::Deactivate();
     }
@@ -286,6 +294,7 @@ namespace LmbrCentral
 
             if (affectedAgentTypes.empty())
             {
+                // this will remove this volume from all agent type and mesh exclusion containers
                 aiSystem->GetNavigationSystem()->SetExclusionVolume(0, 0, NavigationVolumeID(m_volume));
             }
             else
@@ -314,9 +323,9 @@ namespace LmbrCentral
                 }
             }
 
-            // FR: We need to update the game area even in the case that after having read
-            // the data from the binary file the volume was not recreated.
-            // This happens when there was no mesh associated to the actual volume.
+            // Update the game area if requested or in the case that the volume doesn't exist yet.
+            // This can happen when a volume doesn't have an associated mesh which is always the  
+            // case with exclusion volumes.
             if (updateGameArea || !aiNavigation->ValidateVolume(NavigationVolumeID(m_volume)))
             {
                 UpdateGameArea();
@@ -408,4 +417,31 @@ namespace LmbrCentral
     {
         m_switchingToGameMode = true;
     }
+
+    void EditorNavigationAreaComponent::OnEntityCompositionChanging(const AzToolsFramework::EntityIdList& entityIds)
+    {
+        if (AZStd::find(entityIds.begin(), entityIds.end(), GetEntityId()) != entityIds.end())
+        {
+            m_compositionChanging = true;
+        }
+    }
+
+    void EditorNavigationAreaComponent::OnEntityCompositionChanged(const AzToolsFramework::EntityIdList& entityIds)
+    {
+        if (AZStd::find(entityIds.begin(), entityIds.end(), GetEntityId()) != entityIds.end())
+        {
+            m_compositionChanging = false;
+        }
+    }
+
+    void EditorNavigationAreaComponent::OnTick(float /*deltaTime*/, AZ::ScriptTimePoint /*time*/)
+    {
+        m_compositionChanging = false;
+
+        // disconnect from the composition and tick bus because we no longer need to
+        // be concerned with entity scrubbing causing our navigation area to get rebuilt
+        AzToolsFramework::EntityCompositionNotificationBus::Handler::BusDisconnect();
+        AZ::TickBus::Handler::BusDisconnect();
+    }
+
 } // namespace LmbrCentral

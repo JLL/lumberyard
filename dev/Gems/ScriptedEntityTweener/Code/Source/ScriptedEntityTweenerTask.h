@@ -16,7 +16,6 @@
 #include <AzCore/std/containers/unordered_map.h>
 #include <AzCore/std/containers/list.h>
 #include <ScriptedEntityTweener/ScriptedEntityTweenerEnums.h>
-#include <Maestro/Bus/SequenceAgentComponentBus.h>
 #include "ScriptedEntityTweenerSubtask.h"
 
 
@@ -26,7 +25,7 @@ namespace ScriptedEntityTweener
     class ScriptedEntityTweenerTask
     {
     public: // member functions
-        ScriptedEntityTweenerTask(AZ::EntityId id, bool createSequenceAgent = false);
+        ScriptedEntityTweenerTask(AZ::EntityId id);
         ~ScriptedEntityTweenerTask();
 
         void AddAnimation(const AnimationParameters& params, bool overwriteQueued = true);
@@ -34,6 +33,8 @@ namespace ScriptedEntityTweener
         void Update(float deltaTime);
 
         bool GetIsActive();
+
+        void Stop(int timelineId);
 
         void SetPaused(const AnimationParameterAddressData& addressData, int timelineId, bool isPaused);
 
@@ -60,7 +61,6 @@ namespace ScriptedEntityTweener
 
     private: // member functions
         AZ::EntityId m_entityId;
-        Maestro::SequenceAgentEventBusId m_sequenceAgentBusId;
 
         //! Unique(per address data) active subtasks being updated
         AZStd::unordered_map<AnimationParameterAddressData, ScriptedEntityTweenerSubtask> m_subtasks;
@@ -72,17 +72,19 @@ namespace ScriptedEntityTweener
                 : m_params(params)
                 , m_currentDelayTime(delayTime)
                 , m_isPaused(false)
-                , m_hasInitialValue(false)
             {
             }
 
             bool UpdateUntilReady(float deltaTime)
             {
-                m_currentDelayTime -= deltaTime * m_params.m_animationProperties.m_playbackSpeedMultiplier;
-                if (m_currentDelayTime <= .0f)
+                if (!m_isPaused)
                 {
-                    m_params.m_animationProperties.m_timeToDelayAnim = .0f;
-                    return true;
+                    m_currentDelayTime -= deltaTime * m_params.m_animationProperties.m_playbackSpeedMultiplier;
+                    if (m_currentDelayTime <= .0f)
+                    {
+                        m_params.m_animationProperties.m_timeToDelayAnim = .0f;
+                        return true;
+                    }
                 }
                 return false;
             }
@@ -112,20 +114,24 @@ namespace ScriptedEntityTweener
                 m_isPaused = isPaused;
             }
 
-            void SetInitialValue(const AZStd::any initialValue)
+            void SetInitialValue(const AnimationParameterAddressData& addressData, const AZStd::any initialValue)
             {
-                m_hasInitialValue = true;
-                m_initialValue = initialValue;
+                m_initialValues[addressData] = initialValue;
             }
 
             bool HasInitialValue()
             {
-                return m_hasInitialValue;
+                return !m_initialValues.empty();
             }
 
-            const AZStd::any& GetInitialValue()
+            const AZStd::any& GetInitialValue(const AnimationParameterAddressData& addressData)
             {
-                return m_initialValue;
+                auto initialValueEntry = m_initialValues.find(addressData);
+                if (initialValueEntry != m_initialValues.end())
+                {
+                    return initialValueEntry->second;
+                }
+                return m_emptyInitialValue;
             }
 
         private:
@@ -134,10 +140,11 @@ namespace ScriptedEntityTweener
             float m_currentDelayTime;
             bool m_isPaused;
             
-            bool m_hasInitialValue;
-            AZStd::any m_initialValue;
+            AZStd::unordered_map<AnimationParameterAddressData, AZStd::any> m_initialValues;
 
             AnimationParameters m_params;
+
+            static const AZStd::any m_emptyInitialValue;
         };
 
         //! List of AnimationsParameters that need to be delayed before being added to m_subtasks, possibly overriding an animation.
@@ -149,5 +156,9 @@ namespace ScriptedEntityTweener
         {
             return timelineId != AnimationProperties::InvalidTimelineId;
         }
+
+        bool InitializeSubtask(ScriptedEntityTweenerSubtask& subtask, const AZStd::pair<AnimationParameterAddressData, AZStd::any> initData, AnimationParameters params);
+        void ExecuteCallbacks(const AZStd::set<CallbackData>& callbacks);
+        void ClearCallbacks(const AnimationProperties& animationProperties);
     };
 }

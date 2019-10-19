@@ -192,9 +192,13 @@ bool CTerrainModifyTool::MouseCallback(CViewport* view, EMouseEvent event, QPoin
     }
     else if (event == eMouseLDown && bCollideWithTerrain)
     {
-        if (!GetIEditor()->IsUndoRecording())
+        AzToolsFramework::UndoSystem::URSequencePoint* undoOperation = nullptr;
+        AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(
+            undoOperation, &AzToolsFramework::ToolsApplicationRequests::GetCurrentUndoBatch);
+        if (!undoOperation)
         {
-            GetIEditor()->BeginUndo();
+            AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(
+                undoOperation, &AzToolsFramework::ToolsApplicationRequests::BeginUndoBatch, "Modify Terrain");
         }
         Paint();
         m_nPaintingMode = ePaintMode_InProgress;
@@ -233,9 +237,11 @@ bool CTerrainModifyTool::MouseCallback(CViewport* view, EMouseEvent event, QPoin
     // come back without releasing the mouse
     if ((m_nPaintingMode == ePaintMode_Ready && event != eMouseMove) || event == eMouseLUp)
     {
-        if (GetIEditor()->IsUndoRecording())
+        AzToolsFramework::UndoSystem::URSequencePoint* undoOperation = nullptr;
+        AzToolsFramework::ToolsApplicationRequests::Bus::BroadcastResult(undoOperation, &AzToolsFramework::ToolsApplicationRequests::GetCurrentUndoBatch);
+        if (undoOperation)
         {
-            GetIEditor()->AcceptUndo("Terrain Modify");
+            AzToolsFramework::ToolsApplicationRequests::Bus::Broadcast(&AzToolsFramework::ToolsApplicationRequests::EndUndoBatch);
         }
         m_nPaintingMode = ePaintMode_None;
     }
@@ -243,11 +249,19 @@ bool CTerrainModifyTool::MouseCallback(CViewport* view, EMouseEvent event, QPoin
     // Show status help.
     if (m_pBrush->type == eBrushRiseLower)
     {
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+        GetIEditor()->SetStatusText("⌘:Inverse Height  ⌥:Smooth  LMB:Rise/Lower/Smooth  [ ]:Change Brush Radius  <, >.:Change Height");
+#else
         GetIEditor()->SetStatusText("CTRL:Inverse Height  ALT:Smooth  LMB:Rise/Lower/Smooth  [ ]:Change Brush Radius  <, >.:Change Height");
+#endif
     }
     else
     {
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+        GetIEditor()->SetStatusText("⌘:Query Height  ⌥:Smooth  LMB:Flatten/Smooth  [ ]:Change Brush Radius  <, >.:Change Height/Hardness");
+#else
         GetIEditor()->SetStatusText("CTRL:Query Height  ALT:Smooth  LMB:Flatten/Smooth  [ ]:Change Brush Radius  <, >.:Change Height/Hardness");
+#endif
     }
 
     return true;

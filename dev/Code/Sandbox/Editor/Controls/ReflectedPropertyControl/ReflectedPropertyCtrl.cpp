@@ -1,4 +1,15 @@
-#include "stdafx.h"
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates, or 
+* a third party where indicated.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,  
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+*
+*/
+#include "StdAfx.h"
 
 #include "Clipboard.h"
 #include "ReflectedPropertyCtrl.h"
@@ -104,8 +115,15 @@ ReflectedPropertyItem* ReflectedPropertyControl::AddVarBlock(CVarBlock *varBlock
     //filter list based on search string
     if (!m_filterString.isEmpty())
     {
-        auto it = std::copy_if(variables.begin(), variables.end(), variables.begin(), [this](IVariable *var){return QString(var->GetName()).toLower().contains(m_filterString); });
-        variables.resize(std::distance(variables.begin(), it));  // shrink container to new size
+        AZStd::vector<IVariable*> newVariables;
+        for (IVariable* var : variables)
+        {
+            if (QString(var->GetName()).toLower().contains(m_filterString))
+            {
+                newVariables.emplace_back(var);
+            }
+        }
+        variables.swap(newVariables);
     }
 
     //sorting if needed.  sort first when grouping to make grouping easier
@@ -264,7 +282,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
 
             void* pUserData = reinterpret_cast<void*>((i << 16) | k);
 
-            if (!_stricmp(type, "int"))
+            if (!azstricmp(type, "int"))
             {
                 CSmartVariable<int> intVar;
                 AddVariable(group, intVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData);
@@ -280,7 +298,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     intVar->SetLimits(nMin, nMax);
                 }
             }
-            else if (!stricmp(type, "float"))
+            else if (!azstricmp(type, "float"))
             {
                 CSmartVariable<float> floatVar;
                 AddVariable(group, floatVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData);
@@ -296,7 +314,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     floatVar->SetLimits(fMin, fMax);
                 }
             }
-            else if (!stricmp(type, "vector"))
+            else if (!azstricmp(type, "vector"))
             {
                 CSmartVariable<Vec3> vec3Var;
                 AddVariable(group, vec3Var, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData);
@@ -306,7 +324,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     vec3Var->Set(vValue);
                 }
             }
-            else if (!stricmp(type, "bool"))
+            else if (!azstricmp(type, "bool"))
             {
                 CSmartVariable<bool> bVar;
                 AddVariable(group, bVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData);
@@ -316,7 +334,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     bVar->Set(bValue);
                 }
             }
-            else if (!stricmp(type, "texture"))
+            else if (!azstricmp(type, "texture"))
             {
                 CSmartVariable<QString> textureVar;
                 AddVariable(group, textureVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData, IVariable::DT_TEXTURE);
@@ -326,7 +344,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     textureVar->Set(textureName);
                 }
             }
-            else if (!stricmp(type, "material"))
+            else if (!azstricmp(type, "material"))
             {
                 CSmartVariable<QString> materialVar;
                 AddVariable(group, materialVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData, IVariable::DT_MATERIAL);
@@ -336,7 +354,7 @@ void ReflectedPropertyControl::CreateItems(XmlNodeRef node, CVarBlockPtr& outBlo
                     materialVar->Set(materialName);
                 }
             }
-            else if (!stricmp(type, "color"))
+            else if (!azstricmp(type, "color"))
             {
                 CSmartVariable<Vec3> colorVar;
                 AddVariable(group, colorVar, child->getTag(), humanReadableName.toUtf8().data(), strDescription.toUtf8().data(), func, pUserData, IVariable::DT_COLOR);
@@ -890,6 +908,11 @@ void ReflectedPropertyControl::ClearUndoCallback()
 bool ReflectedPropertyControl::FindVariable(IVariable *categoryItem) const
 {
     assert(m_root);
+    if (!m_root)
+    {
+        return false;
+    }
+
     ReflectedPropertyItem *pItem = m_root->findItem(categoryItem);
     return pItem != nullptr;
 }

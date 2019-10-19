@@ -17,6 +17,7 @@
 #include "Attribute.h"
 #include "Vector.h"
 #include "StringConversions.h"
+#include <MCore/Source/AttributeAllocator.h>
 
 
 namespace MCore
@@ -28,6 +29,8 @@ namespace MCore
     class MCORE_API AttributeQuaternion
         : public Attribute
     {
+        AZ_CLASS_ALLOCATOR(AttributeQuaternion, AttributeAllocator, 0)
+
         friend class AttributeFactory;
     public:
         enum
@@ -41,7 +44,6 @@ namespace MCore
 
         MCORE_INLINE uint8* GetRawDataPointer()                     { return reinterpret_cast<uint8*>(&mValue); }
         MCORE_INLINE uint32 GetRawDataSize() const                  { return sizeof(Quaternion); }
-        bool GetSupportsRawDataPointer() const override             { return true; }
 
         // adjust values
         MCORE_INLINE const Quaternion& GetValue() const             { return mValue; }
@@ -49,7 +51,6 @@ namespace MCore
 
         // overloaded from the attribute base class
         Attribute* Clone() const override                           { return AttributeQuaternion::Create(mValue); }
-        Attribute* CreateInstance(void* destMemory) override        { return new(destMemory) AttributeQuaternion(); }
         const char* GetTypeString() const override                  { return "AttributeQuaternion"; }
         bool InitFrom(const Attribute* other) override
         {
@@ -104,17 +105,5 @@ namespace MCore
             return true;
         }
 
-        // write to a stream
-        bool WriteData(MCore::Stream* stream, MCore::Endian::EEndianType targetEndianType) const override
-        {
-            Quaternion streamValue = mValue;
-            Endian::ConvertQuaternionTo(&streamValue, targetEndianType);
-            if (stream->Write(&streamValue, sizeof(Quaternion)) == 0)
-            {
-                return false;
-            }
-
-            return true;
-        }
     };
 }   // namespace MCore

@@ -35,6 +35,7 @@
 #include <QAction>
 #include <QDebug>
 #include <QMessageBox>
+#include <QWidget>
 #include "MainStatusBar.h"
 #include "IEditorMaterialManager.h"
 #include "PanelDisplayLayer.h"
@@ -47,6 +48,7 @@
 
 #include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 #include <AzToolsFramework/API/EditorAnimationSystemRequestBus.h>
+#include <AzToolsFramework/UI/PropertyEditor/DHQSpinbox.hxx>
 
 #include <QWidgetAction>
 #include <QInputDialog>
@@ -60,7 +62,7 @@
 #include "CustomizeKeyboardDialog.h"
 #include "QtViewPaneManager.h"
 #include "Viewport.h"
-#include "Viewpane.h"
+#include "ViewPane.h"
 
 #include "EditorPreferencesPageGeneral.h"
 #include "SettingsManagerDialog.h"
@@ -112,6 +114,7 @@
 #include "AzCore/std/smart_ptr/make_shared.h"
 #include <AzCore/EBus/EBus.h>
 #include <AzCore/Component/TickBus.h>
+#include <AzCore/Component/ComponentApplication.h>
 #include <AzQtComponents/Components/DockMainWindow.h>
 #include <AzQtComponents/Components/EditorProxyStyle.h>
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
@@ -134,6 +137,7 @@
 
 #include <Editor/AzAssetBrowser/AzAssetBrowserWindow.h>
 #include <Editor/AssetEditor/AssetEditorWindow.h>
+#include <Editor/GridSettingsDialog.h>
 
 // uncomment this to show thumbnail demo widget
 // #define ThumbnailDemo
@@ -143,6 +147,8 @@
 #endif
 
 #include "MaterialSender.h"
+
+#include "ActionManager.h"
 
 using namespace AZ;
 using namespace AzQtComponents;
@@ -260,7 +266,7 @@ public:
         return m_pendingJobsCount;
     }
 
-    std::set<AZStd::string> FailedJobsList() const
+    AZStd::set<AZStd::string> FailedJobsList() const
     {
         return m_failedJobs;
     }
@@ -279,7 +285,7 @@ public:
 private:
     EConnectionState m_state;
     int m_pendingJobsCount = 0;
-    std::set<AZStd::string> m_failedJobs;
+    AZStd::set<AZStd::string> m_failedJobs;
     AZStd::string m_lastAssetProcessorTask;
 };
 
@@ -319,6 +325,13 @@ namespace
         // Calling QApplication::closeAllWindows instead of MainWindow::close ensures the Metal
         // render window is cleaned up on macOS.
         QTimer::singleShot(0, qApp, &QApplication::closeAllWindows);
+    }
+
+    void PyExitNoPrompt()
+    {
+        // Set the level to "unmodified" so that it doesn't prompt to save on exit.
+        GetIEditor()->GetDocument()->SetModifiedFlag(false);
+        PyExit();
     }
 }
 
@@ -379,111 +392,74 @@ private:
     }
 };
 
-class SnapToGridMenu
-    : public DynamicMenu
+class SnapToWidget
+    : public QWidget
+    , public CGridSettingsDialog::NotificationBus::Handler
 {
 public:
-    SnapToGridMenu(QObject* parent)
-        : DynamicMenu(parent)
-    {
-    }
-protected:
-    void OnMenuChange(int id, QAction* action) override
-    {
-        if (id < ID_SNAP_TO_GRID_RANGE_BEGIN || id > ID_SNAP_TO_GRID_RANGE_END)
-        {
-            return;
-        }
 
-        const int nId = clamp_tpl(id - ID_SNAP_TO_GRID_RANGE_BEGIN, 0, 10);
-        double startSize = 0.125;
-        if (nId >= 0 && nId < 100)
-        {
-            double size = startSize;
-            for (int i = 0; i < nId; i++)
-            {
-                size *= 2;
-            }
-            // Set grid to size.
-            GetIEditor()->GetViewManager()->GetGrid()->size = size;
-        }
-    }
+    typedef AZStd::function<void(double)> SetValueCallback;
+    typedef AZStd::function<double()> GetValueCallback;
 
-    void OnMenuUpdate(int id, QAction* action) override
+    SnapToWidget(QAction* defaultAction, SetValueCallback setValueCallback, GetValueCallback getValueCallback)
+        : m_setValueCallback(setValueCallback)
+        , m_getValueCallback(getValueCallback)
     {
-        if (id < ID_SNAP_TO_GRID_RANGE_BEGIN || id > ID_SNAP_TO_GRID_RANGE_END)
-        {
-            return;
-        }
-        const int nId = clamp_tpl(id - ID_SNAP_TO_GRID_RANGE_BEGIN, 0, 10);
-        double startSize = 0.125;
-        double currentSize = GetIEditor()->GetViewManager()->GetGrid()->size;
-        int steps = 10;
-        double size = startSize;
-        for (int i = 0; i < nId; i++)
-        {
-            size *= 2;
-        }
+        QHBoxLayout* layout = new QHBoxLayout();
+        setLayout(layout);
 
-        action->setChecked(size == currentSize);
+        m_toolButton = new QToolButton();
+        m_toolButton->setAutoRaise(true);
+        m_toolButton->setCheckable(false);
+        m_toolButton->setDefaultAction(defaultAction);
+
+        m_spinBox = new AzToolsFramework::DHQDoubleSpinbox();
+
+        layout->addWidget(m_toolButton);
+        layout->addWidget(m_spinBox);
+
+        m_spinBox->setEnabled(defaultAction->isChecked());
+
+        OnGridValuesUpdated();
+
+        QObject::connect(m_spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged), this, &SnapToWidget::OnValueChanged);
+        QObject::connect(defaultAction, &QAction::changed, this, &SnapToWidget::OnActionChanged);
+
+        CGridSettingsDialog::NotificationBus::Handler::BusConnect();
     }
 
-    void CreateMenu() override
+    void SetIcon(QIcon icon)
     {
-        double startSize = 0.125;
-        int steps = 10;
-
-        double size = startSize;
-        for (int i = 0; i < steps; i++)
-        {
-            QString str = QString::number(size, 'g');
-            AddAction(ID_SNAP_TO_GRID_RANGE_BEGIN + i, str).SetCheckable(true);
-            size *= 2;
-        }
-        AddSeparator();
-        // The ID_VIEW_GRIDSETTINGS action from the toolbar has a different text than the one in the menu bar
-        // So just connect on to the other instead of having two separate IDs.
-        ActionManager::ActionWrapper action = AddAction(ID_VIEW_GRIDSETTINGS, tr("Setup Grid"));
-        QAction* knownAction = m_actionManager->GetAction(ID_VIEW_GRIDSETTINGS);
-        connect(action, &QAction::triggered, knownAction, &QAction::trigger);
+        m_toolButton->setIcon(icon);
     }
-};
 
-class SnapToAngleMenu
-    : public DynamicMenu
-{
-public:
-    SnapToAngleMenu(QObject* parent)
-        : DynamicMenu(parent)
-        , m_anglesArray({ 1, 5, 30, 45, 90, 180, 270 })
+    void OnGridValuesUpdated() override
     {
+        // Blocking signals to not trigger the valueChanged callback when we set the value on the spin box.
+        QSignalBlocker signalBlocker(m_spinBox);
+        double value = m_getValueCallback();
+        m_spinBox->setValue(value);
     }
 
 protected:
-    void OnMenuChange(int id, QAction* action) override
+
+    void OnValueChanged(double value)
     {
-        id = clamp_tpl(id - ID_SNAP_TO_ANGLE_RANGE_BEGIN, 0, int(m_anglesArray.size() - 1));
-        GetIEditor()->GetViewManager()->GetGrid()->angleSnap = m_anglesArray[id];
+        m_setValueCallback(value);
     }
 
-    void OnMenuUpdate(int id, QAction* action) override
+    void OnActionChanged()
     {
-        id = clamp_tpl(id - ID_SNAP_TO_ANGLE_RANGE_BEGIN, 0, int(m_anglesArray.size() - 1));
-        double currentSize = GetIEditor()->GetViewManager()->GetGrid()->angleSnap;
-        action->setChecked(m_anglesArray[id] == currentSize);
+        m_spinBox->setEnabled(m_toolButton->isChecked());
     }
 
-    void CreateMenu() override
-    {
-        const int count = m_anglesArray.size();
-        for (int i = 0; i < count; i++)
-        {
-            QString str = QString::number(m_anglesArray[i]);
-            AddAction(ID_SNAP_TO_ANGLE_RANGE_BEGIN + i, str).SetCheckable(true);
-        }
-    }
 private:
-    const std::vector<int> m_anglesArray;
+
+    QToolButton* m_toolButton = nullptr;
+    AzToolsFramework::DHQDoubleSpinbox* m_spinBox = nullptr;
+
+    SetValueCallback m_setValueCallback;
+    GetValueCallback m_getValueCallback;
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -495,7 +471,8 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_oldMainFrame(nullptr)
     , m_viewPaneManager(QtViewPaneManager::instance())
-    , m_actionManager(new ActionManager(this, QtViewPaneManager::instance()))
+    , m_shortcutDispatcher(new ShortcutDispatcher(this))
+    , m_actionManager(new ActionManager(this, QtViewPaneManager::instance(), m_shortcutDispatcher))
     , m_undoStateAdapter(new UndoStackStateAdapter(this))
     , m_keyboardCustomization(nullptr)
     , m_activeView(nullptr)
@@ -530,22 +507,17 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(m_viewPaneManager, &QtViewPaneManager::viewPaneCreated, this, &MainWindow::OnViewPaneCreated);
     GetIEditor()->RegisterNotifyListener(this);
-    new ShortcutDispatcher(this);
 
     AssetImporterDragAndDropHandler* assetImporterDragAndDropHandler = new AssetImporterDragAndDropHandler(this, m_assetImporterManager);
     connect(assetImporterDragAndDropHandler, &AssetImporterDragAndDropHandler::OpenAssetImporterManager, this, &MainWindow::OnOpenAssetImporterManager);
 
     connect(m_levelEditorMenuHandler, &LevelEditorMenuHandler::ActivateAssetImporter, this, [this]() {
-        m_assetImporterManager->Exec(); 
+        m_assetImporterManager->Exec();
     });
 
     setFocusPolicy(Qt::StrongFocus);
 
     connect(m_actionManager, &ActionManager::SendMetricsSignal, this, &MainWindow::SendMetricsEvent);
-
-    AzToolsFramework::Ticker* ticker = new AzToolsFramework::Ticker(this);
-    ticker->Start();
-    connect(ticker, &AzToolsFramework::Ticker::Tick, this, &MainWindow::SystemTick);
 
     connect(m_NetPromoterScoreDialog, &NetPromoterScoreDialog::UserInteractionCompleted, m_dayCountManager, &DayCountManager::OnUpdatePreviousUsedData);
     setAcceptDrops(true);
@@ -556,12 +528,13 @@ MainWindow::MainWindow(QWidget* parent)
         aed->installNativeEventFilter(this);
     }
 #endif
-    QAction* escapeAction = new QAction(this);
+
+    // special handling for escape key (outside ActionManager)
+    auto* escapeAction = new QAction(this);
     escapeAction->setShortcut(QKeySequence(Qt::Key_Escape));
-
     addAction(escapeAction);
-
     connect(escapeAction, &QAction::triggered, this, &MainWindow::OnEscapeAction);
+
     const QSize minSize(800, 600);
     if (size().height() < minSize.height() || size().width() < minSize.width())
     {
@@ -571,8 +544,12 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::SystemTick()
 {
-    AZ::SystemTickBus::ExecuteQueuedEvents();
-    AZ::SystemTickBus::QueueBroadcast(&AZ::SystemTickEvents::OnSystemTick);
+    AZ::ComponentApplication* componentApplication = nullptr;
+    EBUS_EVENT_RESULT(componentApplication, AZ::ComponentApplicationBus, GetApplication);
+    if (componentApplication)
+    {
+        componentApplication->TickSystem();
+    }
 }
 
 #ifdef Q_OS_WIN
@@ -646,11 +623,22 @@ MainWindow::~MainWindow()
     delete m_toolbarManager;
     m_connectionListener.reset();
     GetIEditor()->UnregisterNotifyListener(this);
+
+    // tear down the ActionOverride (clear the overrideWidget's parent)
+    ActionOverrideRequestBus::Event(
+        GetEntityContextId(), &ActionOverrideRequests::TeardownActionOverrideHandler);
+
+    m_instance = nullptr;
 }
 
 void MainWindow::InitCentralWidget()
 {
     m_pLayoutWnd = new CLayoutWnd(&m_settings);
+
+    // Set the central widgets before calling CreateLayout to avoid reparenting everything later
+    setCentralWidget(m_viewPaneHost);
+    m_viewPaneHost->setCentralWidget(m_pLayoutWnd);
+
     if (MainWindow::instance()->IsPreview())
     {
         m_pLayoutWnd->CreateLayout(ET_Layout0, true, ET_ViewportModel);
@@ -662,9 +650,6 @@ void MainWindow::InitCentralWidget()
             m_pLayoutWnd->CreateLayout(ET_Layout0);
         }
     }
-
-    setCentralWidget(m_viewPaneHost);
-    m_viewPaneHost->setCentralWidget(m_pLayoutWnd);
 
     // make sure the layout wnd knows to reset it's layout and settings
     connect(m_viewPaneManager, &QtViewPaneManager::layoutReset, m_pLayoutWnd, &CLayoutWnd::ResetLayout);
@@ -683,7 +668,7 @@ void MainWindow::Initialize()
 
     // load toolbars ("shelves") and macros
     GetIEditor()->GetToolBoxManager()->Load(m_actionManager);
-    
+
     InitToolActionHandlers();
 
     m_levelEditorMenuHandler->Initialize();
@@ -713,7 +698,17 @@ void MainWindow::Initialize()
 
     PyScript::InitializePython(CCryEditApp::instance()->GetRootEnginePath());
 
-    AzFramework::ApplicationRequests::Bus::BroadcastResult(m_projectExternal, &AzFramework::ApplicationRequests::IsEngineExternal);
+    AzFramework::ApplicationRequests::Bus::BroadcastResult(
+        m_projectExternal, &AzFramework::ApplicationRequests::IsEngineExternal);
+
+    // setup the ActionOverride (set overrideWidgets parent to be the MainWindow)
+    ActionOverrideRequestBus::Event(
+        GetEntityContextId(), &ActionOverrideRequests::SetupActionOverrideHandler, this);
+
+    // This function only happens after we're pretty sure that the engine has successfully started - so now would be a good time to start ticking the message pumps/etc.
+    AzToolsFramework::Ticker* ticker = new AzToolsFramework::Ticker(this);
+    ticker->Start();
+    connect(ticker, &AzToolsFramework::Ticker::Tick, this, &MainWindow::SystemTick);
 }
 
 void MainWindow::InitStatusBar()
@@ -741,7 +736,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
         m_NetPromoterScoreDialog->exec();
     }
 
-    if (GetIEditor()->GetDocument() && !GetIEditor()->GetDocument()->CanCloseFrame(nullptr))
+    if (GetIEditor()->GetDocument() && !GetIEditor()->GetDocument()->CanCloseFrame())
     {
         event->ignore();
         return;
@@ -832,36 +827,68 @@ void MainWindow::InitActions()
     cryEdit->RegisterActionHandlers();
 
     am->AddAction(ID_TOOLBAR_SEPARATOR, QString());
+
     if (m_enableLegacyCryEntities)
     {
         am->AddAction(ID_TOOLBAR_WIDGET_SELECTION_MASK, QString());
     }
-    am->AddAction(ID_TOOLBAR_WIDGET_REF_COORD, QString());
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+       am->AddAction(ID_TOOLBAR_WIDGET_REF_COORD, QString());
+    }
+
     if (m_enableLegacyCryEntities)
     {
         am->AddAction(ID_TOOLBAR_WIDGET_SELECT_OBJECT, QString());
     }
+
     am->AddAction(ID_TOOLBAR_WIDGET_UNDO, QString());
     am->AddAction(ID_TOOLBAR_WIDGET_REDO, QString());
     am->AddAction(ID_TOOLBAR_WIDGET_SNAP_ANGLE, QString());
     am->AddAction(ID_TOOLBAR_WIDGET_SNAP_GRID, QString());
-    am->AddAction(ID_TOOLBAR_WIDGET_LAYER_SELECT, QString());
+
+    if (m_enableLegacyCryEntities)
+    {
+        am->AddAction(ID_TOOLBAR_WIDGET_LAYER_SELECT, QString());
+    }
 
     // File actions
-    am->AddAction(ID_FILE_NEW, tr("New")).SetShortcut(tr("Ctrl+N")).Connect(&QAction::triggered, [cryEdit]()
-    {
-        cryEdit->OnCreateLevel();
-    })
+    am->AddAction(ID_FILE_NEW, tr("New Level"))
+        .SetShortcut(tr("Ctrl+N"))
+        .Connect(&QAction::triggered, [cryEdit]()
+        {
+            cryEdit->OnCreateLevel();
+        })
         .SetMetricsIdentifier("MainEditor", "NewLevel");
-    am->AddAction(ID_FILE_OPEN_LEVEL, tr("Open...")).SetShortcut(tr("Ctrl+O"))
+    am->AddAction(ID_FILE_OPEN_LEVEL, tr("Open Level..."))
+        .SetShortcut(tr("Ctrl+O"))
         .SetMetricsIdentifier("MainEditor", "OpenLevel")
-        .SetStatusTip(tr("Open an existing level"));
-    am->AddAction(ID_FILE_SAVE_LEVEL, tr("&Save")).SetShortcut(tr("Ctrl+S"))
+        .SetStatusTip(tr("Open an existing level"))
+        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateFileOpen);
+#ifdef ENABLE_SLICE_EDITOR
+    am->AddAction(ID_FILE_NEW_SLICE, tr("New Slice"))
+        .SetMetricsIdentifier("MainEditor", "NewSlice")
+        .SetStatusTip(tr("Create a new slice"));
+    am->AddAction(ID_FILE_OPEN_SLICE, tr("Open Slice..."))
+        .SetMetricsIdentifier("MainEditor", "OpenSlice")
+        .SetStatusTip(tr("Open an existing slice"));
+#endif
+    am->AddAction(ID_FILE_SAVE_SELECTED_SLICE, tr("Save selected slice")).SetShortcut(tr("Alt+S"))
+        .SetMetricsIdentifier("MainEditor", "SaveSliceToFirstLevelRoot")
+        .SetStatusTip(tr("Save the selected slice to the first level root"));
+    am->AddAction(ID_FILE_SAVE_SLICE_TO_ROOT, tr("Save Slice to root")).SetShortcut(tr("Ctrl+Alt+S"))
+        .SetMetricsIdentifier("MainEditor", "SaveSliceToTopLevelRoot")
+        .SetStatusTip(tr("Save the selected slice to the top level root"));
+    am->AddAction(ID_FILE_SAVE_LEVEL, tr("&Save"))
+        .SetShortcut(tr("Ctrl+S"))
+        .SetReserved()
         .SetStatusTip(tr("Save the current level"))
         .SetMetricsIdentifier("MainEditor", "SaveLevel")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateDocumentReady);
     am->AddAction(ID_FILE_SAVE_AS, tr("Save &As..."))
         .SetShortcut(tr("Ctrl+Shift+S"))
+        .SetReserved()
         .SetStatusTip(tr("Save the active document with a new name"))
         .SetMetricsIdentifier("MainEditor", "SaveLevelAs")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateDocumentReady);
@@ -908,6 +935,8 @@ void MainWindow::InitActions()
         .SetMetricsIdentifier("MainEditor", "ExportOcclusionMesh");
     am->AddAction(ID_FILE_EDITLOGFILE, tr("Show Log File"))
         .SetMetricsIdentifier("MainEditor", "ShowLogFile");
+    am->AddAction(ID_FILE_RESAVESLICES, tr("Resave All Slices"))
+        .SetMetricsIdentifier("MainEditor", "ResaveSlices");
     am->AddAction(ID_GAME_PC_ENABLEVERYHIGHSPEC, tr("Very High")).SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "SetSpecPCVeryHigh")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
@@ -920,11 +949,17 @@ void MainWindow::InitActions()
     am->AddAction(ID_GAME_PC_ENABLELOWSPEC, tr("Low")).SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "SetSpecPCLow")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
-    am->AddAction(ID_GAME_OSXGL_ENABLESPEC, tr("OSX GL")).SetCheckable(true)
-        .SetMetricsIdentifier("MainEditor", "SetSpecOSXGL")
+    am->AddAction(ID_GAME_OSXMETAL_ENABLEVERYHIGHSPEC, tr("Very High")).SetCheckable(true)
+        .SetMetricsIdentifier("MainEditor", "SetSpecOSXMetalVeryHigh")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
-    am->AddAction(ID_GAME_OSXMETAL_ENABLESPEC, tr("OSX Metal")).SetCheckable(true)
-        .SetMetricsIdentifier("MainEditor", "SetSpecOSXMetal")
+    am->AddAction(ID_GAME_OSXMETAL_ENABLEHIGHSPEC, tr("High")).SetCheckable(true)
+        .SetMetricsIdentifier("MainEditor", "SetSpecOSXMetalHigh")
+        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
+    am->AddAction(ID_GAME_OSXMETAL_ENABLEMEDIUMSPEC, tr("Medium")).SetCheckable(true)
+        .SetMetricsIdentifier("MainEditor", "SetSpecOSXMetalMedium")
+        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
+    am->AddAction(ID_GAME_OSXMETAL_ENABLELOWSPEC, tr("Low")).SetCheckable(true)
+        .SetMetricsIdentifier("MainEditor", "SetSpecOSXMetalLow")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
     am->AddAction(ID_GAME_ANDROID_ENABLEVERYHIGHSPEC, tr("Very High")).SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "SetSpecAndroidVeryHigh")
@@ -951,11 +986,11 @@ void MainWindow::InitActions()
         .SetMetricsIdentifier("MainEditor", "SetSpecIosLow")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGameSpec);
 #if defined(AZ_TOOLS_EXPAND_FOR_RESTRICTED_PLATFORMS)
-#if defined(TOOLS_SUPPORT_XBONE)
-#include AZ_RESTRICTED_FILE(MainWindow_cpp, TOOLS_SUPPORT_XBONE)
+#if defined(TOOLS_SUPPORT_XENIA)
+    #include "Xenia/MainWindow_cpp_xenia.inl"
 #endif
-#if defined(TOOLS_SUPPORT_PS4)
-#include AZ_RESTRICTED_FILE(MainWindow_cpp, TOOLS_SUPPORT_PS4)
+#if defined(TOOLS_SUPPORT_PROVO)
+    #include "Provo/MainWindow_cpp_provo.inl"
 #endif
 #endif
     am->AddAction(ID_GAME_APPLETV_ENABLESPEC, tr("Apple TV")).SetCheckable(true)
@@ -980,19 +1015,20 @@ void MainWindow::InitActions()
         am->AddAction(i, QString());
     }
 
-#if defined(AZ_PLATFORM_APPLE)
+#if AZ_TRAIT_OS_PLATFORM_APPLE
     const QString appExitText = tr("&Quit");
 #else
     const QString appExitText = tr("E&xit");
 #endif
 
     am->AddAction(ID_APP_EXIT, appExitText)
-        .SetMetricsIdentifier("MainEditor", "Exit");
-
+        .SetMetricsIdentifier("MainEditor", "Exit")
+        .SetReserved();
 
     // Edit actions
     am->AddAction(ID_UNDO, tr("&Undo"))
         .SetShortcut(QKeySequence::Undo)
+        .SetReserved()
         .SetStatusTip(tr("Undo last operation"))
         //.SetMenu(new QMenu("FIXME"))
         .SetIcon(EditorProxyStyle::icon("undo"))
@@ -1001,6 +1037,7 @@ void MainWindow::InitActions()
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateUndo);
     am->AddAction(ID_REDO, tr("&Redo"))
         .SetShortcut(tr("Ctrl+Shift+Z"))
+        .SetReserved()
         //.SetMenu(new QMenu("FIXME"))
         .SetIcon(EditorProxyStyle::icon("Redo"))
         .SetApplyHoverEffect()
@@ -1022,52 +1059,74 @@ void MainWindow::InitActions()
     //     .SetStatusTip(tr("Paste the contents of the clipboard"))
     //     .SetMetricsIdentifier("MainEditor", "Paste");
 
-    am->AddAction(ID_EDIT_SELECTALL, tr("Select &All"))
-        .SetShortcut(tr("Ctrl+A"))
-        .SetMetricsIdentifier("MainEditor", "SelectObjectsAll")
-        .SetStatusTip(tr("Select all objects"))
-        ->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    am->AddAction(ID_EDIT_SELECTNONE, tr("Deselect All"))
-        .SetShortcut(tr("Ctrl+Shift+D"))
-        .SetMetricsIdentifier("MainEditor", "SelectObjectsNone")
-        .SetStatusTip(tr("Remove selection from all objects"));
-    am->AddAction(ID_EDIT_INVERTSELECTION, tr("&Invert Selection"))
-        .SetMetricsIdentifier("MainEditor", "InvertObjectSelection")
-        .SetShortcut(tr("Ctrl+Shift+I"));
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_EDIT_SELECTALL, tr("Select &All"))
+            .SetShortcut(tr("Ctrl+A"))
+            .SetMetricsIdentifier("MainEditor", "SelectObjectsAll")
+            .SetStatusTip(tr("Select all objects"))
+            ->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        am->AddAction(ID_EDIT_SELECTNONE, tr("Deselect All"))
+            .SetShortcut(tr("Ctrl+Shift+D"))
+            .SetMetricsIdentifier("MainEditor", "SelectObjectsNone")
+            .SetStatusTip(tr("Remove selection from all objects"));
+        am->AddAction(ID_EDIT_INVERTSELECTION, tr("&Invert Selection"))
+            .SetMetricsIdentifier("MainEditor", "InvertObjectSelection")
+            .SetShortcut(tr("Ctrl+Shift+I"));
+    }
+
     am->AddAction(ID_SELECT_OBJECT, tr("&Object(s)..."))
         .SetIcon(EditorProxyStyle::icon("Object_list"))
         .SetApplyHoverEffect()
         .SetMetricsIdentifier("MainEditor", "SelectObjectsDialog")
-        .SetStatusTip(tr("Select Object(s)"));
-    am->AddAction(ID_LOCK_SELECTION, tr("Lock Selection")).SetShortcut(tr("Ctrl+Shift+Space"))
-        .SetMetricsIdentifier("MainEditor", "LockObjectSelection")
-        .SetStatusTip(tr("Lock Current Selection."));
+        .SetStatusTip(tr("Select object(s)"));
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_LOCK_SELECTION, tr("Lock Selection"))
+            .SetShortcut(tr("Ctrl+Shift+Space"))
+            .SetMetricsIdentifier("MainEditor", "LockObjectSelection")
+            .SetStatusTip(tr("Lock Current Selection."));
+    }
+
     am->AddAction(ID_EDIT_NEXTSELECTIONMASK, tr("Next Selection Mask"))
         .SetMetricsIdentifier("MainEditor", "NextObjectSelectionMask");
-    am->AddAction(ID_EDIT_HIDE, tr("Hide Selection")).SetShortcut(tr("H"))
-        .SetStatusTip(tr("Hide selected object(s)."))
-        .SetMetricsIdentifier("MainEditor", "HideSelectedObjects")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditHide);
-    am->AddAction(ID_EDIT_SHOW_LAST_HIDDEN, tr("Show Last Hidden")).SetShortcut(tr("Shift+H"))
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        // implemented by EditorTransformComponentSelection when the new Viewport Interaction Model is enabled
+        am->AddAction(ID_EDIT_HIDE, tr("Hide Selection"))
+            .SetShortcut(tr("H"))
+            .SetStatusTip(tr("Hide selected object(s)."))
+            .SetMetricsIdentifier("MainEditor", "HideSelectedObjects")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditHide);
+        am->AddAction(ID_EDIT_UNHIDEALL, tr("Unhide All"))
+            .SetShortcut(tr("Ctrl+H"))
+            .SetMetricsIdentifier("MainEditor", "UnhideAllObjects")
+            .SetStatusTip(tr("Unhide all hidden objects."));
+    }
+
+    am->AddAction(ID_EDIT_SHOW_LAST_HIDDEN, tr("Show Last Hidden"))
+        .SetShortcut(tr("Shift+H"))
         .SetMetricsIdentifier("MainEditor", "ShowLastHiddenObject")
         .SetStatusTip(tr("Show last hidden object."));
-    am->AddAction(ID_EDIT_UNHIDEALL, tr("Unhide All")).SetShortcut(tr("Ctrl+H"))
-        .SetMetricsIdentifier("MainEditor", "UnhideAllObjects")
-        .SetStatusTip(tr("Unhide all hidden objects."));
 
-    if (m_enableLegacyCryEntities)
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
     {
-        am->AddAction(ID_MODIFY_LINK, tr("Link"))
-            .SetMetricsIdentifier("MainEditor", "LinkSelectedObjects");
-        am->AddAction(ID_MODIFY_UNLINK, tr("Unlink"))
-            .SetMetricsIdentifier("MainEditor", "UnlinkSelectedObjects");
-    }
-    else
-    {
-        am->AddAction(ID_MODIFY_LINK, tr("Parent"))
-            .SetMetricsIdentifier("MainEditor", "LinkSelectedObjects");
-        am->AddAction(ID_MODIFY_UNLINK, tr("Un-Parent"))
-            .SetMetricsIdentifier("MainEditor", "UnlinkSelectedObjects");
+        if (m_enableLegacyCryEntities)
+        {
+            am->AddAction(ID_MODIFY_LINK, tr("Link"))
+                .SetMetricsIdentifier("MainEditor", "LinkSelectedObjects");
+            am->AddAction(ID_MODIFY_UNLINK, tr("Unlink"))
+                .SetMetricsIdentifier("MainEditor", "UnlinkSelectedObjects");
+        }
+        else
+        {
+            am->AddAction(ID_MODIFY_LINK, tr("Parent"))
+                .SetMetricsIdentifier("MainEditor", "LinkSelectedObjects");
+            am->AddAction(ID_MODIFY_UNLINK, tr("Un-Parent"))
+                .SetMetricsIdentifier("MainEditor", "UnlinkSelectedObjects");
+        }
     }
 
     am->AddAction(ID_GROUP_MAKE, tr("&Group"))
@@ -1092,28 +1151,45 @@ void MainWindow::InitActions()
     am->AddAction(ID_GROUP_DETACH, tr("&Detach From Group"))
         .SetMetricsIdentifier("MainEditor", "DetachSelectedFromGroup")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGroupDetach);
-    am->AddAction(ID_EDIT_FREEZE, tr("Lock Selection")).SetShortcut(tr("L"))
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditFreeze)
-        .SetMetricsIdentifier("MainEditor", "FreezeSelectedObjects")
-        .SetIcon(EditorProxyStyle::icon("Freeze"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_EDIT_UNFREEZEALL, tr("Unlock All")).SetShortcut(tr("Ctrl+L"))
-        .SetIcon(EditorProxyStyle::icon("Unfreeze_all"))
-        .SetApplyHoverEffect()
-        .SetMetricsIdentifier("MainEditor", "UnfreezeAllObjects");
-    am->AddAction(ID_EDIT_HOLD, tr("&Hold")).SetShortcut(tr("Ctrl+Alt+H"))
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        // implemented by EditorTransformComponentSelection when the new Viewport Interaction Model is enabled
+        am->AddAction(ID_EDIT_FREEZE, tr("Lock selection"))
+            .SetShortcut(tr("L"))
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditFreeze)
+            .SetMetricsIdentifier("MainEditor", "FreezeSelectedObjects")
+            .SetIcon(EditorProxyStyle::icon("Freeze"))
+            .SetApplyHoverEffect();
+        am->AddAction(ID_EDIT_UNFREEZEALL, tr("Unlock all"))
+            .SetShortcut(tr("Ctrl+L"))
+            .SetIcon(EditorProxyStyle::icon("Unfreeze_all"))
+            .SetApplyHoverEffect()
+            .SetMetricsIdentifier("MainEditor", "UnfreezeAllObjects");
+    }
+
+    am->AddAction(ID_EDIT_HOLD, tr("&Hold"))
+        .SetShortcut(tr("Ctrl+Alt+H"))
         .SetMetricsIdentifier("MainEditor", "Hold")
         .SetStatusTip(tr("Save the current state(Hold)"));
-    am->AddAction(ID_EDIT_FETCH, tr("&Fetch")).SetShortcut(tr("Ctrl+Alt+F"))
+    am->AddAction(ID_EDIT_FETCH, tr("&Fetch"))
+        .SetShortcut(tr("Ctrl+Alt+F"))
         .SetMetricsIdentifier("MainEditor", "Fetch")
         .SetStatusTip(tr("Restore saved state (Fetch)"));
-    am->AddAction(ID_EDIT_DELETE, tr("&Delete")).SetShortcut(QKeySequence::Delete)
-        .SetMetricsIdentifier("MainEditor", "DeleteSelectedObjects")
-        .SetStatusTip(tr("Delete selected objects."))
-        ->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    am->AddAction(ID_EDIT_CLONE, tr("Duplicate")).SetShortcut(tr("Ctrl+D"))
-        .SetMetricsIdentifier("MainEditor", "DeleteSelectedObjects")
-        .SetStatusTip(tr("Duplicate selected objects."));
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        // implemented by EditorTransformComponentSelection when the new Viewport Interaction Model is enabled
+        am->AddAction(ID_EDIT_DELETE, tr("&Delete"))
+            .SetShortcut(QKeySequence::Delete)
+            .SetMetricsIdentifier("MainEditor", "DeleteSelectedObjects")
+            .SetStatusTip(tr("Delete selected objects."))
+            ->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        am->AddAction(ID_EDIT_CLONE, tr("Duplicate"))
+            .SetShortcut(tr("Ctrl+D"))
+            .SetMetricsIdentifier("MainEditor", "DuplicateSelectedObjects")
+            .SetStatusTip(tr("Duplicate selected objects."));
+    }
 
     // Modify actions
     am->AddAction(ID_CONVERTSELECTION_TOBRUSHES, tr("Brush"))
@@ -1146,144 +1222,170 @@ void MainWindow::InitActions()
     am->AddAction(ID_EDIT_RENAMEOBJECT, tr("Rename Object(s)..."))
         .SetMetricsIdentifier("MainEditor", "RenameObjects")
         .SetStatusTip(tr("Rename Object"));
-    am->AddAction(ID_EDITMODE_SELECT, tr("Select Mode"))
-        .SetIcon(EditorProxyStyle::icon("Select"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("1"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Select Object(s)"))
-        .SetMetricsIdentifier("MainEditor", "ToolSelect")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeSelect);
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_EDITMODE_SELECT, tr("Select mode"))
+            .SetIcon(EditorProxyStyle::icon("Select"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("1"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Select object(s)"))
+            .SetMetricsIdentifier("MainEditor", "ToolSelect")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeSelect);
+    }
+
     am->AddAction(ID_EDITMODE_MOVE, tr("Move"))
         .SetIcon(EditorProxyStyle::icon("Move"))
         .SetApplyHoverEffect()
-        .SetShortcut(tr("2"))
+        .SetShortcut(GetIEditor()->IsNewViewportInteractionModelEnabled() ? tr("1") : tr("2"))
         .SetCheckable(true)
-        .SetStatusTip(tr("Select and Move Selected Object(s)"))
+        .SetStatusTip(tr("Select and move selected object(s)"))
         .SetMetricsIdentifier("MainEditor", "ToolMove")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeMove);
     am->AddAction(ID_EDITMODE_ROTATE, tr("Rotate"))
         .SetIcon(EditorProxyStyle::icon("Translate"))
         .SetApplyHoverEffect()
-        .SetShortcut(tr("3"))
+        .SetShortcut(GetIEditor()->IsNewViewportInteractionModelEnabled() ? tr("2") : tr("3"))
         .SetCheckable(true)
-        .SetStatusTip(tr("Select and Rotate Selected Object(s)"))
+        .SetStatusTip(tr("Select and rotate selected object(s)"))
         .SetMetricsIdentifier("MainEditor", "ToolRotate")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeRotate);
     am->AddAction(ID_EDITMODE_SCALE, tr("Scale"))
         .SetIcon(EditorProxyStyle::icon("Scale"))
         .SetApplyHoverEffect()
-        .SetShortcut(tr("4"))
+        .SetShortcut(GetIEditor()->IsNewViewportInteractionModelEnabled() ? tr("3") : tr("4"))
         .SetCheckable(true)
-        .SetStatusTip(tr("Select and Scale Selected Object(s)"))
+        .SetStatusTip(tr("Select and scale selected object(s)"))
         .SetMetricsIdentifier("MainEditor", "ToolScale")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeScale);
-    am->AddAction(ID_EDITMODE_SELECTAREA, tr("Select Terrain"))
-        .SetIcon(EditorProxyStyle::icon("Select_terrain"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("5"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Switch to Terrain selection mode"))
-        .SetMetricsIdentifier("MainEditor", "ToolSelectTerrain")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeSelectarea);
-    am->AddAction(ID_SELECT_AXIS_X, tr("Constrain to X Axis"))
-        .SetIcon(EditorProxyStyle::icon("X_axis"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("Ctrl+1"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Lock movement on X axis"))
-        .SetMetricsIdentifier("MainEditor", "ToggleXAxisConstraint")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisX);
-    am->AddAction(ID_SELECT_AXIS_Y, tr("Constrain to Y Axis"))
-        .SetIcon(EditorProxyStyle::icon("Y_axis"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("Ctrl+2"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Lock movement on Y axis"))
-        .SetMetricsIdentifier("MainEditor", "ToggleYAxisConstraint")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisY);
-    am->AddAction(ID_SELECT_AXIS_Z, tr("Constrain to Z Axis"))
-        .SetIcon(EditorProxyStyle::icon("Z_axis"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("Ctrl+3"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Lock movement on Z axis"))
-        .SetMetricsIdentifier("MainEditor", "ToggleZAxisConstraint")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisZ);
-    am->AddAction(ID_SELECT_AXIS_XY, tr("Constrain to XY Plane"))
-        .SetIcon(EditorProxyStyle::icon("XY2_copy"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("Ctrl+4"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Lock movement on XY plane"))
-        .SetMetricsIdentifier("MainEditor", "ToggleYYPlaneConstraint")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisXy);
-    am->AddAction(ID_SELECT_AXIS_TERRAIN, tr("Constrain to Terrain/Geometry"))
-        .SetIcon(EditorProxyStyle::icon("Object_follow_terrain"))
-        .SetApplyHoverEffect()
-        .SetShortcut(tr("Ctrl+5"))
-        .SetCheckable(true)
-        .SetStatusTip(tr("Lock object movement to follow terrain"))
-        .SetMetricsIdentifier("MainEditor", "ToggleFollowTerrainConstraint")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisTerrain);
-    am->AddAction(ID_SELECT_AXIS_SNAPTOALL, tr("Follow Terrain and Snap to Objects"))
-        .SetIcon(EditorProxyStyle::icon("Follow_terrain"))
-        .SetApplyHoverEffect()
-        .SetCheckable(true)
-        .SetMetricsIdentifier("MainEditor", "ToggleSnapToObjectsAndTerrain")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisSnapToAll);
-    am->AddAction(ID_OBJECTMODIFY_ALIGNTOGRID, tr("Align To Grid"))
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelected)
-        .SetMetricsIdentifier("MainEditor", "ToggleAlignToGrid")
-        .SetIcon(EditorProxyStyle::icon("Align_to_grid"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_OBJECTMODIFY_ALIGN, tr("Align To Object")).SetCheckable(true)
-        .SetStatusTip(tr("Ctrl: Align an object to a bounding box, Alt : Keep Rotation of the moved object, Shift : Keep Scale of the moved object"))
-        .SetMetricsIdentifier("MainEditor", "ToggleAlignToObjects")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateAlignObject)
-        .SetIcon(EditorProxyStyle::icon("Align_to_Object"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_MODIFY_ALIGNOBJTOSURF, tr("Align Object to Surface")).SetCheckable(true)
-        .SetMetricsIdentifier("MainEditor", "ToggleAlignToSurfaceVoxels")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateAlignToVoxel)
-        .SetIcon(EditorProxyStyle::icon("Align_object_to_surface"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_SNAP_TO_GRID, tr("Snap to Grid"))
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_EDITMODE_SELECTAREA, tr("Select terrain"))
+            .SetIcon(EditorProxyStyle::icon("Select_terrain"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("5"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Switch to terrain selection mode"))
+            .SetMetricsIdentifier("MainEditor", "ToolSelectTerrain")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateEditmodeSelectarea);
+        am->AddAction(ID_SELECT_AXIS_X, tr("Constrain to X axis"))
+            .SetIcon(EditorProxyStyle::icon("X_axis"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+1"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Lock movement on X axis"))
+            .SetMetricsIdentifier("MainEditor", "ToggleXAxisConstraint")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisX);
+        am->AddAction(ID_SELECT_AXIS_Y, tr("Constrain to Y axis"))
+            .SetIcon(EditorProxyStyle::icon("Y_axis"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+2"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Lock movement on Y axis"))
+            .SetMetricsIdentifier("MainEditor", "ToggleYAxisConstraint")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisY);
+        am->AddAction(ID_SELECT_AXIS_Z, tr("Constrain to Z axis"))
+            .SetIcon(EditorProxyStyle::icon("Z_axis"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+3"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Lock movement on Z axis"))
+            .SetMetricsIdentifier("MainEditor", "ToggleZAxisConstraint")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisZ);
+        am->AddAction(ID_SELECT_AXIS_XY, tr("Constrain to XY plane"))
+            .SetIcon(EditorProxyStyle::icon("XY2_copy"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+4"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Lock movement on XY plane"))
+            .SetMetricsIdentifier("MainEditor", "ToggleYYPlaneConstraint")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisXy);
+        am->AddAction(ID_SELECT_AXIS_TERRAIN, tr("Constrain to terrain/geometry"))
+            .SetIcon(EditorProxyStyle::icon("Object_follow_terrain"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+5"))
+            .SetCheckable(true)
+            .SetStatusTip(tr("Lock object movement to follow terrain"))
+            .SetMetricsIdentifier("MainEditor", "ToggleFollowTerrainConstraint")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisTerrain);
+        am->AddAction(ID_SELECT_AXIS_SNAPTOALL, tr("Follow terrain and snap to objects"))
+            .SetIcon(EditorProxyStyle::icon("Follow_terrain"))
+            .SetApplyHoverEffect()
+            .SetShortcut(tr("Ctrl+6"))
+            .SetCheckable(true)
+            .SetMetricsIdentifier("MainEditor", "ToggleSnapToObjectsAndTerrain")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelectAxisSnapToAll);
+        am->AddAction(ID_OBJECTMODIFY_ALIGNTOGRID, tr("Align to grid"))
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelected)
+            .SetMetricsIdentifier("MainEditor", "ToggleAlignToGrid")
+            .SetIcon(EditorProxyStyle::icon("Align_to_grid"))
+            .SetApplyHoverEffect();
+        am->AddAction(ID_OBJECTMODIFY_ALIGN, tr("Align to object")).SetCheckable(true)
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+            .SetStatusTip(tr("⌘: Align an object to a bounding box, ⌥ : Keep Rotation of the moved object, Shift : Keep Scale of the moved object"))
+#else
+            .SetStatusTip(tr("Ctrl: Align an object to a bounding box, Alt : Keep Rotation of the moved object, Shift : Keep Scale of the moved object"))
+#endif
+            .SetMetricsIdentifier("MainEditor", "ToggleAlignToObjects")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateAlignObject)
+            .SetIcon(EditorProxyStyle::icon("Align_to_Object"))
+            .SetApplyHoverEffect();
+        am->AddAction(ID_MODIFY_ALIGNOBJTOSURF, tr("Align object to surface")).SetCheckable(true)
+            .SetMetricsIdentifier("MainEditor", "ToggleAlignToSurfaceVoxels")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateAlignToVoxel)
+            .SetIcon(EditorProxyStyle::icon("Align_object_to_surface"))
+            .SetApplyHoverEffect();
+    }
+
+    am->AddAction(ID_SNAP_TO_GRID, tr("Snap to grid"))
         .SetIcon(EditorProxyStyle::icon("Grid"))
         .SetApplyHoverEffect()
         .SetShortcut(tr("G"))
-        .SetStatusTip(tr("Toggles Snap to Grid"))
+        .SetStatusTip(tr("Toggles snap to grid"))
         .SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "ToggleSnapToGrid")
         .RegisterUpdateCallback(this, &MainWindow::OnUpdateSnapToGrid);
-    am->AddAction(ID_SNAPANGLE, tr("Snap Angle"))
+    am->AddAction(ID_SNAPANGLE, tr("Snap angle"))
         .SetIcon(EditorProxyStyle::icon("Angle"))
         .SetApplyHoverEffect()
-        .SetStatusTip(tr("Snap Angle"))
+        .SetStatusTip(tr("Snap angle"))
         .SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "ToggleSnapToAngle")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSnapangle);
-    am->AddAction(ID_ROTATESELECTION_XAXIS, tr("Rotate X Axis"))
-        .SetMetricsIdentifier("MainEditor", "FastRotateXAxis");
-    am->AddAction(ID_ROTATESELECTION_YAXIS, tr("Rotate Y Axis"))
-        .SetMetricsIdentifier("MainEditor", "FastRotateYAxis");
-    am->AddAction(ID_ROTATESELECTION_ZAXIS, tr("Rotate Z Axis"))
-        .SetMetricsIdentifier("MainEditor", "FastRotateYAxis");
-    am->AddAction(ID_ROTATESELECTION_ROTATEANGLE, tr("Rotate Angle..."))
-        .SetMetricsIdentifier("MainEditor", "EditFastRotateAngle");
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_ROTATESELECTION_XAXIS, tr("Rotate X Axis"))
+            .SetMetricsIdentifier("MainEditor", "FastRotateXAxis");
+        am->AddAction(ID_ROTATESELECTION_YAXIS, tr("Rotate Y Axis"))
+            .SetMetricsIdentifier("MainEditor", "FastRotateYAxis");
+        am->AddAction(ID_ROTATESELECTION_ZAXIS, tr("Rotate Z Axis"))
+            .SetMetricsIdentifier("MainEditor", "FastRotateYAxis");
+        am->AddAction(ID_ROTATESELECTION_ROTATEANGLE, tr("Rotate Angle..."))
+            .SetMetricsIdentifier("MainEditor", "EditFastRotateAngle");
+    }
 
     // Display actions
-    am->AddAction(ID_WIREFRAME, tr("&Wireframe")).SetShortcut(tr("F3")).SetCheckable(true)
+    am->AddAction(ID_WIREFRAME, tr("&Wireframe"))
+        .SetShortcut(tr("F3"))
+        .SetCheckable(true)
         .SetStatusTip(tr("Render in Wireframe Mode."))
         .SetMetricsIdentifier("MainEditor", "ToggleWireframeRendering")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateWireframe);
-    am->AddAction(ID_RULER, tr("Ruler"))
-        .SetCheckable(true)
-        .SetIcon(EditorProxyStyle::icon("Measure"))
-        .SetApplyHoverEffect()
-        .SetStatusTip(tr("Create temporary Ruler to measure distance"))
-        .SetMetricsIdentifier("MainEditor", "CreateTemporaryRuler")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateRuler);
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_RULER, tr("Ruler"))
+            .SetCheckable(true)
+            .SetIcon(EditorProxyStyle::icon("Measure"))
+            .SetApplyHoverEffect()
+            .SetStatusTip(tr("Create temporary ruler to measure distance"))
+            .SetMetricsIdentifier("MainEditor", "CreateTemporaryRuler")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateRuler);
+    }
+
     am->AddAction(ID_VIEW_GRIDSETTINGS, tr("Grid Settings..."))
         .SetMetricsIdentifier("MainEditor", "GridSettings");
     am->AddAction(ID_SWITCHCAMERA_DEFAULTCAMERA, tr("Default Camera")).SetCheckable(true)
@@ -1295,7 +1397,8 @@ void MainWindow::InitActions()
     am->AddAction(ID_SWITCHCAMERA_SELECTEDCAMERA, tr("Selected Camera Object")).SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "SwitchToSelectedCameraObject")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSwitchToSelectedCamera);
-    am->AddAction(ID_SWITCHCAMERA_NEXT, tr("Cycle Camera")).SetShortcut(tr("Ctrl+`"))
+    am->AddAction(ID_SWITCHCAMERA_NEXT, tr("Cycle Camera"))
+        .SetShortcut(tr("Ctrl+`"))
         .SetMetricsIdentifier("MainEditor", "CycleCamera");
     am->AddAction(ID_CHANGEMOVESPEED_INCREASE, tr("Increase"))
         .SetMetricsIdentifier("MainEditor", "IncreaseFlycamMoveSpeed")
@@ -1314,67 +1417,94 @@ void MainWindow::InitActions()
         .SetShortcut(tr("Z"))
         .SetMetricsIdentifier("MainEditor", "GotoSelection")
         .Connect(&QAction::triggered, this, &MainWindow::OnGotoSelected);
-    am->AddAction(ID_GOTO_LOC1, tr("Location 1")).SetShortcut(tr("Shift+F1"))
+    am->AddAction(ID_GOTO_LOC1, tr("Location 1"))
+        .SetShortcut(tr("Shift+F1"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation1");
-    am->AddAction(ID_GOTO_LOC2, tr("Location 2")).SetShortcut(tr("Shift+F2"))
+    am->AddAction(ID_GOTO_LOC2, tr("Location 2"))
+        .SetShortcut(tr("Shift+F2"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation2");
-    am->AddAction(ID_GOTO_LOC3, tr("Location 3")).SetShortcut(tr("Shift+F3"))
+    am->AddAction(ID_GOTO_LOC3, tr("Location 3"))
+        .SetShortcut(tr("Shift+F3"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation2");
-    am->AddAction(ID_GOTO_LOC4, tr("Location 4")).SetShortcut(tr("Shift+F4"))
+    am->AddAction(ID_GOTO_LOC4, tr("Location 4"))
+        .SetShortcut(tr("Shift+F4"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation4");
-    am->AddAction(ID_GOTO_LOC5, tr("Location 5")).SetShortcut(tr("Shift+F5"))
+    am->AddAction(ID_GOTO_LOC5, tr("Location 5"))
+        .SetShortcut(tr("Shift+F5"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation5");
-    am->AddAction(ID_GOTO_LOC6, tr("Location 6")).SetShortcut(tr("Shift+F6"))
+    am->AddAction(ID_GOTO_LOC6, tr("Location 6"))
+        .SetShortcut(tr("Shift+F6"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation6");
-    am->AddAction(ID_GOTO_LOC7, tr("Location 7")).SetShortcut(tr("Shift+F7"))
+    am->AddAction(ID_GOTO_LOC7, tr("Location 7"))
+        .SetShortcut(tr("Shift+F7"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation7");
-    am->AddAction(ID_GOTO_LOC8, tr("Location 8")).SetShortcut(tr("Shift+F8"))
+    am->AddAction(ID_GOTO_LOC8, tr("Location 8"))
+        .SetShortcut(tr("Shift+F8"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation8");
-    am->AddAction(ID_GOTO_LOC9, tr("Location 9")).SetShortcut(tr("Shift+F9"))
+    am->AddAction(ID_GOTO_LOC9, tr("Location 9"))
+        .SetShortcut(tr("Shift+F9"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation9");
-    am->AddAction(ID_GOTO_LOC10, tr("Location 10")).SetShortcut(tr("Shift+F10"))
+    am->AddAction(ID_GOTO_LOC10, tr("Location 10"))
+        .SetShortcut(tr("Shift+F10"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation10");
-    am->AddAction(ID_GOTO_LOC11, tr("Location 11")).SetShortcut(tr("Shift+F11"))
+    am->AddAction(ID_GOTO_LOC11, tr("Location 11"))
+        .SetShortcut(tr("Shift+F11"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation11");
-    am->AddAction(ID_GOTO_LOC12, tr("Location 12")).SetShortcut(tr("Shift+F12"))
+    am->AddAction(ID_GOTO_LOC12, tr("Location 12"))
+        .SetShortcut(tr("Shift+F12"))
         .SetMetricsIdentifier("MainEditor", "GotoSelectedLocation12");
-    am->AddAction(ID_TAG_LOC1, tr("Location 1")).SetShortcut(tr("Ctrl+F1"))
+    am->AddAction(ID_TAG_LOC1, tr("Location 1"))
+        .SetShortcut(tr("Ctrl+F1"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation1");
-    am->AddAction(ID_TAG_LOC2, tr("Location 2")).SetShortcut(tr("Ctrl+F2"))
+    am->AddAction(ID_TAG_LOC2, tr("Location 2"))
+        .SetShortcut(tr("Ctrl+F2"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation2");
-    am->AddAction(ID_TAG_LOC3, tr("Location 3")).SetShortcut(tr("Ctrl+F3"))
+    am->AddAction(ID_TAG_LOC3, tr("Location 3"))
+        .SetShortcut(tr("Ctrl+F3"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation3");
-    am->AddAction(ID_TAG_LOC4, tr("Location 4")).SetShortcut(tr("Ctrl+F4"))
+    am->AddAction(ID_TAG_LOC4, tr("Location 4"))
+        .SetShortcut(tr("Ctrl+F4"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation4");
-    am->AddAction(ID_TAG_LOC5, tr("Location 5")).SetShortcut(tr("Ctrl+F5"))
+    am->AddAction(ID_TAG_LOC5, tr("Location 5"))
+        .SetShortcut(tr("Ctrl+F5"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation5");
-    am->AddAction(ID_TAG_LOC6, tr("Location 6")).SetShortcut(tr("Ctrl+F6"))
+    am->AddAction(ID_TAG_LOC6, tr("Location 6"))
+        .SetShortcut(tr("Ctrl+F6"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation6");
-    am->AddAction(ID_TAG_LOC7, tr("Location 7")).SetShortcut(tr("Ctrl+F7"))
+    am->AddAction(ID_TAG_LOC7, tr("Location 7"))
+        .SetShortcut(tr("Ctrl+F7"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation7");
-    am->AddAction(ID_TAG_LOC8, tr("Location 8")).SetShortcut(tr("Ctrl+F8"))
+    am->AddAction(ID_TAG_LOC8, tr("Location 8"))
+        .SetShortcut(tr("Ctrl+F8"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation8");
-    am->AddAction(ID_TAG_LOC9, tr("Location 9")).SetShortcut(tr("Ctrl+F9"))
+    am->AddAction(ID_TAG_LOC9, tr("Location 9"))
+        .SetShortcut(tr("Ctrl+F9"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation9");
-    am->AddAction(ID_TAG_LOC10, tr("Location 10")).SetShortcut(tr("Ctrl+F10"))
+    am->AddAction(ID_TAG_LOC10, tr("Location 10"))
+        .SetShortcut(tr("Ctrl+F10"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation10");
-    am->AddAction(ID_TAG_LOC11, tr("Location 11")).SetShortcut(tr("Ctrl+F11"))
+    am->AddAction(ID_TAG_LOC11, tr("Location 11"))
+        .SetShortcut(tr("Ctrl+F11"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation11");
-    am->AddAction(ID_TAG_LOC12, tr("Location 12")).SetShortcut(tr("Ctrl+F12"))
+    am->AddAction(ID_TAG_LOC12, tr("Location 12"))
+        .SetShortcut(tr("Ctrl+F12"))
         .SetMetricsIdentifier("MainEditor", "TagSelectedLocation12");
     am->AddAction(ID_VIEW_CONFIGURELAYOUT, tr("Configure Layout..."))
         .SetMetricsIdentifier("MainEditor", "ConfigureLayoutDialog");
 #ifdef FEATURE_ORTHOGRAPHIC_VIEW
-    am->AddAction(ID_VIEW_CYCLE2DVIEWPORT, tr("Cycle Viewports")).SetShortcut(tr("Ctrl+Tab"))
+    am->AddAction(ID_VIEW_CYCLE2DVIEWPORT, tr("Cycle Viewports"))
+        .SetShortcut(tr("Ctrl+Tab"))
         .SetMetricsIdentifier("MainEditor", "CycleViewports")
         .SetStatusTip(tr("Cycle 2D Viewport"))
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateNonGameMode);
 #endif
-    am->AddAction(ID_DISPLAY_SHOWHELPERS, tr("Show/Hide Helpers")).SetShortcut(tr("Shift+Space"))
+    am->AddAction(ID_DISPLAY_SHOWHELPERS, tr("Show/Hide Helpers"))
+        .SetShortcut(tr("Shift+Space"))
         .SetMetricsIdentifier("MainEditor", "ToggleHelpers");
 
     // AI actions
-    am->AddAction(ID_AI_GENERATEALL, tr("Generate &All AI")).SetShortcut(tr(""))
+    am->AddAction(ID_AI_GENERATEALL, tr("Generate &All AI"))
+        .SetShortcut(tr(""))
         .SetMetricsIdentifier("MainEditor", "GenerateAllAI");
     am->AddAction(ID_AI_GENERATETRIANGULATION, tr("Generate &Triangulation"))
         .SetMetricsIdentifier("MainEditor", "GenerateTriangulation");
@@ -1444,17 +1574,20 @@ void MainWindow::InitActions()
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateCloudsClose);
 
     // Fame actions
-    am->AddAction(ID_VIEW_SWITCHTOGAME, tr("Play &Game")).SetShortcut(tr("Ctrl+G"))
+    am->AddAction(ID_VIEW_SWITCHTOGAME, tr("Play &Game"))
+        .SetShortcut(tr("Ctrl+G"))
         .SetStatusTip(tr("Activate the game input mode"))
         .SetIcon(EditorProxyStyle::icon("Play"))
         .SetApplyHoverEffect()
         .SetMetricsIdentifier("MainEditor", "ToggleGameMode")
         .SetCheckable(true);
-    am->AddAction(ID_SWITCH_PHYSICS, tr("Enable Physics/AI")).SetShortcut(tr("Ctrl+P")).SetCheckable(true)
+    am->AddAction(ID_SWITCH_PHYSICS, tr("Enable Physics/AI"))
+        .SetShortcut(tr("Ctrl+P"))
+        .SetCheckable(true)
         .SetStatusTip(tr("Enable processing of Physics and AI."))
         .SetMetricsIdentifier("MainEditor", "TogglePhysicsAndAI")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnSwitchPhysicsUpdate);
-    am->AddAction(ID_TERRAIN_COLLISION, tr("Terrain Collision")).SetShortcut(tr("Q")).SetCheckable(true)
+    am->AddAction(ID_TERRAIN_COLLISION, tr("Terrain Collision")).SetCheckable(true)
         .SetStatusTip(tr("Enable collision of camera with terrain."))
         .SetMetricsIdentifier("MainEditor", "ToggleTerrainCameraCollision")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnTerrainCollisionUpdate);
@@ -1468,6 +1601,11 @@ void MainWindow::InitActions()
         .SetStatusTip(tr("Switch SP/MP gamerules."))
         .SetMetricsIdentifier("MainEditor", "ToggleSP/MPGameRules")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnToggleMultiplayerUpdate);
+    am->AddAction(ID_VIEW_DEPLOY, tr("Deploy"))
+        .SetStatusTip(tr("Open the Deployment tool"))
+        .SetIcon(EditorProxyStyle::icon("Deploy"))
+        .SetMetricsIdentifier("MainEditor", "Deploy")
+        .SetCheckable(false);
 
     // Physics actions
     am->AddAction(ID_PHYSICS_GETPHYSICSSTATE, tr("Get Physics State"))
@@ -1512,51 +1650,55 @@ void MainWindow::InitActions()
         .SetStatusTip(tr("Generate terrain"))
         .SetMetricsIdentifier("MainEditor", "TerrainGenerate")
         .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateGenerateTerrain);
-    am->AddAction(ID_TERRAIN, tr("&Edit Terrain"))
-        .SetMetricsIdentifier("MainEditor", "TerrainEditDialog")
-        .SetStatusTip(tr("Open Terrain Editor"));
-    am->AddAction(ID_GENERATORS_TEXTURE, tr("Terrain &Texture Layers"))
-        .SetMetricsIdentifier("MainEditor", "TerrainTextureLayersDialog")
-        .SetStatusTip(tr("Bring up the terrain texture generation dialog"));
-    am->AddAction(ID_TERRAIN_TEXTURE_EXPORT, tr("Export/Import Megaterrain Texture"))
-        .SetMetricsIdentifier("MainEditor", "TerrainExportOrImportMegaterrainTexture");
-    am->AddAction(ID_GENERATORS_LIGHTING, tr("&Sun Trajectory Tool"))
-        .SetIcon(EditorProxyStyle::icon("LIghting"))
-        .SetApplyHoverEffect()
-        .SetMetricsIdentifier("MainEditor", "SunTrajectoryToolDialog")
-        .SetStatusTip(tr("Bring up the terrain lighting dialog"));
-    am->AddAction(ID_TERRAIN_TIMEOFDAY, tr("Time Of Day"))
-        .SetMetricsIdentifier("MainEditor", "TimeOfDayDialog")
-        .SetStatusTip(tr("Open Time of Day Editor"));
-    am->AddAction(ID_RELOAD_TERRAIN, tr("Reload Terrain"))
-        .SetMetricsIdentifier("MainEditor", "TerrainReload")
-        .SetStatusTip(tr("Reload Terrain in Game"));
-    am->AddAction(ID_TERRAIN_EXPORTBLOCK, tr("Export Terrain Block"))
-        .SetMetricsIdentifier("MainEditor", "TerrainExportBlock")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainExportblock);
-    am->AddAction(ID_TERRAIN_IMPORTBLOCK, tr("Import Terrain Block"))
-        .SetMetricsIdentifier("MainEditor", "TerrainImportBlock")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainImportblock);
-    am->AddAction(ID_TERRAIN_RESIZE, tr("Resize Terrain"))
-        .SetStatusTip(tr("Resize Terrain Heightmap"))
-        .SetMetricsIdentifier("MainEditor", "TerrainResizeHeightmap")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainResizeterrain);
-    am->AddAction(ID_TOOLTERRAINMODIFY_SMOOTH, tr("Flatten"))
-        .SetMetricsIdentifier("MainEditor", "TerrainFlattenTool");
-    am->AddAction(ID_TERRAINMODIFY_SMOOTH, tr("Smooth"))
-        .SetMetricsIdentifier("MainEditor", "TerrainSmoothTool");
-    am->AddAction(ID_TERRAIN_VEGETATION, tr("Edit Vegetation"))
-        .SetMetricsIdentifier("MainEditor", "EditVegetation");
-    am->AddAction(ID_TERRAIN_PAINTLAYERS, tr("Paint Layers"))
-        .SetMetricsIdentifier("MainEditor", "PaintLayers");
-    am->AddAction(ID_TERRAIN_REFINETERRAINTEXTURETILES, tr("Refine Terrain Texture Tiles"))
-        .SetMetricsIdentifier("MainEditor", "TerrainRefineTextureTiles");
-    am->AddAction(ID_FILE_EXPORT_TERRAINAREA, tr("Export Terrain Area"))
-        .SetMetricsIdentifier("MainEditor", "TerrainExportArea")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateExportTerrainArea);
-    am->AddAction(ID_FILE_EXPORT_TERRAINAREAWITHOBJECTS, tr("Export &Terrain Area with Objects"))
-        .SetMetricsIdentifier("MainEditor", "TerrainExportAreaWithObjects")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateExportTerrainArea);
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_TERRAIN, tr("&Edit Terrain"))
+            .SetMetricsIdentifier("MainEditor", "TerrainEditDialog")
+            .SetStatusTip(tr("Open Terrain Editor"));
+        am->AddAction(ID_GENERATORS_TEXTURE, tr("Terrain &Texture Layers"))
+            .SetMetricsIdentifier("MainEditor", "TerrainTextureLayersDialog")
+            .SetStatusTip(tr("Bring up the terrain texture generation dialog"));
+        am->AddAction(ID_TERRAIN_TEXTURE_EXPORT, tr("Export/Import Megaterrain Texture"))
+            .SetMetricsIdentifier("MainEditor", "TerrainExportOrImportMegaterrainTexture");
+        am->AddAction(ID_GENERATORS_LIGHTING, tr("&Sun Trajectory Tool"))
+            .SetIcon(EditorProxyStyle::icon("LIghting"))
+            .SetApplyHoverEffect()
+            .SetMetricsIdentifier("MainEditor", "SunTrajectoryToolDialog")
+            .SetStatusTip(tr("Bring up the terrain lighting dialog"));
+        am->AddAction(ID_TERRAIN_TIMEOFDAY, tr("Time Of Day"))
+            .SetMetricsIdentifier("MainEditor", "TimeOfDayDialog")
+            .SetStatusTip(tr("Open Time of Day Editor"));
+        am->AddAction(ID_RELOAD_TERRAIN, tr("Reload Terrain"))
+            .SetMetricsIdentifier("MainEditor", "TerrainReload")
+            .SetStatusTip(tr("Reload Terrain in Game"));
+        am->AddAction(ID_TERRAIN_EXPORTBLOCK, tr("Export Terrain Block"))
+            .SetMetricsIdentifier("MainEditor", "TerrainExportBlock")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainExportblock);
+        am->AddAction(ID_TERRAIN_IMPORTBLOCK, tr("Import Terrain Block"))
+            .SetMetricsIdentifier("MainEditor", "TerrainImportBlock")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainImportblock);
+        am->AddAction(ID_TERRAIN_RESIZE, tr("Resize Terrain"))
+            .SetStatusTip(tr("Resize Terrain Heightmap"))
+            .SetMetricsIdentifier("MainEditor", "TerrainResizeHeightmap")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateTerrainResizeterrain);
+        am->AddAction(ID_TOOLTERRAINMODIFY_SMOOTH, tr("Flatten"))
+            .SetMetricsIdentifier("MainEditor", "TerrainFlattenTool");
+        am->AddAction(ID_TERRAINMODIFY_SMOOTH, tr("Smooth"))
+            .SetMetricsIdentifier("MainEditor", "TerrainSmoothTool");
+        am->AddAction(ID_TERRAIN_VEGETATION, tr("Edit Vegetation"))
+            .SetMetricsIdentifier("MainEditor", "EditVegetation");
+        am->AddAction(ID_TERRAIN_PAINTLAYERS, tr("Paint Layers"))
+            .SetMetricsIdentifier("MainEditor", "PaintLayers");
+        am->AddAction(ID_TERRAIN_REFINETERRAINTEXTURETILES, tr("Refine Terrain Texture Tiles"))
+            .SetMetricsIdentifier("MainEditor", "TerrainRefineTextureTiles");
+        am->AddAction(ID_FILE_EXPORT_TERRAINAREA, tr("Export Terrain Area"))
+            .SetMetricsIdentifier("MainEditor", "TerrainExportArea")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateExportTerrainArea);
+        am->AddAction(ID_FILE_EXPORT_TERRAINAREAWITHOBJECTS, tr("Export &Terrain Area with Objects"))
+            .SetMetricsIdentifier("MainEditor", "TerrainExportAreaWithObjects")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateExportTerrainArea);
+    }
 
     // Tools actions
     am->AddAction(ID_RELOAD_ALL_SCRIPTS, tr("Reload All Scripts"))
@@ -1610,6 +1752,8 @@ void MainWindow::InitActions()
         .SetMetricsIdentifier("MainEditor", "ConfigureToolboxMacros");
     am->AddAction(ID_TOOLS_SCRIPTHELP, tr("Script Help"))
         .SetMetricsIdentifier("MainEditor", "ScriptHelp");
+    am->AddAction(ID_TOOLS_LUA_EDITOR, tr("Lua Editor"))
+        .SetMetricsIdentifier("MainEditor", "Lua Editor");
 
     // View actions
     am->AddAction(ID_VIEW_OPENVIEWPANE, tr("Open View Pane"))
@@ -1618,12 +1762,15 @@ void MainWindow::InitActions()
         .SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "ToggleRollupBar")
         .Connect(&QAction::triggered, this, &MainWindow::ToggleRollupBar);
-    am->AddAction(ID_VIEW_CONSOLEWINDOW, tr(LyViewPane::ConsoleMenuName)).SetShortcut(tr("^"))
+    am->AddAction(ID_VIEW_CONSOLEWINDOW, tr(LyViewPane::ConsoleMenuName))
+        .SetShortcut(tr("^"))
+        .SetReserved()
         .SetStatusTip(tr("Show or hide the console window"))
         .SetCheckable(true)
         .SetMetricsIdentifier("MainEditor", "ToggleConsoleWindow")
         .Connect(&QAction::triggered, this, &MainWindow::ToggleConsole);
-    am->AddAction(ID_OPEN_QUICK_ACCESS_BAR, tr("Show &Quick Access Bar")).SetShortcut(tr("Ctrl+Alt+Space"))
+    am->AddAction(ID_OPEN_QUICK_ACCESS_BAR, tr("Show &Quick Access Bar"))
+        .SetShortcut(tr("Ctrl+Alt+Space"))
         .SetMetricsIdentifier("MainEditor", "ToggleQuickAccessBar");
     am->AddAction(ID_VIEW_LAYOUTS, tr("Layouts"))
         .SetMetricsIdentifier("MainEditor", "Layouts");
@@ -1653,12 +1800,14 @@ void MainWindow::InitActions()
         .SetMetricsIdentifier("MainEditor", "GameLiftTrialWizard");
     am->AddAction(ID_AWS_COGNITO_CONSOLE, tr("Cognito"))
         .SetMetricsIdentifier("MainEditor", "CognitoConsole");
+    am->AddAction(ID_AWS_DEVICEFARM_CONSOLE, tr("Device Farm"))
+        .SetMetricsIdentifier("MainEditor", "DeviceFarmConsole");
     am->AddAction(ID_AWS_DYNAMODB_CONSOLE, tr("DynamoDB"))
         .SetMetricsIdentifier("MainEditor", "DynamoDBConsole");
-    am->AddAction(ID_AWS_S3_CONSOLE, tr("S3"))
-        .SetMetricsIdentifier("MainEditor", "S3Console");
     am->AddAction(ID_AWS_LAMBDA_CONSOLE, tr("Lambda"))
         .SetMetricsIdentifier("MainEditor", "LambdaConsole");
+    am->AddAction(ID_AWS_S3_CONSOLE, tr("S3"))
+        .SetMetricsIdentifier("MainEditor", "S3Console");
     am->AddAction(ID_AWS_ACTIVE_DEPLOYMENT, tr("Select a Deployment"))
         .SetMetricsIdentifier("MainEditor", "AWSSelectADeployment");
     am->AddAction(ID_AWS_CREDENTIAL_MGR, tr("Credentials manager"))
@@ -1678,39 +1827,52 @@ void MainWindow::InitActions()
 
     // Help actions
     am->AddAction(ID_DOCUMENTATION_GETTINGSTARTEDGUIDE, tr("Getting Started"))
-        .SetMetricsIdentifier("MainEditor", "DocsGettingStarted");
+        .SetMetricsIdentifier("MainEditor", "DocsGettingStarted")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_TUTORIALS, tr("Tutorials"))
-        .SetMetricsIdentifier("MainEditor", "DocsTutorials");
+        .SetMetricsIdentifier("MainEditor", "DocsTutorials")
+        .SetReserved();
 
     am->AddAction(ID_DOCUMENTATION_GLOSSARY, tr("Glossary"))
-        .SetMetricsIdentifier("MainEditor", "DocsGlossary");
+        .SetMetricsIdentifier("MainEditor", "DocsGlossary")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_LUMBERYARD, tr("Lumberyard Documentation"))
-        .SetMetricsIdentifier("MainEditor", "DocsLumberyardDocumentation");
+        .SetMetricsIdentifier("MainEditor", "DocsLumberyardDocumentation")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_GAMELIFT, tr("GameLift Documentation"))
-        .SetMetricsIdentifier("MainEditor", "DocsGameLift");
+        .SetMetricsIdentifier("MainEditor", "DocsGameLift")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_RELEASENOTES, tr("Release Notes"))
-        .SetMetricsIdentifier("MainEditor", "DocsReleaseNotes");
+        .SetMetricsIdentifier("MainEditor", "DocsReleaseNotes")
+        .SetReserved();
 
     am->AddAction(ID_DOCUMENTATION_GAMEDEVBLOG, tr("GameDev Blog"))
-        .SetMetricsIdentifier("MainEditor", "DocsGameDevBlog");
+        .SetMetricsIdentifier("MainEditor", "DocsGameDevBlog")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_TWITCHCHANNEL, tr("GameDev Twitch Channel"))
-        .SetMetricsIdentifier("MainEditor", "DocsGameDevTwitchChannel");
+        .SetMetricsIdentifier("MainEditor", "DocsGameDevTwitchChannel")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_FORUMS, tr("Forums"))
-        .SetMetricsIdentifier("MainEditor", "DocsForums");
+        .SetMetricsIdentifier("MainEditor", "DocsForums")
+        .SetReserved();
     am->AddAction(ID_DOCUMENTATION_AWSSUPPORT, tr("AWS Support"))
-        .SetMetricsIdentifier("MainEditor", "DocsAWSSupport");
+        .SetMetricsIdentifier("MainEditor", "DocsAWSSupport")
+        .SetReserved();
 
     am->AddAction(ID_DOCUMENTATION_FEEDBACK, tr("Give Us Feedback"))
-        .SetMetricsIdentifier("MainEditor", "DocsFeedback");
+        .SetMetricsIdentifier("MainEditor", "DocsFeedback")
+        .SetReserved();
     am->AddAction(ID_APP_ABOUT, tr("&About Lumberyard"))
         .SetMetricsIdentifier("MainEditor", "AboutLumberyard")
-        .SetStatusTip(tr("Display program information, version number and copyright"));
+        .SetStatusTip(tr("Display program information, version number and copyright"))
+        .SetReserved();
 
     // Editors Toolbar actions
     am->AddAction(ID_OPEN_ASSET_BROWSER, tr("Asset browser"))
         .SetToolTip(tr("Open Asset Browser"))
         .SetIcon(EditorProxyStyle::icon("Asset_Browser"))
         .SetApplyHoverEffect();
+
     if (m_enableLegacyCryEntities)
     {
         am->AddAction(ID_OPEN_LAYER_EDITOR, tr(LyViewPane::LegacyLayerEditor))
@@ -1718,6 +1880,7 @@ void MainWindow::InitActions()
         .SetIcon(EditorProxyStyle::icon("layer_editor"))
         .SetApplyHoverEffect();
     }
+
     am->AddAction(ID_OPEN_MATERIAL_EDITOR, tr(LyViewPane::MaterialEditor))
         .SetToolTip(tr("Open Material Editor"))
         .SetIcon(EditorProxyStyle::icon("Material"))
@@ -1740,11 +1903,12 @@ void MainWindow::InitActions()
         QAction* action = am->AddAction(ID_OPEN_EMOTIONFX_EDITOR, tr("Animation Editor"))
             .SetToolTip(tr("Open Animation Editor (PREVIEW)"))
             .SetIcon(QIcon("Gems/EMotionFX/Assets/Editor/Images/Icons/EMFX_icon_32x32.png"))
-			.SetApplyHoverEffect();
-        QObject::connect(action, &QAction::triggered, this, [this]() {
+            .SetApplyHoverEffect();
+        QObject::connect(action, &QAction::triggered, this, []() {
             QtViewPaneManager::instance()->OpenPane(LyViewPane::AnimationEditor);
         });
     }
+
     if (m_enableLegacyCryEntities)
     {
         am->AddAction(ID_OPEN_FLOWGRAPH, tr(LyViewPane::LegacyFlowGraph))
@@ -1756,28 +1920,38 @@ void MainWindow::InitActions()
         .SetIcon(QIcon(":/MainWindow/toolbars/standard_views_toolbar-08.png"))
         .SetApplyHoverEffect();
     }
-    am->AddAction(ID_OPEN_TRACKVIEW, tr("TrackView"))
-        .SetToolTip(tr("Open TrackView"))
-        .SetIcon(EditorProxyStyle::icon("Trackview"))
-        .SetApplyHoverEffect();
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_OPEN_TRACKVIEW, tr("TrackView"))
+            .SetToolTip(tr("Open Track View"))
+            .SetIcon(EditorProxyStyle::icon("Trackview"))
+            .SetApplyHoverEffect();
+    }
+
     am->AddAction(ID_OPEN_AUDIO_CONTROLS_BROWSER, tr("Audio Controls Editor"))
         .SetToolTip(tr("Open Audio Controls Editor"))
         .SetIcon(EditorProxyStyle::icon("Audio"))
         .SetApplyHoverEffect();
-    am->AddAction(ID_OPEN_TERRAIN_EDITOR, tr(LyViewPane::TerrainEditor))
-        .SetToolTip(tr("Open Terrain Editor"))
-        .SetIcon(EditorProxyStyle::icon("Terrain"))
-        .SetApplyHoverEffect();
-    am->AddAction(ID_OPEN_TERRAINTEXTURE_EDITOR, tr("Terrain Texture Layers Editor"))
-        .SetToolTip(tr("Open Terrain Texture Layers Editor"))
-        .SetIcon(EditorProxyStyle::icon("Terrain_Texture"))
-        .SetApplyHoverEffect();
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_OPEN_TERRAIN_EDITOR, tr(LyViewPane::TerrainEditor))
+            .SetToolTip(tr("Open Terrain Editor"))
+            .SetIcon(EditorProxyStyle::icon("Terrain"))
+            .SetApplyHoverEffect();
+        am->AddAction(ID_OPEN_TERRAINTEXTURE_EDITOR, tr("Terrain Texture Layers Editor"))
+            .SetToolTip(tr("Open Terrain Texture Layers"))
+            .SetIcon(EditorProxyStyle::icon("Terrain_Texture"))
+            .SetApplyHoverEffect();
+    }
+
     am->AddAction(ID_PARTICLE_EDITOR, tr("Particle Editor"))
         .SetToolTip(tr("Open Particle Editor"))
         .SetIcon(EditorProxyStyle::icon("particle"))
         .SetApplyHoverEffect();
     am->AddAction(ID_TERRAIN_TIMEOFDAYBUTTON, tr("Time of Day Editor"))
-        .SetToolTip(tr("Open Time of Day Editor"))
+        .SetToolTip(tr("Open Time of Day"))
         .SetIcon(EditorProxyStyle::icon("Time_of_Day"))
         .SetApplyHoverEffect();
     if (m_enableLegacyCryEntities)
@@ -1819,30 +1993,35 @@ void MainWindow::InitActions()
         .SetApplyHoverEffect()
             .SetMetricsIdentifier("MainEditor", "DeleteNamedSelection")
             .Connect(&QAction::triggered, this, &MainWindow::DeleteSelection);
+
+        am->AddAction(ID_LAYER_SELECT, tr(""))
+            .SetToolTip(tr("Select current layer"))
+            .SetIcon(EditorProxyStyle::icon("layers"))
+            .SetApplyHoverEffect()
+            .SetMetricsIdentifier("MainEditor", "LayerSelect")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateCurrentLayer);
     }
 
-    am->AddAction(ID_LAYER_SELECT, tr(""))
-        .SetToolTip(tr("Select Current Layer"))
-        .SetIcon(EditorProxyStyle::icon("layers"))
-        .SetApplyHoverEffect()
-        .SetMetricsIdentifier("MainEditor", "LayerSelect")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateCurrentLayer);
-
     // Object Toolbar Actions
-    am->AddAction(ID_GOTO_SELECTED, tr("Goto Selected Object"))
+    am->AddAction(ID_GOTO_SELECTED, tr("Go to selected object"))
         .SetIcon(EditorProxyStyle::icon("select_object"))
         .SetApplyHoverEffect()
         .SetMetricsIdentifier("MainEditor", "GotoSelection")
         .Connect(&QAction::triggered, this, &MainWindow::OnGotoSelected);
-    am->AddAction(ID_OBJECTMODIFY_SETHEIGHT, tr("Set Object(s) Height"))
-        .SetIcon(QIcon(":/MainWindow/toolbars/object_toolbar-03.png"))
-        .SetApplyHoverEffect()
-        .SetMetricsIdentifier("MainEditor", "SetObjectHeight")
-        .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelected);
-    am->AddAction(ID_OBJECTMODIFY_VERTEXSNAPPING, tr("Vertex Snapping"))
-        .SetMetricsIdentifier("MainEditor", "ToggleVertexSnapping")
-        .SetIcon(EditorProxyStyle::icon("Vertex_snapping"))
-        .SetApplyHoverEffect();
+
+    if (!GetIEditor()->IsNewViewportInteractionModelEnabled())
+    {
+        am->AddAction(ID_OBJECTMODIFY_SETHEIGHT, tr("Set object(s) height"))
+            .SetIcon(QIcon(":/MainWindow/toolbars/object_toolbar-03.png"))
+            .SetApplyHoverEffect()
+            .SetMetricsIdentifier("MainEditor", "SetObjectHeight")
+            .RegisterUpdateCallback(cryEdit, &CCryEditApp::OnUpdateSelected);
+        // vertex snapping not yet supported when the new Viewport Interaction Model is enabled
+        am->AddAction(ID_OBJECTMODIFY_VERTEXSNAPPING, tr("Vertex snapping"))
+            .SetMetricsIdentifier("MainEditor", "ToggleVertexSnapping")
+            .SetIcon(EditorProxyStyle::icon("Vertex_snapping"))
+            .SetApplyHoverEffect();
+    }
 
     // Misc Toolbar Actions
     am->AddAction(ID_GAMEP1_AUTOGEN, tr(""))
@@ -1876,7 +2055,7 @@ void MainWindow::InitToolActionHandlers()
 
     for (int id = CEditorCommandManager::CUSTOM_COMMAND_ID_FIRST; id <= CEditorCommandManager::CUSTOM_COMMAND_ID_LAST; ++id)
     {
-        am->RegisterActionHandler(id, [tbm, id] {
+        am->RegisterActionHandler(id, [id] {
             GetIEditor()->GetCommandManager()->Execute(id);
         });
     }
@@ -1884,18 +2063,26 @@ void MainWindow::InitToolActionHandlers()
 
 void MainWindow::CGPMenuClicked()
 {
-    GetIEditor()->GetAWSResourceManager()->OpenCGP();
+    if (GetIEditor()->GetAWSResourceManager()->IsProjectInitialized()) {
+        GetIEditor()->GetAWSResourceManager()->OpenCGP();
+    }
+    else 
+    {
+        QMessageBox::critical(GetIEditor()->GetEditorMainWindow(), "Cloud Gem Portal", "Cloud Canvas is not yet initialized.   Please ensure the Cloud Gem Framework is enabled in your Project Configurator and has initialized.");
+    }
 }
 
 void MainWindow::OnEscapeAction()
-{     
+{
     if (GetIEditor()->IsInGameMode())
     {
         GetIEditor()->SetInGameMode(false);
     }
     else
     {
-        AzToolsFramework::EditorEvents::Bus::Broadcast(&AzToolsFramework::EditorEvents::OnEscape);
+        AzToolsFramework::EditorEvents::Bus::Broadcast(
+            &AzToolsFramework::EditorEvents::OnEscape);
+
         CCryEditApp::instance()->OnEditEscape();
     }
 }
@@ -1916,16 +2103,16 @@ QComboBox* MainWindow::CreateSelectionMaskComboBox()
     };
     static Mask s_selectionMasks[] =
     {
-        { tr("Select All"), OBJTYPE_ANY },
+        { tr("Select All"), static_cast<uint32>(OBJTYPE_ANY) },
         { tr("Brushes"), OBJTYPE_BRUSH },
-        { tr("No Brushes"), (~OBJTYPE_BRUSH) },
+        { tr("No Brushes"), static_cast<uint32>(~OBJTYPE_BRUSH) },
         { tr("Entities"), OBJTYPE_ENTITY },
         { tr("Prefabs"), OBJTYPE_PREFAB },
         { tr("Areas, Shapes"), OBJTYPE_VOLUME | OBJTYPE_SHAPE },
         { tr("AI Points"), OBJTYPE_AIPOINT },
         { tr("Decals"), OBJTYPE_DECAL },
         { tr("Solids"), OBJTYPE_SOLID },
-        { tr("No Solids"), (~OBJTYPE_SOLID) },
+        { tr("No Solids"), static_cast<uint32>(~OBJTYPE_SOLID) },
     };
 
     QComboBox* cb = new QComboBox(this);
@@ -1935,7 +2122,7 @@ QComboBox* MainWindow::CreateSelectionMaskComboBox()
     }
     cb->setCurrentIndex(0);
 
-    connect(cb, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), [](int index)
+    connect(cb, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, [](int index)
     {
         if (index >= 0 && index < sizeof(s_selectionMasks))
         {
@@ -1975,7 +2162,7 @@ RefCoordComboBox::RefCoordComboBox(QWidget* parent)
     addItems(coordSysList());
     setCurrentIndex(0);
 
-    connect(this, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), [](int index)
+    connect(this, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, [](int index)
     {
         if (index >= 0 && index < LAST_COORD_SYSTEM)
         {
@@ -2074,35 +2261,34 @@ QToolButton* MainWindow::CreateLayerSelectButton()
     return button;
 }
 
-QToolButton* MainWindow::CreateSnapToGridButton()
+QWidget* MainWindow::CreateSnapToGridWidget()
 {
-    auto button = new QToolButton();
-    button->setAutoRaise(true);
-    button->setPopupMode(QToolButton::MenuButtonPopup);
-    button->setDefaultAction(m_actionManager->GetAction(ID_SNAP_TO_GRID));
-    QMenu* menu = new QMenu(button);
-    button->setMenu(menu);
+    SnapToWidget::SetValueCallback setCallback = [](double snapStep)
+    {
+        GetIEditor()->GetViewManager()->GetGrid()->size = snapStep;
+    };
 
-    SnapToGridMenu* snapToGridMenu = new SnapToGridMenu(button);
-    snapToGridMenu->SetParentMenu(menu, m_actionManager);
+    SnapToWidget::GetValueCallback getCallback = []()
+    {
+        return GetIEditor()->GetViewManager()->GetGrid()->size;
+    };
 
-    return button;
+    return new SnapToWidget(m_actionManager->GetAction(ID_SNAP_TO_GRID), setCallback, getCallback);
 }
 
-QToolButton* MainWindow::CreateSnapToAngleButton()
+QWidget* MainWindow::CreateSnapToAngleWidget()
 {
-    auto button = new QToolButton();
-    button->setAutoRaise(true);
-    button->setPopupMode(QToolButton::MenuButtonPopup);
-    button->setDefaultAction(m_actionManager->GetAction(ID_SNAPANGLE));
+    SnapToWidget::SetValueCallback setCallback = [](double snapAngle)
+    {
+        GetIEditor()->GetViewManager()->GetGrid()->angleSnap = snapAngle;
+    };
 
-    QMenu* menu = new QMenu(button);
-    button->setMenu(menu);
+    SnapToWidget::GetValueCallback getCallback = []()
+    {
+        return GetIEditor()->GetViewManager()->GetGrid()->angleSnap;
+    };
 
-    SnapToAngleMenu* snapToAngleMenu = new SnapToAngleMenu(button);
-    snapToAngleMenu->SetParentMenu(menu, m_actionManager);
-
-    return button;
+    return new SnapToWidget(m_actionManager->GetAction(ID_SNAPANGLE), setCallback, getCallback);
 }
 
 bool MainWindow::IsPreview() const
@@ -2125,7 +2311,7 @@ int MainWindow::SelectRollUpBar(int rollupBarId)
     }
 
     if (!pane)
-    
+
     {
         // TODO: This needs to be replaced with an equivalent workflow when the
         // rollupbar functionality has been replaced
@@ -2200,7 +2386,7 @@ void MainWindow::OnUpdateSnapToGrid(QAction* action)
     action->setChecked(bEnabled);
 
     float gridSize = gSettings.pGrid->size;
-    action->setText(QObject::tr("Snap To Grid (%1)").arg(gridSize));
+    action->setText(QObject::tr("Snap To Grid"));
 }
 
 KeyboardCustomizationSettings* MainWindow::GetShortcutManager() const
@@ -2299,6 +2485,15 @@ void MainWindow::OnEditorNotifyEvent(EEditorNotifyEvent ev)
         }
     }
     break;
+    case eNotify_OnCloseScene:
+    {
+        auto cryEdit = CCryEditApp::instance();
+        if (cryEdit)
+        {
+            cryEdit->SetEditorWindowTitle();
+        }
+    }
+    break;
     case eNotify_OnRefCoordSysChange:
         emit UpdateRefCoordSys();
         break;
@@ -2376,6 +2571,8 @@ void MainWindow::InvalidateControls()
 
 void MainWindow::RegisterStdViewClasses()
 {
+    AzAssetBrowserWindow::createListenerForShowAssetEditorEvent(this);
+
     CRollupBar::RegisterViewClass();
     CTrackViewDialog::RegisterViewClass();
     CDataBaseDialog::RegisterViewClass();
@@ -2454,7 +2651,7 @@ void MainWindow::ResetAutoSaveTimers(bool bForceInit)
         {
             m_autoSaveTimer = new QTimer(this);
             m_autoSaveTimer->start(gSettings.autoBackupTime * 1000 * 60);
-            connect(m_autoSaveTimer, &QTimer::timeout, [&]() {
+            connect(m_autoSaveTimer, &QTimer::timeout, this, [&]() {
                 if (gSettings.autoBackupEnabled)
                 {
                     // Call autosave function of CryEditApp
@@ -2466,7 +2663,7 @@ void MainWindow::ResetAutoSaveTimers(bool bForceInit)
         {
             m_autoRemindTimer = new QTimer(this);
             m_autoRemindTimer->start(gSettings.autoRemindTime * 1000 * 60);
-            connect(m_autoRemindTimer, &QTimer::timeout, [&]() {
+            connect(m_autoRemindTimer, &QTimer::timeout, this, [&]() {
                 if (gSettings.autoRemindTime > 0)
                 {
                     // Remind to save.
@@ -2491,7 +2688,7 @@ void MainWindow::ResetBackgroundUpdateTimer()
     {
         m_backgroundUpdateTimer = new QTimer(this);
         m_backgroundUpdateTimer->start(pBackgroundUpdatePeriod->GetIVal());
-        connect(m_backgroundUpdateTimer, &QTimer::timeout, [&]() {
+        connect(m_backgroundUpdateTimer, &QTimer::timeout, this, [&]() {
             // Make sure that visible editor window get low-fps updates while in the background
 
             CCryEditApp* pApp = CCryEditApp::instance();
@@ -2533,7 +2730,8 @@ void MainWindow::OnRefreshAudioSystem()
         sLevelName = QString();
     }
 
-    Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::RefreshAudioSystem, sLevelName.toUtf8().data());}
+    Audio::AudioSystemRequestBus::Broadcast(&Audio::AudioSystemRequestBus::Events::RefreshAudioSystem, sLevelName.toUtf8().data());
+}
 
 void MainWindow::SaveLayout()
 {
@@ -2705,7 +2903,7 @@ void MainWindow::OnUpdateConnectionStatus()
             break;
         }
 
-        if (m_connectedToAssetProcessor) 
+        if (m_connectedToAssetProcessor)
         {
             m_connectionLostTimer->stop();
         }
@@ -2713,7 +2911,7 @@ void MainWindow::OnUpdateConnectionStatus()
         tooltip += "\n Last Asset Processor Task: ";
         tooltip += m_connectionListener->LastAssetProcessorTask().c_str();
         tooltip += "\n";
-        std::set<AZStd::string> failedJobs = m_connectionListener->FailedJobsList();
+        AZStd::set<AZStd::string> failedJobs = m_connectionListener->FailedJobsList();
         int failureCount = failedJobs.size();
         if (failureCount)
         {
@@ -2830,6 +3028,11 @@ void MainWindow::MatEditSend(int param)
     }
 }
 
+void MainWindow::SetSelectedEntity(AZ::EntityId& id)
+{
+    m_levelEditorMenuHandler->SetupSliceSelectMenu(id);
+}
+
 #ifdef Q_OS_WIN
 bool MainWindow::nativeEventFilter(const QByteArray &eventType, void *message, long *)
 {
@@ -2928,7 +3131,20 @@ void MainWindow::ConnectivityStateChanged(const AzToolsFramework::SourceControlS
 
 void MainWindow::OnGotoSelected()
 {
-    EBUS_EVENT(AzToolsFramework::EditorRequests::Bus, GoToSelectedOrHighlightedEntitiesInViewports);
+    AzToolsFramework::EditorRequestBus::Broadcast(&AzToolsFramework::EditorRequestBus::Events::GoToSelectedEntitiesInViewports);
+}
+
+void MainWindow::OnGotoSliceRoot()
+{
+    int numViews = GetIEditor()->GetViewManager()->GetViewCount();
+    for (int i = 0; i < numViews; ++i)
+    {
+        CViewport* viewport = GetIEditor()->GetViewManager()->GetView(i);
+        if (viewport)
+        {
+            viewport->CenterOnSliceInstance();
+        }
+    }
 }
 
 void MainWindow::ShowCustomizeToolbarDialog()
@@ -2986,10 +3202,10 @@ QWidget* MainWindow::CreateToolbarWidget(int actionId)
         w = CreateRefCoordComboBox();
         break;
     case ID_TOOLBAR_WIDGET_SNAP_GRID:
-        w = CreateSnapToGridButton();
+        w = CreateSnapToGridWidget();
         break;
     case ID_TOOLBAR_WIDGET_SNAP_ANGLE:
-        w = CreateSnapToAngleButton();
+        w = CreateSnapToAngleWidget();
         break;
     case ID_TOOLBAR_WIDGET_SELECT_OBJECT:
         w = CreateSelectObjectComboBox();
@@ -3010,9 +3226,11 @@ QWidget* MainWindow::CreateToolbarWidget(int actionId)
 // and are reading it as an event rather.
 void MainWindow::keyPressEvent(QKeyEvent* e)
 {
-    // We shouldn't need to do this, as there's already an escape key shortcut set on an action attached to the MainWindow. We need to explicitly trap the escape key here so because when in Game Mode, all of the actions attached to the MainWindow are disabled.
+    // We shouldn't need to do this, as there's already an escape key shortcut set on an action
+    // attached to the MainWindow. We need to explicitly trap the escape key here because when in
+    // Game Mode, all of the actions attached to the MainWindow are disabled.
     if (e->key() == Qt::Key_Escape)
-    {   
+    {
        MainWindow::OnEscapeAction();
        return;
     }
@@ -3070,5 +3288,8 @@ REGISTER_ONLY_PYTHON_COMMAND_WITH_EXAMPLE(PyGetViewPaneClassNames, general, get_
 REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyExit, general, exit,
     "Exits the editor.",
     "general.exit()");
+REGISTER_PYTHON_COMMAND_WITH_EXAMPLE(PyExitNoPrompt, general, exit_no_prompt,
+    "Exits the editor without prompting to save first.",
+    "general.exit_no_prompt()");
 
 #include <MainWindow.moc>

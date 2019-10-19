@@ -13,6 +13,7 @@
 
 #include <qgraphicswidget.h>
 #include <qgraphicssceneevent.h>
+#include <QTimer>
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/EntityBus.h>
@@ -33,11 +34,34 @@ namespace GraphCanvas
         , public ConnectionRequestBus::Handler
         , public SceneMemberRequestBus::Handler
         , public AzToolsFramework::EditorEvents::Bus::Handler
+        , public AZ::TickBus::Handler
     {
     private:
         friend class ConnectionEventFilter;
 
     protected:
+
+        class ConnectionEndpointAnimator
+        {
+        public:
+            ConnectionEndpointAnimator();
+
+            bool IsAnimating() const;
+            void AnimateToEndpoint(const QPointF& startPoint, const Endpoint& endPoint, float timeFrame);
+
+            QPointF GetAnimatedPosition() const;
+
+            bool Tick(float deltaTime);
+
+        private:
+            bool m_isAnimating;
+            float m_maxTime;
+            float m_timer;
+            QPointF m_currentPosition;
+
+            QPointF m_startPosition;
+            Endpoint m_targetEndpoint;
+        };
 
         enum class DragContext
         {
@@ -48,10 +72,23 @@ namespace GraphCanvas
             Connected
         };
 
+        enum class ConnectionMoveResult
+        {
+            DeleteConnection,
+            ConnectionMove,
+            NodeCreation
+        };
+
+        struct ConnectionCandidate
+        {
+            Endpoint m_connectableTarget;
+            Endpoint m_testedTarget;
+        };
+
     public:
-        AZ_COMPONENT(ConnectionComponent, "{14BB1535-3B30-4B1C-8324-D864963FBC76}");
+        AZ_COMPONENT(ConnectionComponent, "{14BB1535-3B30-4B1C-8324-D864963FBC76}", AZ::Component);
         static void Reflect(AZ::ReflectContext* context);
-		
+
         static AZ::Entity* CreateBaseConnectionEntity(const Endpoint& sourceEndpoint, const Endpoint& targetEndpoint, bool createModelConnection, const AZStd::string& selectorClass);
         static AZ::Entity* CreateGeneralConnection(const Endpoint& sourceEndpoint, const Endpoint& targetEndpoint, bool createModelConnection, const AZStd::string& substyle = "");
 
@@ -79,8 +116,8 @@ namespace GraphCanvas
         static void GetRequiredServices(AZ::ComponentDescriptor::DependencyArrayType& required)
         {
         }
-		
-		void Activate() override;
+
+        void Activate() override;
         void Deactivate() override;
         ////
 
@@ -90,21 +127,27 @@ namespace GraphCanvas
         Endpoint GetSourceEndpoint() const override;
         QPointF GetSourcePosition() const override;
         void StartSourceMove() override;
+        void SnapSourceDisplayTo(const Endpoint& sourceEndpoint) override;
+        void AnimateSourceDisplayTo(const Endpoint& sourceEndpoint, float connectionTime) override;
 
         AZ::EntityId GetTargetSlotId() const override;
         AZ::EntityId GetTargetNodeId() const override;
         Endpoint GetTargetEndpoint() const override;
         QPointF GetTargetPosition() const override;
         void StartTargetMove() override;
+        void SnapTargetDisplayTo(const Endpoint& targetEndpoint) override;
+        void AnimateTargetDisplayTo(const Endpoint& targetEndpoint, float connectionTime) override;
 
         bool ContainsEndpoint(const Endpoint& endpoint) const override;
+
+        void ChainProposalCreation(const QPointF& scenePos, const QPoint& screenPos) override;
         ////
-		
-		// AzToolsFramework::EditorEvents::Bus
+
+        // AzToolsFramework::EditorEvents::Bus
         void OnEscape() override;
         ////
-		
-		// SceneMemberRequestBus
+
+        // SceneMemberRequestBus
         void SetScene(const AZ::EntityId& sceneId) override;
         void ClearScene(const AZ::EntityId& oldSceneId) override;
 
@@ -123,6 +166,10 @@ namespace GraphCanvas
         AZStd::any* GetUserData() override;
         ////
 
+        // TickBus
+        void OnTick(float deltaTime, AZ::ScriptTimePoint timePoint) override;
+        ////
+
     protected:
 
         // VS2013 Fixes
@@ -134,26 +181,34 @@ namespace GraphCanvas
 
         virtual void OnConnectionMoveStart();
         virtual bool OnConnectionMoveCancelled();
-        virtual bool OnConnectionMoveComplete(const QPointF& scenePos, const QPoint& screenPos);
+        virtual ConnectionMoveResult OnConnectionMoveComplete(const QPointF& scenePos, const QPoint& screenPos);
 
         void StartMove();
         void StopMove();
 
         bool UpdateProposal(Endpoint& activePoint, const Endpoint& proposedEndpoint, AZStd::function< void(const AZ::EntityId&, const AZ::EntityId&)> endpointChangedFunctor);
 
-        Endpoint FindConnectionCandidateAt(const QPointF& scenePos) const;
+        ConnectionCandidate FindConnectionCandidateAt(const QPointF& scenePos) const;
 
         void UpdateMovePosition(const QPointF& scenePos);
-        void FinalizeMove(const QPointF& scenePos, const QPoint& screenPos);        
+        void FinalizeMove(const QPointF& scenePos, const QPoint& screenPos, bool chainAddition);
+
+        void DisplayConnectionToolTip(const QPointF& scenePos, const Endpoint& connectionTarget);
+
+        ConnectionValidationTooltip m_validationResult;
+        Endpoint m_endpointTooltip;
+        ToastId  m_toastId;
 
         //! The Id of the graph this connection belongs to.
         GraphId m_graphId;
 
         //! The source endpoint that this connection is from.
         Endpoint m_sourceEndpoint;
+        ConnectionEndpointAnimator m_sourceAnimator;
 
         //! The target endpoint that this connection is to.
         Endpoint m_targetEndpoint;
+        ConnectionEndpointAnimator m_targetAnimator;
 
         //! Information needed to handle the dragging aspect of the connections
         QPointF m_mousePoint;
@@ -171,7 +226,7 @@ namespace GraphCanvas
         AZStd::any m_userData;
 
         StateSetter<RootGraphicsItemDisplayState> m_nodeDisplayStateStateSetter;
-        StateSetter<RootGraphicsItemDisplayState> m_connectionStateStateSetter;
+        StateSetter<RootGraphicsItemDisplayState> m_connectionStateStateSetter;        
     };
 
     class ConnectionEventFilter
@@ -198,7 +253,10 @@ namespace GraphCanvas
             case QEvent::GraphicsSceneMouseRelease:
             {
                 QGraphicsSceneMouseEvent* mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
-                m_connection.FinalizeMove(mouseEvent->scenePos(), mouseEvent->screenPos());
+
+                bool chainAddition = mouseEvent->modifiers() & Qt::KeyboardModifier::ShiftModifier;
+
+                m_connection.FinalizeMove(mouseEvent->scenePos(), mouseEvent->screenPos(), chainAddition);
                 return true;
             }
             default:

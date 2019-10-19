@@ -23,6 +23,9 @@
 #include "VisAreas.h"
 #include "ObjectsTree.h"
 
+#include <StatObjBus.h>
+#include <HeightmapUpdateNotificationBus.h>
+
 #define SIGC_ALIGNTOTERRAIN       BIT(0) // Deprecated
 #define SIGC_USETERRAINCOLOR      BIT(1)
 #define SIGC_HIDEABILITY          BIT(3)
@@ -295,7 +298,7 @@ void CTerrain::SaveTables(byte*& pData, int& nDataSize, std::vector<struct IStat
             {
                 SNameChunk tmp;
                 assert(strlen(rTable[dwI] ? rTable[dwI]->GetName() : "") < sizeof(tmp.szFileName));
-                strcpy(tmp.szFileName, rTable[dwI] ? rTable[dwI]->GetName() : "");
+                azstrcpy(tmp.szFileName, AZ_ARRAY_SIZE(tmp.szFileName), rTable[dwI] ? rTable[dwI]->GetName() : "");
                 AddToPtr(pData, nDataSize, tmp, eEndian);
             }
         }
@@ -612,7 +615,6 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
         PodArray<StatInstGroupChunk> lstStatInstGroupChunkFileChunks;
 
         { // get vegetation objects count
-            MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Vegetation");
             LOADING_TIME_PROFILE_SECTION_NAMED("Vegetation");
 
             int nObjectsCount = 0;
@@ -639,7 +641,8 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
             {
                 // preallocate real array
                 PodArray<StatInstGroup>& rTable = GetObjManager()->GetListStaticTypes()[DEFAULT_SID];
-                rTable.resize(nObjectsCount);//,nObjectsCount);
+                rTable.resize(nObjectsCount);
+                StatInstGroupEventBus::Broadcast(&StatInstGroupEventBus::Events::ReserveStatInstGroupIdRange, StatInstGroupId(0), StatInstGroupId(nObjectsCount));
 
                 // init struct values and load cgf's
                 for (uint32 i = 0; i < rTable.size(); i++)
@@ -652,12 +655,13 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
         pStatObjTable = new std::vector < IStatObj* >;
 
         { // get brush objects count
-            MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Brushes");
             LOADING_TIME_PROFILE_SECTION_NAMED("Brushes");
 
             int nObjectsCount = 0;
             if (!LoadDataFromFile(&nObjectsCount, 1, f, nDataSize, eEndian))
             {
+                delete pStatObjTable;
+                pStatObjTable = nullptr;
                 return 0;
             }
 
@@ -670,6 +674,8 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
             lstFileChunks.PreAllocate(nObjectsCount, nObjectsCount);
             if (!LoadDataFromFile(lstFileChunks.GetElements(), lstFileChunks.Count(), f, nDataSize, eEndian))
             {
+                delete pStatObjTable;
+                pStatObjTable = nullptr;
                 return 0;
             }
 
@@ -842,6 +848,7 @@ bool CTerrain::Load_T(T& f, int& nDataSize, STerrainChunkHeader* pTerrainChunkHe
 
     int numTiles = CTerrain::m_NodePyramid[0].GetSize();
     SendLegacyTerrainUpdateNotifications(0, 0, numTiles, numTiles);
+    AZ::HeightmapUpdateNotificationBus::Broadcast(&AZ::HeightmapUpdateNotificationBus::Events::HeightmapModified, AZ::Aabb::CreateNull());
 
     assert(nNodesLoaded && nDataSize == 0);
     return (nNodesLoaded && nDataSize == 0);

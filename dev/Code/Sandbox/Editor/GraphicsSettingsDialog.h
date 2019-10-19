@@ -13,6 +13,8 @@
 
 #include <QDialog>
 
+#include <AzToolsFramework/UI/PropertyEditor/DHQSpinbox.hxx>
+
 class QGridLayout;
 class QLabel;
 
@@ -21,15 +23,46 @@ namespace Ui
     class GraphicsSettingsDialog;
 }
 
+// Description:
+//   Status of cvar for a specifc platform and spec level
+//   editedValue - current setting within Graphics Settings Dialog box
+//   overwrittenValue - original setting from platform config file (set to originalValue if not found)
+//   originalValue - original settings from sys_spec config file index
+
+struct CVarFileStatus
+{
+    AZStd::any editedValue;
+    AZStd::any overwrittenValue;
+    AZStd::any originalValue;
+    CVarFileStatus(AZStd::any edit, AZStd::any over, AZStd::any orig) : editedValue(edit), overwrittenValue(over), originalValue(orig) {}
+};
+
+// Description:
+//   Status of specific cvar for Editor mapping
+//   type - CVAR_INT / CVAR_FLOAT / CVAR_STRING
+//   cvarGroup - source of cvar (sys_spec_particles, sys_spec_physics, etc.) or "miscellaneous" if only specified in platform config file
+//   fileVals = CVarFileStatus for each spec level of a specific platform
+
+struct CVarInfo
+{
+    int type;
+    AZStd::string cvarGroup;
+    AZStd::vector<CVarFileStatus> fileVals;
+};
+
 class GraphicsSettingsDialog
-    : public QDialog
+    : public QDialog,
+      public ILoadConfigurationEntrySink
 {
     Q_OBJECT
 
-public:    
+public:
 
     explicit GraphicsSettingsDialog(QWidget* parent = nullptr);
     virtual ~GraphicsSettingsDialog();
+
+    // ILoadConfigurationEntrySink
+    void OnLoadConfigurationEntry(const char* szKey, const char* szValue, const char* szGroup) override;
 
 public slots:
     //Accept and reject
@@ -45,7 +78,7 @@ private slots:
     void CVarChanged(const QString& s);
 
 private:
-    
+
     // The struct ParameterWidget is used to store the parameter widget
     // m_parameterName will be the name of the parameter the widget represent.
     struct ParameterWidget
@@ -61,6 +94,7 @@ private:
 
     struct CollapseGroup
     {
+        QString m_groupName;
         QPushButton* m_dropDownButton;
         QGridLayout* m_gridlayout;
 
@@ -78,6 +112,12 @@ private:
 
     void OpenCustomSpecDialog();
     void ApplyCustomSpec(const QString& customFilePath);
+    void UnloadCustomSpec(int specLevel);
+    bool IsCustomSpecAlreadyLoaded(const AZStd::string& filename) const;
+    bool eventFilter(QObject *obj, QEvent *event) override;
+
+    template<typename T>
+    void RemoveWidgetsFromLayout(QVector<T*>& widgetVector, QGridLayout* layout);
 
     enum CVarStateComparison
     {
@@ -97,22 +137,26 @@ private:
     void LoadPlatformConfigurations();
     // Build UI column for spec level of current platform
     void BuildColumn(int specLevel);
+    // Sets the tab order based on the currently visible cvars
+    void SetCVarWidgetTabOrder();
     // Initial UI building
     void BuildUI();
     // Cleaning out UI before loading new platform information
     void CleanUI();
     // Shows/hides custom spec option
-    void ToggleCustomSpecOption();
+    void ShowCustomSpecOption(bool show);
     // Shows/hides category labels and dropdowns
-    void ToggleCategories();
+    void ShowCategories(bool show);
     // Warns about unsaved changes (returns true if accepted)
     bool SendUnsavedChangesWarning(bool cancel);
+
+    void LoadCVarGroupDirectory(const AZStd::string& path);
 
     /////////////////////////////////////////////
     // UI help functions
 
     // Setup collapsed buttons
-    void SetCollapsedLayout(QPushButton* togglebutton, QGridLayout* layout);
+    void SetCollapsedLayout(const QString& groupName, QPushButton* togglebutton, QGridLayout* layout);
     // Sets the platform entry index for the given platform
     void SetPlatformEntry(ESystemConfigPlatform platform);
     // Gets the platform enum given the platform name
@@ -135,34 +179,46 @@ private:
     const QString SETTINGS_FILE_PATH = "Config/spec/";
     const char* CFG_FILEFILTER = "Cfg File(*.cfg);;All files(*)";
 
+    const int m_numSpecLevels = 4;
+
     bool m_isLoading;
-    bool m_customSpecChosen;
+    bool m_showCustomSpec;
     bool m_showCategories;
+
+    const char* m_cvarGroupsFolder = "Config/CVarGroups";
 
     QScopedPointer<Ui::GraphicsSettingsDialog> m_ui;
 
     QVector<CollapseGroup*> m_uiCollapseGroup;
-    
+    QIcon m_iconRemove;
+
     QVector<ParameterWidget*> m_parameterWidgets;
+
+    AZStd::string m_currentConfigFilename;
+    size_t m_currentSpecIndex;
 
     // cvar name --> pair(type, CVarStatus for each file)
     AZStd::unordered_map<AZStd::string, CVarInfo> m_cVarTracker;
 
-    AZStd::unordered_map<ESystemConfigPlatform, AZStd::vector<AZStd::string>> m_cfgFiles;
+    AZStd::unordered_map<ESystemConfigPlatform, AZStd::vector<AZStd::string> > m_cfgFiles;
 
-    AZStd::vector<AZStd::pair<AZStd::string, ESystemConfigPlatform>> m_platformStrings;
+    AZStd::vector<AZStd::pair<AZStd::string, ESystemConfigPlatform> > m_platformStrings;
 
     struct CVarGroupInfo
     {
         QVector<QLabel*> m_platformLabels;
         QVector<QLabel*> m_cvarLabels;
-        QVector<QSpinBox*> m_cvarSpinBoxes;
-        QVector<QDoubleSpinBox*> m_cvarDoubleSpinBoxes;
+        QVector<AzToolsFramework::DHQSpinbox*> m_cvarSpinBoxes;
+        QVector<AzToolsFramework::DHQDoubleSpinbox*> m_cvarDoubleSpinBoxes;
         QVector<QLineEdit*> m_cvarLineEdits;
+        QVector<QPushButton*> m_customSpecUnloadButtons;
+        QVector<QPushButton*> m_specFileArea;
         QGridLayout* m_layout;
+        QVector<QWidget*> m_widgetInsertOrder;
     };
 
     AZStd::unordered_map<AZStd::string, CVarGroupInfo> m_cvarGroupData;
+    AZStd::vector<AZStd::string> m_cvarGroupOrder;
 
     ESystemConfigPlatform m_currentPlatform;
 

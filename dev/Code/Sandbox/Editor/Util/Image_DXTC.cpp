@@ -11,7 +11,7 @@
 */
 // Original file Copyright Crytek GMBH or its affiliates, used under license.
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "Image_DXTC.h"
 #include <CryFile.h>
 #include "BitFiddling.h"
@@ -56,6 +56,7 @@ static float LinearToGamma(float x)
 #ifndef __RECODE__
 #pragma warning(push)
 #pragma warning(disable:4819)   // Invalid character not in default code page
+#pragma warning(disable:4828)
 #include <squish.h>
 #include <squish.inl>
 #pragma warning(pop)

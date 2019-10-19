@@ -22,8 +22,9 @@ namespace GraphCanvas
             const char* const Graph = "graph";
             const char* const Node = "node";
             const char* const Slot = "slot";
-            const char* const DataSlot = "dataSlot";
+            const char* const DataSlot = "dataSlot";            
             const char* const ExecutionSlot = "executionSlot";
+            const char* const ExtenderSlot = "extenderSlot";
             const char* const PropertySlot = "propertySlot";
             const char* const Group = "group";
             const char* const Connection = "connection";
@@ -85,6 +86,7 @@ namespace GraphCanvas
             const char* const Hovered = ":hovered";
             const char* const Selected = ":selected";
             const char* const Disabled = ":disabled";
+            const char* const PartialDisabled = ":partial_disabled";
             const char* const Collapsed = ":collapsed";
             const char* const Highlighted = ":highlighted";
             const char* const ValidDrop = ":validDrop";
@@ -97,11 +99,11 @@ namespace GraphCanvas
             const char* const InspectionTransparent = ":inspection_transparent";
         } // namespace States
 
-        // Style of curve for connection lines
-        enum class Curves : AZ::u32
+        enum class PaletteStyle : AZ::u32
         {
-            Straight,
-            Curved 
+            Solid,
+            CandyStripe,
+            PatternFill
         };
 
         namespace Attributes
@@ -161,6 +163,22 @@ namespace GraphCanvas
             const char* const ConnectionDragPercent = "connection-drag-percentage";
             const char* const ConnectionDragMoveBuffer = "connection-drag-move-buffer";
             const char* const ConnectionDefaultMarquee = "connection-default-marquee";
+
+            const char* const PaletteStyle = "palette-style";
+
+            // Candy Stripe Attribute
+            const char* const MaximumStripeSize = "max-stripe-size";
+            const char* const MinimumStripes = "min-stripes";
+            const char* const StripeAngle = "stripe-angle";
+            const char* const StripeColor = "stripe-color";
+            const char* const StripeOffset = "stripe-offset";
+
+            // Pattern Fill
+            const char* const PatternTemplate = "pattern";
+            const char* const PatternPalettes = "palettes";
+            const char* const OddOffsetPercent = "odd-offset-percent";
+            const char* const EvenOffsetPercent = "even-offset-percent";
+            const char* const MinimumRepetitions = "min-repetitions";
 
             const char* const ZValue = "z-value";
             const char* const Opacity = "opacity";
@@ -222,6 +240,22 @@ namespace GraphCanvas
             ConnectionDragPercent,
             ConnectionDragMoveBuffer,
             ConnectionDefaultMarquee,
+
+            PaletteStyle,
+
+            // Candy Stripe Attributes
+            MaximumStripeSize,
+            MinimumStripes,
+            StripeAngle,
+            StripeColor,
+            StripeOffset,
+
+            // Pattern Fill
+            PatternTemplate,
+            PatternPalettes,
+            OddOffsetPercent,
+            EvenOffsetPercent,
+            MinimumRepetitions,
 
             ZValue,
 

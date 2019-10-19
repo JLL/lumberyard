@@ -20,10 +20,11 @@
 #include <GraphCanvas/Components/Nodes/NodeBus.h>
 #include <GraphCanvas/Components/Nodes/NodeTitleBus.h>
 #include <GraphCanvas/Components/SceneBus.h>
+#include <GraphCanvas/Components/StyleBus.h>
 #include <GraphCanvas/Components/VisualBus.h>
+#include <GraphCanvas/Types/EntitySaveData.h>
 #include <GraphCanvas/Types/TranslationTypes.h>
 #include <Widgets/GraphCanvasLabel.h>
-#include <GraphCanvas/Types/EntitySaveData.h>
 
 namespace GraphCanvas
 {
@@ -33,28 +34,9 @@ namespace GraphCanvas
     class GeneralNodeTitleComponent
         : public AZ::Component
         , public NodeTitleRequestBus::Handler
-        , public SceneMemberNotificationBus::Handler
+        , public SceneMemberNotificationBus::Handler        
     {
     public:
-
-        class GeneralNodeTitleComponentSaveData
-            : public SceneMemberComponentSaveData<GeneralNodeTitleComponentSaveData>
-        {
-        public:
-            AZ_RTTI(GeneralNodeTitleComponentSaveData, "{328FF15C-C302-458F-A43D-E1794DE0904E}", ComponentSaveData);
-            AZ_CLASS_ALLOCATOR(GeneralNodeTitleComponentSaveData, AZ::SystemAllocator, 0);
-
-            GeneralNodeTitleComponentSaveData() = default;
-            ~GeneralNodeTitleComponentSaveData() = default;
-
-            bool RequiresSave() const override
-            {
-                return !m_paletteOverride.empty();
-            }
-
-            AZStd::string m_paletteOverride;
-        };
-
         AZ_COMPONENT(GeneralNodeTitleComponent, "{67D54B26-A924-4028-8544-5684B16BF04A}");
         static void Reflect(AZ::ReflectContext*);
 
@@ -103,6 +85,9 @@ namespace GraphCanvas
 
         void SetPaletteOverride(const AZStd::string& paletteOverride) override;
         void SetDataPaletteOverride(const AZ::Uuid& uuid) override;
+        void SetColorPaletteOverride(const QColor& color) override;
+
+        void ConfigureIconConfiguration(PaletteIconConfiguration& paletteConfiguration) override;
 
         void ClearPaletteOverride() override;
         /////
@@ -130,13 +115,14 @@ namespace GraphCanvas
         , public SceneNotificationBus::Handler
         , public SceneMemberNotificationBus::Handler
         , public NodeNotificationBus::Handler
+        , public RootGraphicsItemNotificationBus::Handler
     {
     public:
         AZ_TYPE_INFO(GeneralNodeTitleGraphicsWidget, "{9DE7D3C0-D88C-47D8-85D4-5E0F619E60CB}");
         AZ_CLASS_ALLOCATOR(GeneralNodeTitleGraphicsWidget, AZ::SystemAllocator, 0);        
 
         GeneralNodeTitleGraphicsWidget(const AZ::EntityId& entityId);
-        ~GeneralNodeTitleGraphicsWidget() override = default;
+        ~GeneralNodeTitleGraphicsWidget() override;
 
         void Activate();
         void Deactivate();
@@ -144,8 +130,12 @@ namespace GraphCanvas
         void SetTitle(const TranslationKeyedString& title);
         void SetSubTitle(const TranslationKeyedString& subtitle);
 
-        void SetPaletteOverride(const AZStd::string& paletteOverride);
+        void SetPaletteOverride(AZStd::string_view paletteOverride);
         void SetPaletteOverride(const AZ::Uuid& uuid);
+        void SetPaletteOverride(const QColor& color);
+
+        void ConfigureIconConfiguration(PaletteIconConfiguration& paletteConfiguration);
+
         void ClearPaletteOverride();
 
         void UpdateLayout();
@@ -166,6 +156,10 @@ namespace GraphCanvas
         void OnTooltipChanged(const AZStd::string& tooltip) override;
         ////
 
+        // RootGraphicsItemNotifications
+        void OnEnabledChanged(RootGraphicsItemEnabledState enabledState) override;
+        ////
+
     protected:
 
         // QGraphicsItem
@@ -182,7 +176,10 @@ namespace GraphCanvas
 
         AZ::EntityId m_entityId;
 
+        const Styling::StyleHelper* m_disabledPalette;
         const Styling::StyleHelper* m_paletteOverride;
-        Styling::StyleHelper m_styleHelper;
+        Styling::StyleHelper* m_colorOverride;        
+
+        Styling::StyleHelper m_styleHelper;        
     };
 }

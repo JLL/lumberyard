@@ -13,7 +13,7 @@
 */
 
 #include <AzCore/std/string/string.h>
-#include <AzCore/RTTI/Rtti.h>
+#include <AzCore/RTTI/RTTI.h>
 #include <SceneAPI/SceneCore/DataTypes/Rules/IMeshAdvancedRule.h>
 
 namespace AZ
@@ -44,6 +44,8 @@ namespace AZ
                     bool(size_t index));
                 MOCK_CONST_METHOD0(GetUVStreamCount,
                     size_t());
+                MOCK_CONST_METHOD0(UseCustomNormals,
+                    bool());
             };
         }  // DataTypes
     }  // SceneAPI

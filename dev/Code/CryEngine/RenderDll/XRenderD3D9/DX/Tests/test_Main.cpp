@@ -9,8 +9,9 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#include "stdafx.h"
+#include "StdAfx.h"
 #include <AzTest/AzTest.h>
+#include <AzCore/UnitTest/UnitTest.h>
 #include <AzCore/Memory/SystemAllocator.h>
 #include <AzCore/Memory/OSAllocator.h>
 #include <AzCore/Memory/AllocatorManager.h>
@@ -18,6 +19,7 @@ namespace
 {
     class RenderDllTestEnvironment final
         : public AZ::Test::ITestEnvironment
+        , UnitTest::TraceBusRedirector // provides AZ_TEST_START_TRACE_SUPPRESSION
     {
     public:
         AZ_TEST_CLASS_ALLOCATOR(RenderDllTestEnvironment);
@@ -25,25 +27,17 @@ namespace
     protected:
         void SetupEnvironment() override
         {
-            // required memory management
-            AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
-            AZ::AllocatorInstance<AZ::OSAllocator>::Create();
-            // For some reason there's always an assert in ~AllocatorManager() after running the tests,
-            // even though we call Destroy on both allocators in the TeardownEnvironment function,
-            // so allow allocator leaking here to enable the tests to run without issue
-            AZ::AllocatorManager::Instance().SetAllocatorLeaking(true); 
+            AZ::Debug::TraceMessageBus::Handler::BusConnect();
         }
 
         void TeardownEnvironment() override
         {           
-            AZ::AllocatorInstance<AZ::OSAllocator>::Destroy();
-            AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
+            AZ::Debug::TraceMessageBus::Handler::BusDisconnect();
         }
     private:
     };
 }
 AZ_UNIT_TEST_HOOK(new RenderDllTestEnvironment);
-AZ_INTEG_TEST_HOOK();
 
 TEST(CryRenderD3D11SanityTest, Sanity)
 {

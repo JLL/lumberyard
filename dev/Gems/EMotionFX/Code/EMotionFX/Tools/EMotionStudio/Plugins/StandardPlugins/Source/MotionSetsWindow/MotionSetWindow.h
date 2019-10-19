@@ -16,7 +16,6 @@
 #include <AzCore/std/containers/vector.h>
 #include "../../../../EMStudioSDK/Source/DockWidgetPlugin.h"
 #include <MysticQt/Source/DialogStack.h>
-#include <MysticQt/Source/SearchButton.h>
 #include <MysticQt/Source/ComboBox.h>
 #include <EMotionFX/Source/MotionSet.h>
 #include <EMotionFX/CommandSystem/Source/CommandManager.h>
@@ -29,6 +28,10 @@
 #include <QLineEdit>
 #include <QDialog>
 
+namespace AzQtComponents
+{
+    class FilteredSearchWidget;
+}
 
 namespace EMStudio
 {
@@ -141,6 +144,10 @@ namespace EMStudio
         bool AddMotion(EMotionFX::MotionSet* motionSet, EMotionFX::MotionSet::MotionEntry* motionEntry);
         bool UpdateMotion(EMotionFX::MotionSet* motionSet, EMotionFX::MotionSet::MotionEntry* motionEntry, const AZStd::string& oldMotionId);
         bool RemoveMotion(EMotionFX::MotionSet* motionSet, EMotionFX::MotionSet::MotionEntry* motionEntry);
+        void PlayMotion(EMotionFX::Motion* motion);
+
+    signals:
+        void MotionSelectionChanged();
 
     public slots:
         void UpdateInterface();
@@ -155,7 +162,7 @@ namespace EMStudio
         void OnClearMotions();
         void OnEditButton();
 
-        void SearchStringChanged(const QString& text);
+        void OnTextFilterChanged(const QString& text);
 
         void OnEntryDoubleClicked(QTableWidgetItem* item);
 
@@ -163,8 +170,8 @@ namespace EMStudio
         void dragEnterEvent(QDragEnterEvent* event) override;
 
     private:
-        virtual void keyPressEvent(QKeyEvent* event) override;
-        virtual void keyReleaseEvent(QKeyEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
+        void keyReleaseEvent(QKeyEvent* event) override;
 
         bool InsertRow(EMotionFX::MotionSet* motionSet, EMotionFX::MotionSet::MotionEntry* motionEntry, QTableWidget* tableWidget, bool readOnly);
         bool FillRow(EMotionFX::MotionSet* motionSet, EMotionFX::MotionSet::MotionEntry* motionEntry, uint32 rowIndex, QTableWidget* tableWidget, bool readOnly);
@@ -189,7 +196,8 @@ namespace EMStudio
         QPushButton*                            mClearButton;
         QPushButton*                            mEditButton;
 
-        MysticQt::SearchButton*                 mFindWidget;
+        AzQtComponents::FilteredSearchWidget*   m_searchWidget;
+        AZStd::string                           m_searchWidgetText;
         MotionSetsWindowPlugin*                 mPlugin;
     };
 } // namespace EMStudio

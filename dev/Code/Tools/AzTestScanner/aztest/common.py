@@ -10,7 +10,9 @@
 #
 from datetime import datetime
 import os
+import subprocess
 import sys
+import time
 from aztest.errors import InvalidUseError
 from collections import namedtuple
 
@@ -22,6 +24,11 @@ EXECUTABLE_RUNNER_ARG = "--loadunittests"
 DEFAULT_OUTPUT_PATH = "TestResults"
 
 ScanResult = namedtuple("ScanResult", ("path", "return_code", "xml_path", "error_msg"))
+
+
+class SubprocessTimeoutException(Exception):
+    pass
+
 
 class ModuleType:
     EXECUTABLE = 1
@@ -63,7 +70,7 @@ def create_output_directory(output_path, no_timestamp):
                     os.remove(os.path.join(root, name))
         except Exception:
             # print error message to console and exit
-            print "ERROR! Could not delete old report files. Please close any open files in {} and try again"\
+            print "ERROR! Could not delete old report files. Please close any open files in {} and try again" \
                 .format(output_dir)
             sys.exit(1)
     else:
@@ -105,3 +112,29 @@ def to_list(obj):
             yield x
     else:
         yield obj
+
+
+def subprocess_with_timeout(command, timeout_sec, cwd=None, delay=1.0):
+    """
+    Runs a command in a subprocess and times out if the subprocess exceeds timeout_sec in execution time
+    :param command: command to be run
+    :param timeout_sec: total timeout length, in seconds
+    :param cwd: desired cwd for the command to run in
+    :param delay: delay between checks for timeout
+    :return:
+    """
+    deadline = time.time() + timeout_sec
+
+    if cwd:
+        task = subprocess.Popen(command, cwd=cwd)
+    else:
+        task = subprocess.Popen(command)
+
+    while task.poll() is None:
+        # print 'Waiting on call: ' + str(command)
+        if time.time() > deadline:
+            task.terminate()
+            raise SubprocessTimeoutException("Subprocess timed out after {} seconds.".format(timeout_sec))
+        time.sleep(delay)
+
+    return task.returncode

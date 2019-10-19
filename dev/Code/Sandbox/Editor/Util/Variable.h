@@ -551,7 +551,7 @@ public:
     }
 
 
-    void OnSetValue(bool bRecursive)
+    virtual void OnSetValue(bool bRecursive)
     {
         // If have wired variables or OnSet callback, process them.
         // Send value to wired variable.
@@ -646,18 +646,17 @@ protected:
     QString m_humanName;
     QString m_description;
 
+    //! Optional userdata pointer
+    QVariant m_userData;
+
     //! Extended data (Extended data is never copied, it's always private to this variable).
     WiredList m_wiredVars;
     OnSetCallbackList m_onSetFuncs;
     OnSetEnumCallbackList m_onSetEnumFuncs;
 
-
     uint16 m_flags;
     //! Limited to 8 flags.
     unsigned char m_dataType;
-
-    //! Optional userdata pointer
-    QVariant m_userData;
 
     bool m_boUpdateCallbacksEnabled;
 
@@ -756,7 +755,7 @@ public:
             return;
         }
         int numSrc = fromVar->GetNumVariables();
-        int numTrg = m_vars.size();
+        int numTrg = static_cast<int>(m_vars.size());
         for (int i = 0; i < numSrc && i < numTrg; i++)
         {
             // Copy Every child variable.
@@ -768,7 +767,7 @@ public:
     }
 
     //////////////////////////////////////////////////////////////////////////
-    virtual int GetNumVariables() const { return m_vars.size(); }
+    virtual int GetNumVariables() const { return static_cast<int>(m_vars.size()); }
 
     virtual IVariable* GetVariable(int index) const
     {
@@ -1321,13 +1320,12 @@ protected:
 
 protected:
     T m_valueDef;
-
-    // Min/Max value.
-    float m_valueMin, m_valueMax, m_valueStep;
-    unsigned char m_bHardMin : 1;
-    unsigned char m_bHardMax : 1;
     bool m_customLimits;
     bool m_bResolving;
+    unsigned char m_bHardMin : 1;
+    unsigned char m_bHardMax : 1;
+    // Min/Max value.
+    float m_valueMin, m_valueMax, m_valueStep;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -1812,7 +1810,7 @@ public:
     void AddVariable(CVariableBase& var, const char* varName, unsigned char dataType = IVariable::DT_SIMPLE);
 
     //! Returns number of variables in block.
-    virtual int GetNumVariables() const { return m_vars.size(); }
+    virtual int GetNumVariables() const { return static_cast<int>(m_vars.size()); }
 
     //! Get pointer to stored variable by index.
     virtual IVariable* GetVariable(int index) const

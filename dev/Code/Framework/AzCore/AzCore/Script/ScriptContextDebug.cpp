@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #if !defined(AZCORE_EXCLUDE_LUA)
 
@@ -73,11 +72,7 @@ ScriptContextDebug::ScriptContextDebug(ScriptContext& scriptContext, bool isEnab
     , m_currentStackLevel(-1)
     , m_stepStackLevel(-1)
     , m_isRecordCallstack(isEnableStackRecord)
-#if defined(AZ_PLATFORM_WINDOWS)
-    , m_isRecordCodeCallstack(true)   // PC is fast enough to do it all the time.
-#else
-    , m_isRecordCodeCallstack(false)  // On consoles we need to traverse map files (for full stack decode)
-#endif
+    , m_isRecordCodeCallstack(AZ_TRAIT_SCRIPT_RECORD_CALLSTACK_DEFAULT)
     , m_context(scriptContext)
 {
     ConnectHook();
@@ -397,28 +392,31 @@ void ScriptContextDebug::EnumRegisteredEBuses(EnumEBus enumEBus, EnumEBusSender 
         {
             AZ::BehaviorEBusHandler* handler = nullptr;
             ebus->m_createHandler->InvokeResult(handler);
-            const auto& notifications = handler->GetEvents();
-            for (const auto& notification : notifications)
+            if (handler)
             {
-                AZStd::string scriptArgs;
-                const size_t paramCount = notification.m_parameters.size();
-                for (size_t i = 0; i < notification.m_parameters.size(); ++i)
+                const auto& notifications = handler->GetEvents();
+                for (const auto& notification : notifications)
                 {
-                    AZStd::string argName = notification.m_parameters[i].m_name;
-                    StripQualifiers(argName);
-                    scriptArgs += argName;
-                    if (i != paramCount - 1)
+                    AZStd::string scriptArgs;
+                    const size_t paramCount = notification.m_parameters.size();
+                    for (size_t i = 0; i < notification.m_parameters.size(); ++i)
                     {
-                        scriptArgs += ", ";
+                        AZStd::string argName = notification.m_parameters[i].m_name;
+                        StripQualifiers(argName);
+                        scriptArgs += argName;
+                        if (i != paramCount - 1)
+                        {
+                            scriptArgs += ", ";
+                        }
                     }
+
+                    AZStd::string funcName = notification.m_name;
+                    StripQualifiers(funcName);
+
+                    enumEBusSender(ebus->m_name, funcName, scriptArgs, "Notification", userData);
                 }
-
-                AZStd::string funcName = notification.m_name;
-                StripQualifiers(funcName);
-
-                enumEBusSender(ebus->m_name, funcName, scriptArgs, "Notification", userData);
+                ebus->m_destroyHandler->Invoke(handler);
             }
-            ebus->m_destroyHandler->Invoke(handler);
         }
     }
 }
@@ -1411,9 +1409,6 @@ ScriptContextDebug::GetValue(DebugValue& value)
     // Erase first element, so that all that's left is sub-elements
     tokens.erase(tokens.begin());
 
-    // Disallow writing back values if it's a sub-element
-    bool isReadOnly = !tokens.empty();
-
     for (const auto& token : tokens)
     {
         // Attempt to convert token to a number
@@ -1443,7 +1438,7 @@ ScriptContextDebug::GetValue(DebugValue& value)
 
     VoidPtrArray tablesVisited; ///< Keep a list of visited tables to allow circular table dependencies
 
-    ReadValue(value, tablesVisited, isReadOnly);
+    ReadValue(value, tablesVisited);
 
     lua_pop(l, 1); // pop the value from the stack
 
@@ -1455,10 +1450,54 @@ ScriptContextDebug::GetValue(DebugValue& value)
 // [8/15/2012]
 //=========================================================================
 bool
-ScriptContextDebug::SetValue(const DebugValue& value)
+ScriptContextDebug::SetValue(const DebugValue& sourceValue)
 {
-    const char* name = value.m_name.c_str();
-    size_t nameLen = value.m_name.length();
+    AZStd::vector<AZ::OSString> tokens;
+    AZStd::tokenize<AZ::OSString>(sourceValue.m_name, ".[] ", tokens);
+
+    if (tokens.empty())
+    {
+        return false;
+    }
+
+    // create hierarchy from tokens
+    const DebugValue* value = &sourceValue;
+    DebugValue untokenizedValue;
+    
+    if (tokens.size() > 1)
+    {
+        untokenizedValue.m_name = tokens[0];
+        untokenizedValue.m_type = LUA_TTABLE;
+
+        // Erase first element, so that all that's left is sub-elements
+        tokens.erase(tokens.begin());
+
+        // expand the tokens into the hierarchy
+        DebugValue* current = &untokenizedValue;
+
+        for (AZ::OSString& token : tokens)
+        {
+            current->m_elements.push_back();
+            current = &(current->m_elements.back());
+            current->m_name = token;
+            current->m_type = LUA_TTABLE;
+        }
+
+        current->m_type = sourceValue.m_type;
+        current->m_value = sourceValue.m_value;
+
+        // If any hierarchy was passed in with the sourceValue, make sure it is accounted for
+        // in the last element of our new hierarchy
+        if (sourceValue.m_elements.size() > 0)
+        {
+            current->m_elements = sourceValue.m_elements;
+        }
+
+        value = &untokenizedValue;
+    }
+
+    const char* name = value->m_name.c_str();
+    size_t nameLen = value->m_name.length();
     if (nameLen == 0)
     {
         return false;
@@ -1495,11 +1534,9 @@ ScriptContextDebug::SetValue(const DebugValue& value)
         }
     }
 
-    WriteValue(value, name, localIndex, -1, -1);
+    WriteValue(*value, name, localIndex, -1, -1);
 
     return true;
 }
 
 #endif // #if !defined(AZCORE_EXCLUDE_LUA)
-
-#endif // #ifndef AZ_UNITY_BUILD

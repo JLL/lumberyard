@@ -24,23 +24,25 @@ def build(bld):
         copyright_org        = 'Amazon-CryTek',
         file_list            = 'audioimplwwise.waf_files',
         platforms            = ['win', 'android', 'darwin', 'ios', 'appletv'],
-        configurations       = ['debug', 'debug_test', 'profile', 'profile_test', 'performance', 'release'],
+        configurations       = ['all'],
+        client_only          = True,
         pch                  = 'StdAfx.cpp',
         use                  = ['AzCore'],
-        uselib               = ['WWISE'],
+        uselib               = ['WWISELTX'],
         includes             = ['.',
-                                '../../Common'],
+                                '../../Common',
+                                bld.Path('Code/CryEngine/CryCommon')
+                               ],
+        defines              = ['USE_CRY_NEW_AND_DELETE'],
+
+        # Platform Roots
+        platform_roots  = [bld.PlatformRoot('Platform', export_includes=False)],
+
+        # Complier Specific
+        msvc_cxxflags        = ['/wd4819'],
 
         # Platform Specific
-        win_cxxflags         = ['/wd4819'],
-        win_lib              = ['Ole32', 'dxguid', 'ws2_32', 'Dsound', 'XINPUT9_1_0', 'Msacm32'],
-
-       
-       
-       
-
-       
-       
+        win_lib              = ['Ole32', 'OleAut32', 'dxguid', 'ws2_32', 'XInput', 'Winmm', 'DInput8', 'DSound'],
 
         ios_lib              = ['AkAACDecoder'],
         ios_framework        = ['AVFoundation', 'AudioToolbox', 'CoreAudio'],
@@ -52,6 +54,8 @@ def build(bld):
         darwin_x64_framework = ['AVFoundation', 'AudioToolbox', 'CoreAudio'],
 
         android_lib          = ['OpenSLES'],
+
+        win_x64_clang_cxxflags = ['-Wno-deprecated-declarations'], # Wwise calls deprecated Windows functions
 
         # Testing
         test_all_file_list   = ['audioimplwwise_test.waf_files'],

@@ -12,6 +12,7 @@
 #pragma once
 
 #include "AzCore/Outcome/Internal/OutcomeStorage.h"
+#include "AzCore/RTTI/TypeInfo.h"
 
 namespace AZ
 {
@@ -83,6 +84,8 @@ namespace AZ
     class Outcome
     {
     public:
+        AZ_TYPE_INFO(Outcome, "{C1DB96E5-922A-4387-B658-B4BE7FB94EA0}", ValueT, ErrorT)
+        
         using ValueType = ValueT;
         using ErrorType = ErrorT;
 
@@ -91,32 +94,29 @@ namespace AZ
         using FailureType = FailureValue<ErrorType>;
 
     public:
-        //! Default construction is not allowed; Outcome must be either in success state or failure state
-        Outcome() = delete;
+        /**
+        Default construction is only allowed to support generic interactions with Outcome objects of all template argumetns; user
+        Outcome must be either in success state or failure state
+        */
+        AZ_FORCE_INLINE Outcome();
 
         //! Constructs successful outcome, where value is copy-constructed.
         AZ_FORCE_INLINE Outcome(const SuccessType& success);
 
-#ifdef AZ_HAS_RVALUE_REFS
         //! Constructs successful outcome, where value is move-constructed.
         AZ_FORCE_INLINE Outcome(SuccessType&& success);
-#endif // AZ_HAS_RVALUE_REFS
 
         //! Constructs failed outcome, where error is copy-constructed.
         AZ_FORCE_INLINE Outcome(const FailureType& failure);
 
-#ifdef AZ_HAS_RVALUE_REFS
         //! Constructs failed outcome, where error is move-constructed.
         AZ_FORCE_INLINE Outcome(FailureType&& failure);
-#endif // AZ_HAS_RVALUE_REFS
 
         //! Copy constructor.
         AZ_FORCE_INLINE Outcome(const Outcome& other);
 
-#ifdef AZ_HAS_RVALUE_REFS
         //! Move constructor.
         AZ_FORCE_INLINE Outcome(Outcome&& other);
-#endif // AZ_HAS_RVALUE_REFS
 
         AZ_FORCE_INLINE ~Outcome();
 
@@ -129,7 +129,6 @@ namespace AZ
         //! Copy error into outcome. Outcome is now failed.
         AZ_FORCE_INLINE Outcome& operator=(const FailureType& failure);
 
-#ifdef AZ_HAS_RVALUE_REFS
         //! Move-assignment from other outcome.
         AZ_FORCE_INLINE Outcome& operator=(Outcome&& other);
 
@@ -138,7 +137,6 @@ namespace AZ
 
         //! Move error into outcome. Outcome is now failed.
         AZ_FORCE_INLINE Outcome& operator=(FailureType&& failure);
-#endif // AZ_HAS_RVALUE_REFS
 
         //! Returns whether outcome was a success, containing a valid value.
         AZ_FORCE_INLINE bool IsSuccess() const;
@@ -156,20 +154,13 @@ namespace AZ
         //! Note that outcome's value may have its contents stolen,
         //! rendering it invalid for further access.
         //! Behavior is undefined if outcome was a failure.
-#ifdef AZ_HAS_RVALUE_REFS
         template <class Value_Type = ValueType, class = Internal::enable_if_not_void<Value_Type> >
         AZ_FORCE_INLINE Value_Type && TakeValue();
-#endif // AZ_HAS_RVALUE_REFS
 
         //! Returns value from successful outcome.
         //! defaultValue is returned if outcome was a failure.
-#ifdef AZ_HAS_RVALUE_REFS
         template <class U, class Value_Type = ValueType, class = Internal::enable_if_not_void<Value_Type> >
         AZ_FORCE_INLINE Value_Type GetValueOr(U&& defaultValue) const;
-#else
-        template <class Value_Type = ValueType, class = Internal::enable_if_not_void<Value_Type> >
-        AZ_FORCE_INLINE Value_Type GetValueOr(const ValueType& defaultValue) const;
-#endif // AZ_HAS_RVALUE_REFS
 
         //! Returns error for failed outcome.
         //! Behavior is undefined if outcome was a success.
@@ -183,13 +174,10 @@ namespace AZ
         //! Note that outcome's error may have its contents stolen,
         //! rendering it invalid for further access.
         //! Behavior is undefined if outcome was a success.
-#ifdef AZ_HAS_RVALUE_REFS
         template <class Error_Type = ErrorType, class = Internal::enable_if_not_void<Error_Type> >
         AZ_FORCE_INLINE Error_Type && TakeError();
-#endif // AZ_HAS_RVALUE_REFS
 
     private:
-
         //! Return m_success  as a SuccessType.
         //! Behavior is undefined if outcome was a failure.
         SuccessType& GetSuccess();
@@ -230,21 +218,12 @@ namespace AZ
     //////////////////////////////////////////////////////////////////////////
     // Success
 
-#ifdef AZ_HAS_RVALUE_REFS
     /**
      * Used to return a success case in a function returning an AZ::Outcome<ValueT, ...>.
      * rhs is a universal reference: can either copy or move
      */
     template <class ValueT, class = Internal::enable_if_not_void<ValueT> >
     inline SuccessValue<ValueT> Success(ValueT&& rhs);
-#else // AZ_HAS_RVALUE_REFS
-      /**
-       * Used to return a success case in a function returning an AZ::Outcome<ValueT, ...>.
-       * Moving is disallowed, so we must copy rhs.
-       */
-    template <class ValueT, class = Internal::enable_if_not_void<ValueT> >
-    inline SuccessValue<ValueT> Success(const ValueT& rhs);
-#endif // AZ_HAS_RVALUE_REFS
 
     /**
      * Used to return a success case in a function returning an AZ::Outcome<void, ...>.
@@ -254,21 +233,12 @@ namespace AZ
     //////////////////////////////////////////////////////////////////////////
     // Failure
 
-#ifdef AZ_HAS_RVALUE_REFS
     /**
      * Used to return a failure case in a function returning an AZ::Outcome<..., ValueT>.
      * rhs is a universal reference: can either copy or move
      */
     template <class ValueT, class = Internal::enable_if_not_void<ValueT> >
     inline FailureValue<ValueT> Failure(ValueT&& rhs);
-#else // AZ_HAS_RVALUE_REFS
-      /**
-       * Used to return a failure case in a function returning an AZ::Outcome<..., ValueT>.
-       * Moving is disallowed, so we must copy rhs.
-       */
-    template <class ValueT, class = Internal::enable_if_not_void<ValueT> >
-    inline FailureValue<ValueT> Failure(const ValueT& rhs);
-#endif // AZ_HAS_RVALUE_REFS
 
     /**
      * Used to return a failure case in a function returning an AZ::Outcome<..., void>.

@@ -22,7 +22,6 @@
 namespace AzQtComponents
 {
     // Slider parameters
-    const int sliderMarginToSpinBox = 4;
     const int sliderDefaultHeight = 35;
     const int sliderDefaultWidth = 192;
 
@@ -350,20 +349,20 @@ namespace AzQtComponents
             // use the same range for the slider as our spinbox
             if (m_hasCustomSliderRange)
             {
-                m_slider->setMinimum(m_customSliderMinValue);
-                m_slider->setMaximum(m_customSliderMaxValue);
+                m_slider->setMinimum(static_cast<int>(m_customSliderMinValue));
+                m_slider->setMaximum(static_cast<int>(m_customSliderMaxValue));
             }
             else
             {
-                m_slider->setMinimum(minimum());
-                m_slider->setMaximum(maximum());
+                m_slider->setMinimum(static_cast<int>(minimum()));
+                m_slider->setMaximum(static_cast<int>(maximum()));
             }
         }
         // Otherwise, we need to set a custom scale for our slider using 0 as the
         // minimum and a power of 10 based on our decimal precision as the maximum
         else
         {
-            int scaledMax = pow(10, (int)log10(GetSliderRange()) + decimals());
+            int scaledMax = static_cast<int>(pow(10, (int)log10(GetSliderRange()) + decimals()));
             m_slider->setMinimum(0);
             m_slider->setMaximum(scaledMax);
         }
@@ -524,7 +523,7 @@ namespace AzQtComponents
         // appropriate integer value for our custom slider scale
         else
         {
-            newVal = ((spinBoxValue - GetSliderMinimum()) / GetSliderRange()) * m_slider->maximum();
+            newVal = static_cast<int>((spinBoxValue - GetSliderMinimum()) / GetSliderRange()) * m_slider->maximum();
         }
 
         return newVal;
@@ -577,7 +576,7 @@ namespace AzQtComponents
 
         // Added a valueChanged signal with an int parameter to mirror the behavior
         // of the QSpinBox
-        QObject::connect(this, static_cast<void(StyledDoubleSpinBox::*)(double)>(&StyledDoubleSpinBox::valueChanged), [this](double val) {
+        QObject::connect(this, static_cast<void(StyledDoubleSpinBox::*)(double)>(&StyledDoubleSpinBox::valueChanged), this, [this](double val) {
             emit valueChanged((int)val);
         });
     }

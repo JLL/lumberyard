@@ -23,6 +23,12 @@ namespace AzFramework
 
     namespace AssetSystem
     {
+
+        BaseAssetProcessorMessage::BaseAssetProcessorMessage(bool requireFencing /*= false*/)
+            :m_requireFencing(requireFencing)
+        {
+        }
+
         //---------------------------------------------------------------------
         void BaseAssetProcessorMessage::Reflect(AZ::ReflectContext* context)
         {
@@ -30,13 +36,14 @@ namespace AzFramework
             if (serialize)
             {
                 serialize->Class<BaseAssetProcessorMessage>()
-                    ->SerializerForEmptyClass();
+                    ->Version(1)
+                    ->Field("RequireFencing", &BaseAssetProcessorMessage::m_requireFencing);
             }
         }
 
-        bool BaseAssetProcessorMessage::RequireFencing()
+        bool BaseAssetProcessorMessage::RequireFencing() const
         {
-            return false;
+            return m_requireFencing;
         }
 
         //---------------------------------------------------------------------
@@ -77,7 +84,7 @@ namespace AzFramework
 
         unsigned int RequestPing::MessageType()
         {
-            return AZ_CRC("AssetSystem::RequestPing", 0xa6124cfb); 
+            return AZ_CRC("AssetSystem::RequestPing", 0xa6124cfb);
         }
 
         unsigned int RequestPing::GetMessageType() const
@@ -107,16 +114,18 @@ namespace AzFramework
         }
 
         //---------------------------------------------------------------------
-        RequestAssetStatus::RequestAssetStatus(const char* sourceData, bool isStatusRequest)
-            : m_searchTerm(sourceData)
+        RequestAssetStatus::RequestAssetStatus(const char* sourceData, bool isStatusRequest, bool requireFencing /*= true*/)
+            : BaseAssetProcessorMessage(requireFencing)
+            , m_searchTerm(sourceData)
             , m_isStatusRequest(isStatusRequest)
         {
             AZ_Assert(sourceData, "Invalid source data for RequestAssetStatus");
         }
 
-        bool RequestAssetStatus::RequireFencing()
+
+        RequestAssetStatus::RequestAssetStatus(bool requireFencing /*= true*/)
+            :BaseAssetProcessorMessage(requireFencing)
         {
-            return true;
         }
 
         // these share the same message type since they're request and response.
@@ -371,6 +380,63 @@ namespace AzFramework
         }
 
         //---------------------------------------------------------------------
+        AssetInfoRequest::AssetInfoRequest(const AZ::Data::AssetId& assetId)
+            : m_assetId(assetId)
+        {
+        }
+
+        AssetInfoRequest::AssetInfoRequest(const char* assetPath)
+            : m_assetPath(assetPath)
+        {
+        }
+
+        unsigned int AssetInfoRequest::MessageType()
+        {
+            static unsigned int messageType = AZ_CRC("AssetProcessor::AssetInfoRequest", 0xfe3e020a);
+            return messageType;
+        }
+
+        unsigned int AssetInfoRequest::GetMessageType() const
+        {
+            return MessageType();
+        }
+
+        void AssetInfoRequest::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<AssetInfoRequest, BaseAssetProcessorMessage>()
+                    ->Version(1)
+                    ->Field("AssetId", &AssetInfoRequest::m_assetId)
+                    ->Field("AssetPath", &AssetInfoRequest::m_assetPath);
+            }
+        }
+
+        //---------------------------------------------------------------------
+        AssetInfoResponse::AssetInfoResponse(const AZ::Data::AssetInfo& assetInfo)
+            : m_assetInfo(assetInfo)
+        {
+        }
+
+        unsigned int AssetInfoResponse::GetMessageType() const
+        {
+            return AssetInfoRequest::MessageType();
+        }
+
+        void AssetInfoResponse::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<AssetInfoResponse, BaseAssetProcessorMessage>()
+                    ->Version(1)
+                    ->Field("Found", &AssetInfoResponse::m_found)
+                    ->Field("AssetInfo", &AssetInfoResponse::m_assetInfo);
+            }
+        }
+
+        //-----------------------------------------------------------------------------
         RegisterSourceAssetRequest::RegisterSourceAssetRequest(const AZ::Data::AssetType& assetType, const char* assetFileFilter)
             : m_assetType(assetType),
             m_assetFileFilter(assetFileFilter)
@@ -447,8 +513,32 @@ namespace AzFramework
             auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<ShowAssetProcessorRequest, BaseAssetProcessorMessage>()
-                    ->SerializerForEmptyClass();
+                serialize->Class<ShowAssetProcessorRequest>()
+                    ->SerializeWithNoData();
+            }
+        }
+
+        //---------------------------------------------------------------------
+
+        unsigned int ShowAssetInAssetProcessorRequest::MessageType()
+        {
+            static unsigned int messageType = AZ_CRC("AssetSystem::ShowAssetInAssetProcessor", 0x3c9d1be0);
+            return messageType;
+        }
+
+        unsigned int ShowAssetInAssetProcessorRequest::GetMessageType() const
+        {
+            return MessageType();
+        }
+
+        void ShowAssetInAssetProcessorRequest::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<ShowAssetInAssetProcessorRequest>()
+                    ->Version(1)
+                    ->Field("AssetPath", &ShowAssetInAssetProcessorRequest::m_assetPath);
             }
         }
 
@@ -576,7 +666,7 @@ namespace AzFramework
             AZ_Assert((data == nullptr && dataLength == 0) || (data && dataLength > 0), "FileReadResponse: data buffer and data length do not match");
             if (data && dataLength > 0)
             {
-                m_data.resize(dataLength);
+                m_data.resize_no_construct(dataLength);
                 memcpy(m_data.data(), data, dataLength);
             }
         }
@@ -605,7 +695,7 @@ namespace AzFramework
             AZ_Assert(fileHandle != AZ::IO::InvalidHandle, "FileWriteRequest: Invalid handle %u", fileHandle);
             if (data && dataLength > 0)
             {
-                m_data.resize(dataLength);
+                m_data.resize_no_construct(dataLength);
                 memcpy(m_data.data(), data, dataLength);
             }
         }
@@ -1390,6 +1480,62 @@ namespace AzFramework
             }
         }
 
+
+
+
+        //---------------------------------------------------------------------
+        unsigned int FileTreeRequest::MessageType()
+        {
+            static unsigned int messageType = AZ_CRC("AssetSystem::FileTree", 0x27019bb2);
+            return messageType;
+        }
+
+        unsigned int FileTreeRequest::GetMessageType() const
+        {
+            return MessageType();
+        }
+
+        void FileTreeRequest::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<FileTreeRequest, BaseAssetProcessorMessage>()
+                    ->Version(1);
+            }
+        }
+
+        //---------------------------------------------------------------------
+        FileTreeResponse::FileTreeResponse(AZ::u32 resultCode
+            , const FileList& fileList
+            , const FolderList& folderList)
+            : m_resultCode(resultCode)
+            , m_fileList(fileList)
+            , m_folderList(folderList)
+        {
+        }
+
+        unsigned int FileTreeResponse::GetMessageType() const
+        {
+            return FileTreeRequest::MessageType();
+        }
+
+        void FileTreeResponse::Reflect(AZ::ReflectContext* context)
+        {
+            auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
+            if (serialize)
+            {
+                serialize->Class<FileTreeResponse, BaseAssetProcessorMessage>()
+                    ->Version(1)
+                    ->Field("ResultCode", &FileTreeResponse::m_resultCode)
+                    ->Field("Files", &FileTreeResponse::m_fileList)
+                    ->Field("Folders", &FileTreeResponse::m_folderList);
+            }
+        }
+
+
+
+
         //---------------------------------------------------------------------------
         AssetNotificationMessage::AssetNotificationMessage(const AZ::OSString& data, NotificationType type, const AZ::Data::AssetType& assetType)
             : m_data(data)
@@ -1444,8 +1590,8 @@ namespace AzFramework
             auto serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<SaveAssetCatalogRequest, BaseAssetProcessorMessage>()
-                    ->SerializerForEmptyClass();
+                serialize->Class<SaveAssetCatalogRequest>()
+                    ->SerializeWithNoData();
             }
         }
 

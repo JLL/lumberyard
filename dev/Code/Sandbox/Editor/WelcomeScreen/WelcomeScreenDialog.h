@@ -58,8 +58,6 @@ private:
     News::ResourceManifest* m_manifest = nullptr;
     News::ArticleViewContainer* m_articleViewContainer = nullptr;
     bool m_waitingOnAsync = true;
-    bool m_closing = false;
-    int m_doneResult = 0;
     bool m_messageScrollReported = false;
 
     void RemoveLevelEntry(int index);
@@ -68,6 +66,8 @@ private:
     void OnShowContextMenu(const QPoint& point);
     void OnNewLevelBtnClicked(bool checked);
     void OnOpenLevelBtnClicked(bool checked);
+    void OnNewSliceBtnClicked(bool checked);
+    void OnOpenSliceBtnClicked(bool checked);
     void OnRecentLevelListItemClicked(const QModelIndex& index);
     void OnGettingStartedBtnClicked(bool checked);
     void OnTutorialsBtnClicked(bool checked);

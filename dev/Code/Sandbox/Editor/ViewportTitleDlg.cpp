@@ -14,7 +14,7 @@
 // Description : CViewportTitleDlg implementation file
 
 
-#include "stdafx.h"
+#include "StdAfx.h"
 #include "ViewportTitleDlg.h"
 #include "ViewPane.h"
 #include "DisplaySettings.h"
@@ -83,28 +83,38 @@ CViewportTitleDlg::CViewportTitleDlg(QWidget* pParent)
     LoadCustomPresets("AspectRatioPresets", "AspectRatioPreset", m_customAspectRatioPresets);
     LoadCustomPresets("ResPresets", "ResPreset", m_customResPresets);
 
+    const bool newViewportInteractionModelEnabled =
+        GetIEditor()->IsNewViewportInteractionModelEnabled();
+
+    m_ui->m_viewportSearch->setEnabled(!newViewportInteractionModelEnabled);
+    m_ui->m_viewportSearch->setVisible(!newViewportInteractionModelEnabled);
+
     OnInitDialog();
-    m_ui->m_viewportSearch->setMenu(InitializeViewportSearchMenu());
-    connect(m_ui->m_viewportSearch, &AzQtComponents::SearchLineEdit::menuEntryClicked, this, &CViewportTitleDlg::OnViewportSearchButtonClicked);
-    connect(m_ui->m_viewportSearch, &AzQtComponents::SearchLineEdit::returnPressed, this, &CViewportTitleDlg::OnSearchTermChange);
+
+    if (!newViewportInteractionModelEnabled)
+    {
+        m_ui->m_viewportSearch->setMenu(InitializeViewportSearchMenu());
+        connect(m_ui->m_viewportSearch, &AzQtComponents::SearchLineEdit::menuEntryClicked, this, &CViewportTitleDlg::OnViewportSearchButtonClicked);
+        connect(m_ui->m_viewportSearch, &AzQtComponents::SearchLineEdit::returnPressed, this, &CViewportTitleDlg::OnSearchTermChange);
+
+        auto clearAction = new QAction(this);
+        clearAction->setIcon(QIcon(":/stylesheet/img/16x16/lineedit-clear.png"));
+        clearAction->setVisible(!m_ui->m_viewportSearch->text().isEmpty());
+        m_ui->m_viewportSearch->addAction(clearAction, QLineEdit::TrailingPosition);
+
+        connect(clearAction, &QAction::triggered, this, &CViewportTitleDlg::OnViewportSearchClear);
+        connect(m_ui->m_viewportSearch, &QLineEdit::textChanged, this, [clearAction, this] {
+            clearAction->setVisible(!m_ui->m_viewportSearch->text().isEmpty());
+        });
+
+        m_ui->m_viewportSearch->setFixedWidth(190);
+    }
 
     connect(m_ui->m_fovLabel, &QWidget::customContextMenuRequested, this, &CViewportTitleDlg::PopUpFOVMenu);
     connect(m_ui->m_fovStaticCtrl, &QWidget::customContextMenuRequested, this, &CViewportTitleDlg::PopUpFOVMenu);
     connect(m_ui->m_ratioStaticCtrl, &QWidget::customContextMenuRequested, this, &CViewportTitleDlg::PopUpAspectMenu);
     connect(m_ui->m_ratioLabel, &QWidget::customContextMenuRequested, this, &CViewportTitleDlg::PopUpAspectMenu);
     connect(m_ui->m_sizeStaticCtrl, &QWidget::customContextMenuRequested, this, &CViewportTitleDlg::PopUpResolutionMenu);
-
-    auto clearAction = new QAction(this);
-    clearAction->setIcon(QIcon(":/stylesheet/img/16x16/lineedit-clear.png"));
-    clearAction->setVisible(!m_ui->m_viewportSearch->text().isEmpty());
-    m_ui->m_viewportSearch->addAction(clearAction, QLineEdit::TrailingPosition);
-
-    connect(clearAction, &QAction::triggered, this, &CViewportTitleDlg::OnViewportSearchClear);
-    connect(m_ui->m_viewportSearch, &QLineEdit::textChanged, [clearAction, this] {
-            clearAction->setVisible(!m_ui->m_viewportSearch->text().isEmpty());
-        });
-
-    m_ui->m_viewportSearch->setFixedWidth(190);
 }
 
 CViewportTitleDlg::~CViewportTitleDlg()
@@ -226,7 +236,11 @@ void CViewportTitleDlg::SetTitle(const QString& title)
 {
     m_title = title;
     m_ui->m_titleBtn->setText(m_title);
-    m_ui->m_viewportSearch->setVisible(title == QLatin1String("Perspective"));
+
+    const bool searchVisible =
+        title == QLatin1String("Perspective") && !GetIEditor()->IsNewViewportInteractionModelEnabled();
+
+    m_ui->m_viewportSearch->setVisible(searchVisible);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -271,7 +285,7 @@ void CViewportTitleDlg::AddFOVMenus(QMenu* menu, std::function<void(float)> call
     {
         const float fov = fovs[i];
         QAction* action = menu->addAction(QString::number(fov));
-        connect(action, &QAction::triggered, [fov, callback](){ callback(fov); });
+        connect(action, &QAction::triggered, action, [fov, callback](){ callback(fov); });
     }
 
     menu->addSeparator();
@@ -293,7 +307,7 @@ void CViewportTitleDlg::AddFOVMenus(QMenu* menu, std::function<void(float)> call
                 fov = std::max(1.0f, f);
                 fov = std::min(120.0f, f);
                 QAction* action = menu->addAction(customPresets[i]);
-                connect(action, &QAction::triggered, [fov, callback](){ callback(fov); });
+                connect(action, &QAction::triggered, action, [fov, callback](){ callback(fov); });
             }
         }
     }
@@ -355,7 +369,7 @@ void CViewportTitleDlg::AddAspectRatioMenus(QMenu* menu, std::function<void(int,
         int width = ratios[i].first;
         int height = ratios[i].second;
         QAction* action = menu->addAction(QString("%1:%2").arg(width).arg(height));
-        connect(action, &QAction::triggered, [width, height, callback]() {callback(width, height); });
+        connect(action, &QAction::triggered, action, [width, height, callback]() {callback(width, height); });
     }
 
     menu->addSeparator();
@@ -377,7 +391,7 @@ void CViewportTitleDlg::AddAspectRatioMenus(QMenu* menu, std::function<void(int,
             unsigned int height = matches.captured(2).toInt(&ok);
             Q_ASSERT(ok);
             QAction* action = menu->addAction(customPresets[i]);
-            connect(action, &QAction::triggered, [width, height, callback]() {callback(width, height); });
+            connect(action, &QAction::triggered, action, [width, height, callback]() {callback(width, height); });
         }
     }
 }
@@ -446,7 +460,7 @@ void CViewportTitleDlg::AddResolutionMenus(QMenu* menu, std::function<void(int, 
         const int height = resolutions[i].height;
         const QString text = QString::fromLatin1("%1 x %2").arg(width).arg(height);
         QAction* action = menu->addAction(text);
-        connect(action, &QAction::triggered, [width, height, callback](){ callback(width, height); });
+        connect(action, &QAction::triggered, action, [width, height, callback](){ callback(width, height); });
     }
 
     menu->addSeparator();
@@ -468,7 +482,7 @@ void CViewportTitleDlg::AddResolutionMenus(QMenu* menu, std::function<void(int, 
             int height = matches.captured(2).toInt(&ok);
             Q_ASSERT(ok);
             QAction* action = menu->addAction(customPresets[i]);
-            connect(action, &QAction::triggered, [width, height, callback](){ callback(width, height); });
+            connect(action, &QAction::triggered, action, [width, height, callback](){ callback(width, height); });
         }
     }
 }
@@ -528,8 +542,10 @@ void CViewportTitleDlg::OnViewportSizeChanged(int width, int height)
 void CViewportTitleDlg::OnViewportFOVChanged(float fov)
 {
     const float degFOV = RAD2DEG(fov);
-
-    m_ui->m_fovStaticCtrl->setText(QString::fromLatin1("%1%2").arg(qRound(degFOV)).arg(QString(QByteArray::fromPercentEncoding("%C2%B0"))));
+    if (m_ui &&  m_ui->m_fovStaticCtrl)
+    {
+        m_ui->m_fovStaticCtrl->setText(QString::fromLatin1("%1%2").arg(qRound(degFOV)).arg(QString(QByteArray::fromPercentEncoding("%C2%B0"))));
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////

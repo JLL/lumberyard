@@ -33,6 +33,8 @@ namespace GraphCanvas
 
     SlotConnectionPin::SlotConnectionPin(const AZ::EntityId& slotId)
         : m_slotId(slotId)
+        , m_connectionType(ConnectionType::CT_Invalid)
+        , m_trackClick(false)
     {
         setFlags(ItemSendsScenePositionChanges);
         setZValue(1);
@@ -61,24 +63,22 @@ namespace GraphCanvas
         RootGraphicsItemRequestBus::EventResult(stateController, nodeId, &RootGraphicsItemRequests::GetDisplayStateStateController);
 
         m_nodeDisplayStateStateSetter.AddStateController(stateController);
+        
+        SlotRequestBus::EventResult(m_connectionType, GetEntityId(), &SlotRequests::GetConnectionType);
     }
-	
-	void SlotConnectionPin::RefreshStyle()
+
+    void SlotConnectionPin::RefreshStyle()
     {
         OnRefreshStyle();
         setCacheMode(QGraphicsItem::CacheMode::ItemCoordinateCache);
     }
-	
-	QPointF SlotConnectionPin::GetConnectionPoint() const
+
+    QPointF SlotConnectionPin::GetConnectionPoint() const
     {
         qreal padding = m_style.GetAttribute(Styling::Attribute::Padding, 2.0);
-
-        ConnectionType connectionType = ConnectionType::CT_Invalid;
-        SlotRequestBus::EventResult(connectionType, GetEntityId(), &SlotRequests::GetConnectionType);
-
         QPointF localPoint = boundingRect().center();
 
-        switch (connectionType)
+        switch (m_connectionType)
         {
         case ConnectionType::CT_Input:
             localPoint.setX(boundingRect().left() + padding);
@@ -93,9 +93,26 @@ namespace GraphCanvas
         return mapToScene(localPoint);
     }
 
+    QPointF SlotConnectionPin::GetJutDirection() const
+    {
+        switch (m_connectionType)
+        {
+        case ConnectionType::CT_Input:
+            return QPointF(-1, 0);
+        case ConnectionType::CT_Output:
+            return QPointF(1, 0);
+        default:
+            return QPointF(0, 0);
+        }
+    }
+
+    void SlotConnectionPin::OnSlotClicked()
+    {
+    }
+
     QRectF SlotConnectionPin::boundingRect() const
     {
-        return{ { 0, 0 }, geometry().size() };
+        return{ {0, 0} , geometry().size() };
     }
 
     void SlotConnectionPin::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget /*= nullptr*/)
@@ -125,7 +142,7 @@ namespace GraphCanvas
             if (keyEvent->key() == Qt::Key::Key_Alt)
             {
                 SlotRequestBus::Event(m_slotId, &SlotRequests::SetConnectionDisplayState, RootGraphicsItemDisplayState::Deletion);
-            }            
+            }
         }
     }
 
@@ -182,37 +199,46 @@ namespace GraphCanvas
             }
             else
             {
-                m_nodeDisplayStateStateSetter.ReleaseState();
-
-                AZ::EntityId nodeId;
-                SlotRequestBus::EventResult(nodeId, m_slotId, &SlotRequests::GetNode);
-
-                AZ::EntityId sceneId;
-                SceneMemberRequestBus::EventResult(sceneId, nodeId, &SceneMemberRequests::GetScene);
-
-                SceneRequestBus::Event(sceneId, &SceneRequestBus::Events::ClearSelection);
-                SlotRequestBus::Event(m_slotId, &SlotRequests::CreateConnection);
+                m_trackClick = true;
             }
 
             return;
         }
-
+        
         SlotLayoutItem::mousePressEvent(event);
     }
-	
-    void SlotConnectionPin::contextMenuEvent(QGraphicsSceneContextMenuEvent* contextMenuEvent)
+
+    void SlotConnectionPin::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     {
-        contextMenuEvent->ignore();
-        AZ::EntityId sceneId;
-        SceneMemberRequestBus::EventResult(sceneId, GetEntityId(), &SceneMemberRequests::GetScene);
-        SceneUIRequestBus::Event(sceneId, &SceneUIRequests::OnSlotContextMenuEvent, GetEntityId(), contextMenuEvent);
+        if (m_trackClick)
+        {
+            OnSlotClicked();
+        }
+
+        m_trackClick = false;
+        SlotLayoutItem::mouseReleaseEvent(event);
     }
-	
-	void SlotConnectionPin::setGeometry(const QRectF& rect)
+
+    void SlotConnectionPin::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
+    {
+        if (m_trackClick)
+        {
+            if (!sceneBoundingRect().contains(event->scenePos()))
+            {
+                m_trackClick = false;
+                HandleNewConnection();
+            }
+        }
+
+        SlotLayoutItem::mouseMoveEvent(event);
+    }
+
+    void SlotConnectionPin::setGeometry(const QRectF& rect)
     {
         prepareGeometryChange();
         QGraphicsLayoutItem::setGeometry(rect);
         setPos(rect.topLeft());
+        updateGeometry();
     }
 
     QSizeF SlotConnectionPin::sizeHint(Qt::SizeHint which, const QSizeF& constraint) const
@@ -233,6 +259,20 @@ namespace GraphCanvas
         default:
             return QSizeF();
         }
+    }
+
+    void SlotConnectionPin::HandleNewConnection()
+    {
+        m_nodeDisplayStateStateSetter.ReleaseState();
+
+        AZ::EntityId nodeId;
+        SlotRequestBus::EventResult(nodeId, m_slotId, &SlotRequests::GetNode);
+
+        AZ::EntityId sceneId;
+        SceneMemberRequestBus::EventResult(sceneId, nodeId, &SceneMemberRequests::GetScene);
+
+        SceneRequestBus::Event(sceneId, &SceneRequestBus::Events::ClearSelection);
+        SlotRequestBus::Event(m_slotId, &SlotRequests::DisplayConnection);
     }
 
     void SlotConnectionPin::DrawConnectionPin(QPainter* painter, QRectF drawRect, bool isConnected)

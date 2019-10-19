@@ -16,14 +16,16 @@
 #include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include "ComponentDemoWidget.h"
 
+#include <AzCore/Memory/SystemAllocator.h>
+
 #include <QApplication>
 #include <QMainWindow>
-#include <QMenuBar>
-#include <QAction>
 #include <QSettings>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
+#else
+#include <iostream>
 #endif
 
 const QString g_ui_1_0_SettingKey = QStringLiteral("useUI_1_0");
@@ -34,18 +36,29 @@ static void LogToDebug(QtMsgType Type, const QMessageLogContext& Context, const 
     OutputDebugStringW(L"Qt: ");
     OutputDebugStringW(reinterpret_cast<const wchar_t*>(message.utf16()));
     OutputDebugStringW(L"\n");
+#else
+    std::wcerr << L"Qt: " << message.toStdWString() << std::endl;
 #endif
 }
 
 int main(int argv, char **argc)
 {
+    // Need to initialize AZ::SystemAllocator otherwise AzToolsFramework::Logging::LogLine can't be instantiated
+    if (!AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady())
+    {
+        AZ::AllocatorInstance<AZ::SystemAllocator>::Create();
+    }
+
     QApplication::setOrganizationName("Amazon");
     QApplication::setOrganizationDomain("amazon.com");
     QApplication::setApplicationName("LumberyardWidgetGallery");
 
     AzQtComponents::PrepareQtPaths();
 
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     qInstallMessageHandler(LogToDebug);
 
@@ -57,43 +70,32 @@ int main(int argv, char **argc)
     bool legacyUISetting = settings.value(g_ui_1_0_SettingKey, false).toBool();
     styleManager.SwitchUI(&app, legacyUISetting);
 
-    auto wrapper = new AzQtComponents::WindowDecorationWrapper(AzQtComponents::WindowDecorationWrapper::OptionAutoAttach);
-    auto widget = new ComponentDemoWidget(wrapper);
+    auto wrapper = new AzQtComponents::WindowDecorationWrapper(AzQtComponents::WindowDecorationWrapper::OptionNone);
+    auto widget = new ComponentDemoWidget(legacyUISetting, wrapper);
+    wrapper->setGuest(widget);
     widget->resize(550, 900);
     widget->show();
 
     wrapper->enableSaveRestoreGeometry("windowGeometry");
     wrapper->restoreGeometryFromSettings();
-    //wrapper->show();
 
-    auto fileMenu = widget->menuBar()->addMenu("&File");
-
-    auto styleToggle = fileMenu->addAction("Enable UI 1.0");
-    styleToggle->setShortcut(QKeySequence("Ctrl+T"));
-    styleToggle->setCheckable(true);
-    styleToggle->setChecked(legacyUISetting);
-    QObject::connect(styleToggle, &QAction::toggled, &styleManager, [&styleManager, &app, &settings](bool checked) {
+    QObject::connect(widget, &ComponentDemoWidget::styleChanged, &styleManager, [&styleManager, &app, &settings](bool checked) {
         styleManager.SwitchUI(&app, checked);
 
         settings.setValue(g_ui_1_0_SettingKey, checked);
         settings.sync();
     });
 
-    QAction* refreshAction = fileMenu->addAction("Refresh Stylesheet");
-    QObject::connect(refreshAction, &QAction::triggered, &styleManager, [&styleManager, &app]() {
+    QObject::connect(widget, &ComponentDemoWidget::refreshStyle, &styleManager, [&styleManager, &app]() {
         styleManager.Refresh(&app);
     });
-    fileMenu->addSeparator();
-
-#if defined(Q_OS_MACOS)
-    QAction* quitAction = fileMenu->addAction("&Quit");
-#else
-    QAction* quitAction = fileMenu->addAction("E&xit");
-#endif
-    quitAction->setShortcut(QKeySequence::Quit);
-    QObject::connect(quitAction, &QAction::triggered, widget, &QMainWindow::close);
 
     app.setQuitOnLastWindowClosed(true);
 
     app.exec();
+
+    if (AZ::AllocatorInstance<AZ::SystemAllocator>::IsReady())
+    {
+        AZ::AllocatorInstance<AZ::SystemAllocator>::Destroy();
+    }
 }

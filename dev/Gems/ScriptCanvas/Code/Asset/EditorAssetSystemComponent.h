@@ -14,14 +14,15 @@
 
 #include <AzCore/Component/Component.h>
 
-#include "EditorAssetRegistry.h"
-#include "RuntimeAssetRegistry.h"
+#include "EditorAssetConversionBus.h"
 #include <AzToolsFramework/AssetBrowser/AssetBrowserBus.h>
+#include <ScriptCanvas/Asset/AssetRegistry.h>
 
 namespace ScriptCanvasEditor
 {
     class EditorAssetSystemComponent
         : public AZ::Component
+        , public EditorAssetConversionBus::Handler
         , private AzToolsFramework::AssetBrowser::AssetBrowserInteractionNotificationBus::Handler
     {
     public:
@@ -41,18 +42,22 @@ namespace ScriptCanvasEditor
         void Activate() override;
         void Deactivate() override;
         ////////////////////////////////////////////////////////////////////////
-
-
+        
         ////////////////////////////////////////////////////////////////////////
         // AzToolsFramework::AssetBrowser::AssetBrowserInteractionNotificationBus::Handler overrides
         void AddSourceFileOpeners(const char* fullSourceFileName, const AZ::Uuid& sourceUuid, AzToolsFramework::AssetBrowser::SourceFileOpenerList& openers) override;
         ////////////////////////////////////////////////////////////////////////
 
-        EditorAssetRegistry& GetAssetRegistry();
+        //////////////////////////////////////////////////////////////////////////
+        // EditorAssetConversionBus::Handler overrides
+        AZ::Outcome<AZ::Data::Asset<ScriptCanvas::RuntimeAsset>, AZStd::string> CreateRuntimeAsset(AZStd::string_view graphPath) override;
+        //////////////////////////////////////////////////////////////////////////
+        
+        ScriptCanvas::AssetRegistry& GetAssetRegistry();
 
     private:
         EditorAssetSystemComponent(const EditorAssetSystemComponent&) = delete;
 
-        EditorAssetRegistry m_editorAssetRegistry;
+        ScriptCanvas::AssetRegistry m_editorAssetRegistry;
     };
 }

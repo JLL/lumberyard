@@ -21,10 +21,16 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+
+#ifdef DEPRECATED_QML_SUPPORT
 #include <QQmlEngine>
+#endif
+
 #include <QDebug>
 #include "../Plugins/EditorUI_QT/UIFactory.h"
 #include <AzQtComponents/Components/LumberyardStylesheet.h>
+#include <AzQtComponents/Components/Titlebar.h>
+#include <AzQtComponents/Components/WindowDecorationWrapper.h>
 #include <AzQtComponents/Utilities/QtPluginPaths.h>
 #include <QToolBar>
 #include <QTimer>
@@ -32,6 +38,7 @@
 
 #if defined(AZ_PLATFORM_WINDOWS)
 #include <QtGui/qpa/qplatformnativeinterface.h>
+#include <QtGui/private/qhighdpiscaling_p.h>
 #endif
 
 #include "Material/MaterialManager.h"
@@ -42,13 +49,11 @@
 #include <AzCore/UserSettings/UserSettings.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
 #include <AzCore/IO/SystemFile.h>
-#include <AzCore/Component/Entity.h>
-#include <AzToolsFramework/Thumbnails/ThumbnailerComponent.h>
-#include <AzToolsFramework/AssetBrowser/AssetBrowserComponent.h>
-#include <AzToolsFramework/MaterialBrowser/MaterialBrowserComponent.h>
+
+#include <AzToolsFramework/Metrics/LyEditorMetricsBus.h>
 
 #if defined(AZ_PLATFORM_WINDOWS)
-#   include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_win.h>
+#   include <AzFramework/Input/Buses/Notifications/RawInputNotificationBus_Platform.h>
 #endif // defined(AZ_PLATFORM_WINDOWS)
 
 enum
@@ -57,13 +62,18 @@ enum
     GameModeIdleFrequency = 0,
     EditorModeIdleFrequency = 1,
     InactiveModeFrequency = 10,
+    UninitializedFrequency = 9999,
 };
+
+#ifdef DEPRECATED_QML_SUPPORT
 
 // QML imports that go in the editor folder (relative to the project root)
 #define QML_IMPORT_USER_LIB_PATH "Editor/UI/qml"
 
 // QML Imports that are part of Qt (relative to the executable)
 #define QML_IMPORT_SYSTEM_LIB_PATH "qtlibs/qml"
+
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
 Q_LOGGING_CATEGORY(InputDebugging, "lumberyard.editor.input")
 
@@ -119,13 +129,19 @@ namespace
             {
                 case QEvent::Wheel:
                 {
-                    QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(e);
+                    auto wheelEvent = static_cast<QWheelEvent*>(e);
 
                     // make the wheel event fall through to windows underneath the mouse, even if they don't have focus
                     QWidget* widget = QApplication::widgetAt(wheelEvent->globalPos());
-                    if ((widget != nullptr) && (obj != widget))
+                    if (widget && obj != widget)
                     {
-                        return QApplication::instance()->sendEvent(widget, e);
+                        QPoint mappedPos = widget->mapFromGlobal(wheelEvent->globalPos());
+
+                        QWheelEvent wheelEventCopy(mappedPos, wheelEvent->globalPos(), wheelEvent->pixelDelta(),
+                            wheelEvent->angleDelta(), wheelEvent->delta(), wheelEvent->orientation(), wheelEvent->buttons(),
+                            wheelEvent->modifiers(), wheelEvent->phase(), wheelEvent->source());
+
+                        return QApplication::instance()->sendEvent(widget, &wheelEventCopy);
                     }
                 }
                 break;
@@ -156,9 +172,64 @@ namespace
                     }
                 }
                 break;
+
+                case QEvent::MouseButtonPress:
+                case QEvent::MouseButtonRelease:
+                case QEvent::MouseButtonDblClick:
+                case QEvent::MouseMove:
+                {
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+                    auto widget = qobject_cast<QWidget*>(obj);
+                    if (widget && widget->graphicsProxyWidget() != nullptr)
+                    {
+                        QMouseEvent* me = static_cast<QMouseEvent*>(e);
+                        QWidget* target = qApp->widgetAt(QCursor::pos());
+                        if (target)
+                        {
+                            QMouseEvent ev(me->type(), target->mapFromGlobal(QCursor::pos()), me->button(), me->buttons(), me->modifiers());
+                            qApp->notify(target, &ev);
+                            return true;
+                        }
+                    }
+#endif
+                    GuardMouseEventSelectionChangeMetrics(e);
+                }
+                break;
             }
 
             return false;
+        }
+
+    private:
+        bool m_mouseButtonWasDown = false;
+
+        void GuardMouseEventSelectionChangeMetrics(QEvent* e)
+        {
+            // Force the metrics collector to queue up any selection changed metrics until mouse release, so that we don't
+            // get flooded with multiple selection changed events when one, sent on mouse release, is enough.
+            if (e->type() == QEvent::MouseButtonPress)
+            {
+                if (!m_mouseButtonWasDown)
+                {
+                    AzToolsFramework::EditorMetricsEventsBus::Broadcast(&AzToolsFramework::EditorMetricsEventsBus::Events::BeginSelectionChange);
+                    m_mouseButtonWasDown = true;
+                }
+            }
+            else if (e->type() == QEvent::MouseButtonRelease)
+            {
+                // This is a tricky case. We don't want to send the end selection change event too early
+                // because there might be other things responding to the mouse release after this, and we want to
+                // block handling of the selection change events until we're entirely finished with the mouse press.
+                // So, queue the handling with a single shot timer, but then check the state of the mouse buttons
+                // to ensure that they haven't been pressed in between the release and the timer firing off.
+                QTimer::singleShot(0, this, [this]() {
+                    if (!QApplication::mouseButtons() && m_mouseButtonWasDown)
+                    {
+                        AzToolsFramework::EditorMetricsEventsBus::Broadcast(&AzToolsFramework::EditorMetricsEventsBus::Events::EndSelectionChange);
+                        m_mouseButtonWasDown = false;
+                    }
+                });
+            }
         }
     };
 
@@ -205,8 +276,9 @@ namespace Editor
         , m_inWinEventFilter(false)
         , m_stylesheet(new AzQtComponents::LumberyardStylesheet(this))
         , m_idleTimer(new QTimer(this))
-        , m_qtEntity(nullptr)
     {
+        m_idleTimer->setInterval(UninitializedFrequency);
+
         setWindowIcon(QIcon(":/Application/res/editor_icon.ico"));
 
         // set the default key store for our preferences:
@@ -216,9 +288,7 @@ namespace Editor
 
         connect(m_idleTimer, &QTimer::timeout, this, &EditorQtApplication::maybeProcessIdle);
 
-        connect(this, &QGuiApplication::applicationStateChanged, [this]() {
-            ResetIdleTimer(GetIEditor() ? GetIEditor()->IsInGameMode() : true);
-        });
+        connect(this, &QGuiApplication::applicationStateChanged, this, [this] { ResetIdleTimerInterval(PollState); });
         installEventFilter(this);
 
         // Disable our debugging input helpers by default
@@ -236,7 +306,10 @@ namespace Editor
 
         // install hooks and filters last and revoke them first
         InstallFilters();
+
+#ifdef DEPRECATED_QML_SUPPORT
         InitializeQML();
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
         // install this filter. It will be a parent of the application and cleaned up when it is cleaned up automically
         auto globalEventFilter = new GlobalEventFilter(this);
@@ -244,24 +317,6 @@ namespace Editor
 
         //Setup reusable dialogs
         UIFactory::Initialize();
-
-        InitQtEntity();
-    }
-
-    void EditorQtApplication::InitQtEntity()
-    {
-        AzToolsFramework::Thumbnailer::ThumbnailerComponent::CreateDescriptor();
-        AzToolsFramework::AssetBrowser::AssetBrowserComponent::CreateDescriptor();
-        AzToolsFramework::MaterialBrowser::MaterialBrowserComponent::CreateDescriptor();
-
-        m_qtEntity.reset(aznew AZ::Entity());
-
-        m_qtEntity->AddComponent(aznew AzToolsFramework::Thumbnailer::ThumbnailerComponent());
-        m_qtEntity->AddComponent(aznew AzToolsFramework::AssetBrowser::AssetBrowserComponent());
-        m_qtEntity->AddComponent(aznew AzToolsFramework::MaterialBrowser::MaterialBrowserComponent());
-
-        m_qtEntity->Init();
-        m_qtEntity->Activate();
     }
 
     void EditorQtApplication::LoadSettings() 
@@ -273,7 +328,19 @@ namespace Editor
         AZ::IO::FileIOBase::GetInstance()->ResolvePath("@user@/EditorUserSettings.xml", resolvedPath, AZ_MAX_PATH_LEN);
         m_localUserSettings.Load(resolvedPath, context);
         m_localUserSettings.Activate(AZ::UserSettings::CT_LOCAL);
+        AZ::UserSettingsOwnerRequestBus::Handler::BusConnect(AZ::UserSettings::CT_LOCAL);
         m_activatedLocalUserSettings = true;
+    }
+
+    void EditorQtApplication::UnloadSettings()
+    {
+        if (m_activatedLocalUserSettings)
+        {
+            SaveSettings();
+            m_localUserSettings.Deactivate();
+            AZ::UserSettingsOwnerRequestBus::Handler::BusDisconnect();
+            m_activatedLocalUserSettings = false;
+        }
     }
 
     void EditorQtApplication::SaveSettings()
@@ -283,11 +350,10 @@ namespace Editor
             AZ::SerializeContext* context;
             EBUS_EVENT_RESULT(context, AZ::ComponentApplicationBus, GetSerializeContext);
             AZ_Assert(context, "No serialize context");
+
             char resolvedPath[AZ_MAX_PATH_LEN];
             AZ::IO::FileIOBase::GetInstance()->ResolvePath("@user@/EditorUserSettings.xml", resolvedPath, AZ_ARRAY_SIZE(resolvedPath));
             m_localUserSettings.Save(resolvedPath, context);
-            m_localUserSettings.Deactivate();
-            m_activatedLocalUserSettings = false;
         }
     }
 
@@ -325,37 +391,60 @@ namespace Editor
 
     EditorQtApplication::~EditorQtApplication()
     {
-        GetIEditor()->UnregisterNotifyListener(this);
+        if (GetIEditor())
+        {
+            GetIEditor()->UnregisterNotifyListener(this);
+        }
 
         //Clean reusable dialogs
         UIFactory::Deinitialize();
 
+#ifdef DEPRECATED_QML_SUPPORT
         UninitializeQML();
+#endif // #ifdef DEPRECATED_QML_SUPPORT
+
         UninstallFilters();
 
         UninstallEditorTranslators();
     }
 
-#ifdef _DEBUG
+#ifdef AZ_DEBUG_BUILD
+    static QString objectParentsToString(QObject* obj)
+    {
+        QString result;
+        if (obj)
+        {
+            QDebug stream(&result);
+            QObject* p = obj->parent();
+            while (p)
+            {
+                stream << p << ":";
+                p = p->parent();
+            }
+        }
+        return result;
+    }
+
     bool EditorQtApplication::notify(QObject* receiver, QEvent* ev)
     {
+        /*
         QEvent::Type evType = ev->type();
         if (evType == QEvent::MouseButtonPress ||
-            evType == QEvent::KeyPress ||
-            evType == QEvent::Shortcut ||
-            evType == QEvent::ShortcutOverride ||
-            evType == QEvent::KeyPress ||
-            evType == QEvent::KeyRelease)
+                evType == QEvent::KeyPress ||
+                evType == QEvent::Shortcut ||
+                evType == QEvent::ShortcutOverride ||
+                evType == QEvent::KeyPress ||
+                evType == QEvent::KeyRelease)
         {
-            qCDebug(InputDebugging) << "Attempting to deliver" << evType << "to" << receiver << "; pre-accepted=" << ev->isAccepted();
+            qCDebug(InputDebugging) << "Attempting to deliver" << evType << "to" << receiver << "; receiver's parents=(" << objectParentsToString(receiver) << "); pre-accepted=" << ev->isAccepted();
             bool processed = QApplication::notify(receiver, ev);
-            qCDebug(InputDebugging) << "processed=" << processed << "; accepted=" << ev->isAccepted()
-                << "focusWidget=" << focusWidget();
+            qCDebug(InputDebugging) << "    processed=" << processed << "; accepted=" << ev->isAccepted()
+                                    << "focusWidget=" << focusWidget();
 
             if (QWidget::mouseGrabber() || QWidget::keyboardGrabber())
             {
                 qCDebug(InputDebugging) << "Mouse Grabber=" << QWidget::mouseGrabber()
-                    << "; Key Grabber=" << QWidget::keyboardGrabber();
+                                        << "; Key Grabber=" << QWidget::keyboardGrabber();
             }
 
             if (QWidget* popup = QApplication::activePopupWidget())
@@ -370,10 +459,11 @@ namespace Editor
 
             return processed;
         }
+        */
 
         return QApplication::notify(receiver, ev);
     }
-#endif
+#endif // #ifdef AZ_DEBUG_BUILD
 
     static QWindow* windowForWidget(const QWidget* widget)
     {
@@ -405,6 +495,35 @@ namespace Editor
             m_isMovingOrResizing = false;
         }
 
+        // Prevent the user from being able to move the window in game mode.
+        // This is done during the hit test phase to bypass the native window move messages. If the window
+        // decoration wrapper title bar contains the cursor, set the result to HTCLIENT instead of
+        // HTCAPTION.
+        if (msg->message == WM_NCHITTEST && GetIEditor()->IsInGameMode())
+        {
+            const LRESULT defWinProcResult = DefWindowProc(msg->hwnd, msg->message, msg->wParam, msg->lParam);
+            if (defWinProcResult == 1)
+            {
+                if (QWidget* widget = QWidget::find((WId)msg->hwnd))
+                {
+                    if (auto wrapper = qobject_cast<const AzQtComponents::WindowDecorationWrapper *>(widget))
+                    {
+                        AzQtComponents::TitleBar* titleBar = wrapper->titleBar();
+                        const short global_x = static_cast<short>(LOWORD(msg->lParam));
+                        const short global_y = static_cast<short>(HIWORD(msg->lParam));
+
+                        const QPoint globalPos = QHighDpi::fromNativePixels(QPoint(global_x, global_y), widget->window()->windowHandle());
+                        const QPoint local = titleBar->mapFromGlobal(globalPos);
+                        if (titleBar->draggableRect().contains(local) && !titleBar->isTopResizeArea(globalPos))
+                        {
+                            *result = HTCLIENT;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
         // Ensure that the Windows WM_INPUT messages get passed through to the AzFramework input system,
         // but only while in game mode so we don't accumulate raw input events before we start actually
         // ticking the input devices, otherwise the queued events will get sent when entering game mode.
@@ -414,8 +533,8 @@ namespace Editor
             const UINT rawInputHeaderSize = sizeof(RAWINPUTHEADER);
             GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, NULL, &rawInputSize, rawInputHeaderSize);
 
-            LPBYTE rawInputBytes = new BYTE[rawInputSize];
-            CRY_ASSERT(rawInputBytes);
+            AZStd::array<BYTE, sizeof(RAWINPUT)> rawInputBytesArray;
+            LPBYTE rawInputBytes = rawInputBytesArray.data();
 
             const UINT bytesCopied = GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, rawInputBytes, &rawInputSize, rawInputHeaderSize);
             CRY_ASSERT(bytesCopied == rawInputSize);
@@ -423,14 +542,15 @@ namespace Editor
             RAWINPUT* rawInput = (RAWINPUT*)rawInputBytes;
             CRY_ASSERT(rawInput);
 
-            AzFramework::RawInputNotificationBusWin::Broadcast(&AzFramework::RawInputNotificationsWin::OnRawInputEvent, *rawInput);
+            AzFramework::RawInputNotificationBusWindows::Broadcast(&AzFramework::RawInputNotificationsWindows::OnRawInputEvent, *rawInput);
+
             return false;
         }
         else if (msg->message == WM_DEVICECHANGE)
         {
             if (msg->wParam == 0x0007) // DBT_DEVNODES_CHANGED
             {
-                AzFramework::RawInputNotificationBusWin::Broadcast(&AzFramework::RawInputNotificationsWin::OnRawInputDeviceChangeEvent);
+                AzFramework::RawInputNotificationBusWindows::Broadcast(&AzFramework::RawInputNotificationsWindows::OnRawInputDeviceChangeEvent);
             }
             return true;
         }
@@ -452,12 +572,12 @@ namespace Editor
                 GetIEditor()->UnregisterNotifyListener(this);
             break;
 
-            case eNotify_OnEndGameMode:
-                ResetIdleTimer(false);
-            break;
-
             case eNotify_OnBeginGameMode:
-                ResetIdleTimer(true);
+                // GetIEditor()->IsInGameMode() Isn't reliable when called from within the notification handler
+                ResetIdleTimerInterval(GameMode);
+            break;
+            case eNotify_OnEndGameMode:
+                ResetIdleTimerInterval(EditorMode);
             break;
         }
     }
@@ -500,6 +620,7 @@ namespace Editor
         m_stylesheet->Refresh(this);
     }
 
+#ifdef DEPRECATED_QML_SUPPORT
     void EditorQtApplication::InitializeQML()
     {
         if (!m_qmlEngine)
@@ -532,6 +653,7 @@ namespace Editor
             m_qmlEngine = nullptr;
         }
     }
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
     void EditorQtApplication::setIsMovingOrResizing(bool isMovingOrResizing)
     {
@@ -558,10 +680,12 @@ namespace Editor
         return m_stylesheet->GetColorByName(name);
     }
 
+#ifdef DEPRECATED_QML_SUPPORT
     QQmlEngine* EditorQtApplication::GetQMLEngine() const
     {
         return m_qmlEngine;
     }
+#endif // #ifdef DEPRECATED_QML_SUPPORT
 
     EditorQtApplication* EditorQtApplication::instance()
     {
@@ -608,6 +732,11 @@ namespace Editor
     {
         if (enable)
         {
+            if (m_idleTimer->interval() == UninitializedFrequency)
+            {
+                ResetIdleTimerInterval();
+            }
+
             m_idleTimer->start();
         }
         else
@@ -616,24 +745,40 @@ namespace Editor
         }
     }
 
-    void EditorQtApplication::ResetIdleTimer(bool isInGameMode)
+    bool EditorQtApplication::OnIdleEnabled() const
     {
-        bool isActive = true;
-
-        int timerFrequency = InactiveModeFrequency;
-
-        if (isActive)
+        if (m_idleTimer->interval() == UninitializedFrequency)
         {
-            if (isInGameMode)
+            return false;
+        }
+
+        return m_idleTimer->isActive();
+    }
+
+    void EditorQtApplication::ResetIdleTimerInterval(TimerResetFlag flag)
+    {
+        bool isInGameMode = flag == GameMode;
+        if (flag == PollState)
+        {
+            isInGameMode = GetIEditor() ? GetIEditor()->IsInGameMode() : false;
+        }
+
+        // Game mode takes precedence over anything else
+        if (isInGameMode)
+        {
+            m_idleTimer->setInterval(GameModeIdleFrequency);
+        }
+        else
+        {
+            if (applicationState() & Qt::ApplicationActive)
             {
-                timerFrequency = GameModeIdleFrequency;
+                m_idleTimer->setInterval(EditorModeIdleFrequency);
             }
             else
             {
-                timerFrequency = EditorModeIdleFrequency;
+                m_idleTimer->setInterval(InactiveModeFrequency);
             }
         }
-        EnableOnIdle(isActive);
     }
 
     bool EditorQtApplication::eventFilter(QObject* object, QEvent* event)
@@ -652,6 +797,42 @@ namespace Editor
         case QEvent::KeyRelease:
             m_pressedKeys.remove(reinterpret_cast<QKeyEvent*>(event)->key());
             break;
+#ifdef AZ_PLATFORM_WINDOWS
+        case QEvent::Leave:
+        {
+            // if we receive a leave event for a toolbar on Windows
+            // check first whether we really left it. If we didn't: start checking
+            // for the tool bar under the mouse by timer to check when we really left.
+            // Synthesize a new leave event then. Workaround for LY-69788
+            auto toolBarAt = [](const QPoint& pos) -> QToolBar* {
+                QWidget* widget = qApp->widgetAt(pos);
+                while (widget != nullptr)
+                {
+                    if (QToolBar* tb = qobject_cast<QToolBar*>(widget))
+                    {
+                        return tb;
+                    }
+                    widget = widget->parentWidget();
+                }
+                return nullptr;
+            };
+            if (object == toolBarAt(QCursor::pos()))
+            {
+                QTimer* t = new QTimer(object);
+                t->start(100);
+                connect(t, &QTimer::timeout, object, [t, object, toolBarAt]() {
+                    if (object != toolBarAt(QCursor::pos()))
+                    {
+                        QEvent event(QEvent::Leave);
+                        qApp->sendEvent(object, &event);
+                        t->deleteLater();
+                    }
+                });
+                return true;
+            }
+            break;
+        }
+#endif
         default:
             break;
         }

@@ -10,28 +10,31 @@
 *
 */
 
-// include the required headers
-#include "CommandManager.h"
-#include "ActorCommands.h"
-#include "MotionCommands.h"
-#include "MotionEventCommands.h"
-#include "MotionSetCommands.h"
-#include "MotionCompressionCommands.h"
-#include "SelectionCommands.h"
-#include "ImporterCommands.h"
-#include "AnimGraphCommands.h"
-#include "AnimGraphNodeCommands.h"
-#include "AnimGraphNodeGroupCommands.h"
-#include "AnimGraphConnectionCommands.h"
-#include "AnimGraphParameterCommands.h"
-#include "AnimGraphConditionCommands.h"
-#include "MorphTargetCommands.h"
-#include "AttachmentCommands.h"
-#include "LODCommands.h"
-#include "NodeGroupCommands.h"
-#include "AnimGraphParameterGroupCommands.h"
-#include "ActorInstanceCommands.h"
-#include "MiscCommands.h"
+#include <EMotionFX/CommandSystem/Source/ActorCommands.h>
+#include <EMotionFX/CommandSystem/Source/ActorInstanceCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphConditionCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphConnectionCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphGroupParameterCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphNodeCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphNodeGroupCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphParameterCommands.h>
+#include <EMotionFX/CommandSystem/Source/AnimGraphTriggerActionCommands.h>
+#include <EMotionFX/CommandSystem/Source/AttachmentCommands.h>
+#include <EMotionFX/CommandSystem/Source/CommandManager.h>
+#include <EMotionFX/CommandSystem/Source/ColliderCommands.h>
+#include <EMotionFX/CommandSystem/Source/ImporterCommands.h>
+#include <EMotionFX/CommandSystem/Source/LODCommands.h>
+#include <EMotionFX/CommandSystem/Source/MiscCommands.h>
+#include <EMotionFX/CommandSystem/Source/MorphTargetCommands.h>
+#include <EMotionFX/CommandSystem/Source/MotionCommands.h>
+#include <EMotionFX/CommandSystem/Source/MotionCompressionCommands.h>
+#include <EMotionFX/CommandSystem/Source/MotionEventCommands.h>
+#include <EMotionFX/CommandSystem/Source/MotionSetCommands.h>
+#include <EMotionFX/CommandSystem/Source/NodeGroupCommands.h>
+#include <EMotionFX/CommandSystem/Source/RagdollCommands.h>
+#include <EMotionFX/CommandSystem/Source/SelectionCommands.h>
+#include <EMotionFX/CommandSystem/Source/SimulatedObjectCommands.h>
 
 
 namespace CommandSystem
@@ -39,21 +42,14 @@ namespace CommandSystem
     // the global command manager object
     CommandManager* gCommandManager = nullptr;
 
-    // get the command manager
     CommandManager* GetCommandManager()
     {
         return gCommandManager;
     }
 
-
-    // constructor
     CommandManager::CommandManager()
         : MCore::CommandManager()
     {
-        // reserve some memory for the command objects
-        mCommands.Reserve(128);
-
-        // register actor commands
         RegisterCommand(new CommandImportActor());
         RegisterCommand(new CommandRemoveActor());
         RegisterCommand(new CommandScaleActorData());
@@ -72,6 +68,19 @@ namespace CommandSystem
         RegisterCommand(new CommandUpdateRenderActors());
         RegisterCommand(new CommandAddLOD());
         RegisterCommand(new CommandRemoveLOD());
+        RegisterCommand(aznew EMotionFX::CommandAddCollider());
+        RegisterCommand(aznew EMotionFX::CommandAdjustCollider());
+        RegisterCommand(aznew EMotionFX::CommandRemoveCollider());
+        RegisterCommand(aznew EMotionFX::CommandAddRagdollJoint());
+        RegisterCommand(aznew EMotionFX::CommandRemoveRagdollJoint());
+
+        // register simulated object related commands.
+        RegisterCommand(aznew EMotionFX::CommandAddSimulatedObject());
+        RegisterCommand(aznew EMotionFX::CommandAdjustSimulatedObject());
+        RegisterCommand(aznew EMotionFX::CommandAddSimulatedJoints());
+        RegisterCommand(aznew EMotionFX::CommandRemoveSimulatedObject());
+        RegisterCommand(aznew EMotionFX::CommandRemoveSimulatedJoints());
+        RegisterCommand(aznew EMotionFX::CommandAdjustSimulatedJoint());
 
         // register motion commands
         RegisterCommand(new CommandImportMotion());
@@ -82,16 +91,16 @@ namespace CommandSystem
         RegisterCommand(new CommandAdjustDefaultPlayBackInfo());
         RegisterCommand(new CommandStopMotionInstances());
         RegisterCommand(new CommandStopAllMotionInstances());
-        RegisterCommand(new CommandAdjustMotion());
+        RegisterCommand(aznew CommandAdjustMotion());
 
         // register motion event commands
-        RegisterCommand(new CommandCreateMotionEvent());
+        RegisterCommand(aznew CommandCreateMotionEvent());
         RegisterCommand(new CommandRemoveMotionEvent());
-        RegisterCommand(new CommandAdjustMotionEvent());
-        RegisterCommand(new CommandClearMotionEvents());
-        RegisterCommand(new CommandCreateMotionEventTrack());
+        RegisterCommand(aznew CommandAdjustMotionEvent());
+        RegisterCommand(aznew CommandClearMotionEvents());
+        RegisterCommand(aznew CommandCreateMotionEventTrack());
         RegisterCommand(new CommandRemoveMotionEventTrack());
-        RegisterCommand(new CommandAdjustMotionEventTrack());
+        RegisterCommand(aznew CommandAdjustMotionEventTrack());
 
         // register motion set commands
         RegisterCommand(new CommandCreateMotionSet());
@@ -122,27 +131,30 @@ namespace CommandSystem
         RegisterCommand(new CommandAnimGraphAdjustNode());
         RegisterCommand(new CommandAnimGraphCreateConnection());
         RegisterCommand(new CommandAnimGraphRemoveConnection());
-        RegisterCommand(new CommandAnimGraphAdjustConnection());
+        RegisterCommand(aznew CommandAnimGraphAdjustTransition());
         RegisterCommand(new CommandAnimGraphRemoveNode());
         RegisterCommand(new CommandAnimGraphCreateParameter());
         RegisterCommand(new CommandAnimGraphRemoveParameter());
         RegisterCommand(new CommandAnimGraphAdjustParameter());
-        RegisterCommand(new CommandAnimGraphSwapParameters());
+        RegisterCommand(new CommandAnimGraphMoveParameter());
         RegisterCommand(new CommandLoadAnimGraph());
-        RegisterCommand(new CommandAdjustAnimGraph());
         RegisterCommand(new CommandCreateAnimGraph());
         RegisterCommand(new CommandRemoveAnimGraph());
-        RegisterCommand(new CommandCloneAnimGraph());
         RegisterCommand(new CommandActivateAnimGraph());
         RegisterCommand(new CommandAnimGraphSetEntryState());
-        RegisterCommand(new CommandAnimGraphAddCondition());
-        RegisterCommand(new CommandAnimGraphRemoveCondition());
+        RegisterCommand(aznew CommandAddTransitionCondition());
+        RegisterCommand(aznew CommandRemoveTransitionCondition());
+        RegisterCommand(aznew CommandAdjustTransitionCondition());
         RegisterCommand(new CommandAnimGraphAddNodeGroup());
         RegisterCommand(new CommandAnimGraphRemoveNodeGroup());
         RegisterCommand(new CommandAnimGraphAdjustNodeGroup());
-        RegisterCommand(new CommandAnimGraphAddParameterGroup());
-        RegisterCommand(new CommandAnimGraphRemoveParameterGroup());
-        RegisterCommand(new CommandAnimGraphAdjustParameterGroup());
+        RegisterCommand(new CommandAnimGraphAddGroupParameter());
+        RegisterCommand(new CommandAnimGraphRemoveGroupParameter());
+        RegisterCommand(new CommandAnimGraphAdjustGroupParameter());
+        RegisterCommand(aznew CommandAnimGraphAddTransitionAction());
+        RegisterCommand(aznew CommandAnimGraphRemoveTransitionAction());
+        RegisterCommand(aznew CommandAnimGraphAddStateAction());
+        RegisterCommand(aznew CommandAnimGraphRemoveStateAction());
 
         // register misc commands
         RegisterCommand(new CommandRecorderClear());
@@ -152,8 +164,6 @@ namespace CommandSystem
         mWorkspaceDirtyFlag = false;
     }
 
-
-    // destructor
     CommandManager::~CommandManager()
     {
     }

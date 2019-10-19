@@ -10,16 +10,16 @@
 *
 */
 
-#include "StdAfx.h"
+#include "stdafx.h"
 #include "Annotations.hxx"
 #include <Woodpecker/Driller/Workspaces/Workspace.h>
 #include <AzCore/std/sort.h>
 #include <AzCore/Serialization/SerializeContext.h>
 #include <AzCore/UserSettings/UserSettings.h>
 #include <AzCore/IO/SystemFile.h>
-#include <AzCore/IO/genericstreams.h>
+#include <AzCore/IO/GenericStreams.h>
 #include <AzCore/Component/ComponentApplicationBus.h>
-#include <AzCore/Serialization/objectstream.h>
+#include <AzCore/Serialization/ObjectStream.h>
 
 
 
@@ -42,7 +42,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<AnnotationWorkspaceSettings, AZ::UserSettings>()
+                serialize->Class<AnnotationWorkspaceSettings>()
                     ->Version(2)
                     ->Field("m_ActiveAnnotationChannels", &AnnotationWorkspaceSettings::m_ActiveAnnotationChannels)
                     ->Field("m_ActiveAnnotationChannelCRCs", &AnnotationWorkspaceSettings::m_ActiveAnnotationChannelCRCs);
@@ -95,7 +95,7 @@ namespace Driller
             AZ::SerializeContext* serialize = azrtti_cast<AZ::SerializeContext*>(context);
             if (serialize)
             {
-                serialize->Class<AnnotationUserSettings, AZ::UserSettings>()
+                serialize->Class<AnnotationUserSettings>()
                     ->Version(1)
                     ->Field("m_KnownAnnotationChannels", &AnnotationUserSettings::m_KnownAnnotationChannels)
                     ->Field("m_customizedColors", &AnnotationUserSettings::m_customizedColors);

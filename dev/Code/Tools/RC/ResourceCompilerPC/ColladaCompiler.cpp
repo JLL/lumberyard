@@ -25,13 +25,13 @@
 #include "StatCGFPhysicalize.h"
 #include "StringHelpers.h"
 #include "CGF/CGFNodeMerger.h"
-#include "Iconfig.h"
+#include "IConfig.h"
 #include "UpToDateFileHelpers.h"
 #include "Export/ExportHelpers.h"
 
 #include "IXml.h"
 #include "../../CryXML/IXMLSerializer.h"
-#include "../../CryXML/Xml/xml.h"
+#include "../../CryXML/XML/xml.h"
 
 #include <iterator>
 #include <AzCore/std/string/conversions.h>
@@ -789,11 +789,6 @@ ICompiler* ColladaCompiler::CreateCompiler()
     // convertor may as well just be the same object.
     ++m_refCount;
     return this;
-}
-
-bool ColladaCompiler::SupportsMultithreading() const
-{
-    return false;
 }
 
 const char* ColladaCompiler::GetExt(int index) const

@@ -45,10 +45,7 @@
 #include "Environment/OceanEnvironmentBus.h"
 
 #include <LoadScreenBus.h>
-
-#if defined(FEATURE_SVO_GI)
-#include "SVO/SceneTreeManager.h"
-#endif
+#include <StatObjBus.h>
 
 //------------------------------------------------------------------------------
 #define LEVEL_DATA_FILE "LevelData.xml"
@@ -65,7 +62,7 @@ inline Vec3 StringToVector(const char* str)
 {
     Vec3 vTemp(0, 0, 0);
     float x, y, z;
-    if (sscanf(str, "%f,%f,%f", &x, &y, &z) == 3)
+    if (azsscanf(str, "%f,%f,%f", &x, &y, &z) == 3)
     {
         vTemp(x, y, z);
     }
@@ -87,12 +84,12 @@ void C3DEngine::SetLevelPath(const char* szFolderName)
 {
     // make folder path
     assert(strlen(szFolderName) < 1024);
-    strcpy(m_szLevelFolder, szFolderName);
+    azstrcpy(m_szLevelFolder, AZ_ARRAY_SIZE(m_szLevelFolder), szFolderName);
     if (strlen(m_szLevelFolder) > 0)
     {
         if (m_szLevelFolder[strlen(m_szLevelFolder) - 1] != '/')
         {
-            strcat(m_szLevelFolder, "/");
+            azstrcat(m_szLevelFolder, AZ_ARRAY_SIZE (m_szLevelFolder), "/");
         }
     }
 }
@@ -165,7 +162,10 @@ bool C3DEngine::InitLevelForEditor(const char* szFolderName, const char* szMissi
 
     gEnv->pPhysicalWorld->DeactivateOnDemandGrid();
 
-    gEnv->pEntitySystem->RegisterPhysicCallbacks();
+    if (gEnv->pEntitySystem)
+    {
+        gEnv->pEntitySystem->RegisterPhysicCallbacks();
+    }
 
     if (!szFolderName || !szFolderName[0])
     {
@@ -208,7 +208,6 @@ bool C3DEngine::InitLevelForEditor(const char* szFolderName, const char* szMissi
     }
 
     CRY_ASSERT(m_pClipVolumeManager->GetClipVolumeCount() == 0);
-    assert (gEnv->pCharacterManager);
 
     //////////////////////////////////////////////////////////////////////////
     CryComment("initializing merged mesh manager");
@@ -247,7 +246,7 @@ bool C3DEngine::InitLevelForEditor(const char* szFolderName, const char* szMissi
         {
             char Data[1024 * 8];
             gEnv->pCryPak->FRead(Data, sizeof(Data), metaFileHandle);
-            sscanf(Data, "<Map CenterX=\"%f\" CenterY=\"%f\" SizeX=\"%f\" SizeY=\"%f\" Height=\"%f\"  Quality=\"%d\" Orientation=\"%d\" />",
+            azsscanf(Data, "<Map CenterX=\"%f\" CenterY=\"%f\" SizeX=\"%f\" SizeY=\"%f\" Height=\"%f\"  Quality=\"%d\" Orientation=\"%d\" />",
                 &GetCVars()->e_ScreenShotMapCenterX,
                 &GetCVars()->e_ScreenShotMapCenterY,
                 &GetCVars()->e_ScreenShotMapSizeX,
@@ -267,6 +266,11 @@ bool C3DEngine::InitLevelForEditor(const char* szFolderName, const char* szMissi
     //  m_pObjectsTree[nSID] = NULL;
     return (true);
 #endif
+}
+
+bool C3DEngine::LevelLoadingInProgress()
+{
+    return Cry3DEngineBase::m_bLevelLoadingInProgress;
 }
 
 bool C3DEngine::LoadTerrain(XmlNodeRef pDoc, std::vector<struct IStatObj*>** ppStatObjTable, std::vector<_smart_ptr<IMaterial> >** ppMatTable, int nSID)
@@ -294,8 +298,6 @@ bool C3DEngine::LoadTerrain(XmlNodeRef pDoc, std::vector<struct IStatObj*>** ppS
 
     if (header.nChunkSize)
     {
-        MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Terrain, 0, "Terrain");
-
         if (!m_pTerrain)
         {
             m_pTerrain = (CTerrain*)CreateTerrain(header.TerrainInfo);
@@ -376,9 +378,8 @@ void C3DEngine::UnloadLevel()
 
     GetRenderer()->FlushRTCommands(true, true, true);
 
-#if defined(FEATURE_SVO_GI)
-    CSvoManager::Release();
-#endif
+    SVOGILegacyRequestBus::Broadcast(&SVOGILegacyRequests::ReleaseData);
+    InstanceStatObjEventBus::Broadcast(&InstanceStatObjEventBus::Events::ReleaseData);
 
     FreeRNTmpDataPool();
 
@@ -603,10 +604,6 @@ void C3DEngine::UnloadLevel()
     stl::free_container(m_RenderingPassCameras[1]);
     stl::free_container(m_deferredRenderComponentStreamingPriorityUpdates);
 
-    for (uint i = 0; i < m_lstCustomShadowFrustums.size(); ++i)
-    {
-        m_lstCustomShadowFrustums[i].~ShadowMapFrustum();
-    }
     stl::free_container(m_lstCustomShadowFrustums);
 
     m_nWindSamplePositions = 0;
@@ -623,8 +620,6 @@ void C3DEngine::UnloadLevel()
 //////////////////////////////////////////////////////////////////////////
 void C3DEngine::LoadFlaresData()
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "Flare data");
-
     string flareExportListPath = gEnv->p3DEngine->GetLevelFilePath(FLARE_EXPORT_FILE);
     XmlNodeRef pFlareRootNode = gEnv->pSystem->LoadXmlFromFile(flareExportListPath);
 
@@ -694,7 +689,10 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
     m_bEditor = false;
 #endif
 
-    gEnv->pEntitySystem->RegisterPhysicCallbacks();
+    if (gEnv->pEntitySystem)
+    {
+        gEnv->pEntitySystem->RegisterPhysicCallbacks();
+    }
 
     assert(!m_bEditor);
 
@@ -746,7 +744,6 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
     }
 
     CRY_ASSERT(m_pClipVolumeManager->GetClipVolumeCount() == 0);
-    assert (gEnv->pCharacterManager);
 
     // Load and activate all shaders used by the level before activating any shaders
     if (!m_bEditor)
@@ -844,11 +841,11 @@ bool C3DEngine::LoadLevel(const char* szFolderName, const char* szMissionName)
     gEnv->pSystem->SetSystemGlobalState(ESYSTEM_GLOBAL_STATE_LEVEL_LOAD_START_STATIC_WORLD);
 
 #if defined(FEATURE_SVO_GI)
-    if (GetCVars()->e_svoTI_Active >= 0)
+    if (gEnv->pConsole->GetCVar("e_GI")->GetIVal())
     {
         // Load SVOGI settings (must be called before loading of brushes, vegetation and textures)
         char szFileName[256];
-        sprintf(szFileName, "mission_%s.xml", szMissionName);
+        azsprintf(szFileName, "mission_%s.xml", szMissionName);
         XmlNodeRef xmlMission = GetSystem()->LoadXmlFromFile(Get3DEngine()->GetLevelFilePath(szFileName));
         if (xmlMission)
         {
@@ -1205,12 +1202,11 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
         char szTerrainWaterMatName[256];
         cry_strcpy(szTerrainWaterMatName, GetXMLAttribText(pInputNode, "Ocean", "Material", "EngineAssets/Materials/Water/Ocean_default"));
         m_pTerrainWaterMat = szTerrainWaterMatName[0] ? GetMatMan()->LoadMaterial(szTerrainWaterMatName, false) : nullptr;
-    }
 
-
-    if (m_pTerrain)
-    {
-        m_pTerrain->InitTerrainWater(m_pTerrainWaterMat);
+        if (m_pTerrain)
+        {
+            m_pTerrain->InitTerrainWater(m_pTerrainWaterMat);
+        }
     }
 
     m_oceanWindDirection = (float) atof(GetXMLAttribText(pInputNode, "OceanAnimation", "WindDirection", "1.0"));
@@ -1341,7 +1337,7 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
         ITexture* pTex = 0;
         if (cloudShadowTexture[0] != '\0')
         {
-            pTex = GetRenderer()->EF_LoadTexture(cloudShadowTexture);
+            pTex = GetRenderer()->EF_LoadTexture(cloudShadowTexture, FT_DONT_STREAM);
         }
 
         m_nCloudShadowTexId = pTex ? pTex->GetTextureID() : 0;
@@ -1375,7 +1371,10 @@ void C3DEngine::LoadEnvironmentSettingsFromXML(XmlNodeRef pInputNode, int nSID)
     }
 
 #if defined(FEATURE_SVO_GI)
-    LoadTISettings(pInputNode);
+    if (gEnv->pConsole->GetCVar("e_GI")->GetIVal())
+    {
+        LoadTISettings(pInputNode);
+    }
 #endif
 }
 
@@ -1396,7 +1395,7 @@ void C3DEngine::LoadParticleEffects(const char* szFolderName)
 {
     LOADING_TIME_PROFILE_SECTION;
 
-    if (m_pPartManager && GetSystem()->GetIGame())
+    if (m_pPartManager)
     {
         PrintMessage("===== Loading Particle Effects =====");
 
@@ -1475,9 +1474,6 @@ void C3DEngine::ReRegisterKilledVegetationInstances()
 bool C3DEngine::LoadUsedShadersList()
 {
     LOADING_TIME_PROFILE_SECTION;
-
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "LoadUsedShadersList");
-
     gEnv->pRenderer->EF_Query(EFQ_SetShaderCombinations);
     return true;
 }
@@ -1486,7 +1482,6 @@ bool C3DEngine::LoadUsedShadersList()
 bool C3DEngine::PrecreateDecals()
 {
     LOADING_TIME_PROFILE_SECTION;
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "PrecreateDecals");
 
     CObjManager::DecalsToPrecreate& decals(GetObjManager()->GetDecalsToPrecreate());
     // pre-create ...
@@ -1520,7 +1515,6 @@ bool C3DEngine::PrecreateDecals()
 //////////////////////////////////////////////////////////////////////////
 void C3DEngine::PostLoadLevel()
 {
-    MEMSTAT_CONTEXT(EMemStatContextTypes::MSC_Other, 0, "PostLoadLevel");
     LOADING_TIME_PROFILE_SECTION;
 
     CRY_ASSERT(m_levelLoaded == false);

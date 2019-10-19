@@ -15,30 +15,40 @@
 
 def build(bld):
 
-    bld.CryEngineStaticLibrary(
+    kw = dict(
         # Settings
         target              = 'AWSNativeSDKInit',
         vs_filter           = 'Tools/AWSNativeSDKInit',
         file_list           = 'aws_native_sdk_init.waf_files',
+        restricted_script   = 'update_restricted_parameters',
         platforms           = ['all'],
         configurations      = ['all'],
         use                 = ['AzCore'],
         uselib              = ['AWS_CPP_SDK_CORE'],
         includes            = ['include' ],
         disable_pch         = True,
-        export_includes     = [ bld.Path('Code/Tools/AwsNativeSDKInit/include')],
-    )
+        export_includes     = [ bld.Path('Code/Tools/AWSNativeSDKInit/include')],
+        platform_roots      = [bld.PlatformRoot('source/Platform', export_includes=False)],
 
-    bld.CryEngineStaticLibrary(
+        win_x64_clang_enable_rtti = True,
+    )
+    bld.CryEngineStaticLibrary(**kw)
+
+    kw = dict(
         # Settings
         target              = 'AWSNativeSDKInit_Static',
         vs_filter           = 'Tools/AWSNativeSDKInit',
         file_list           = 'aws_native_sdk_init.waf_files',
+        restricted_script   = 'update_restricted_parameters',
         platforms           = ['all'],
         configurations      = ['all'],
         use                 = ['AzCore'],
         uselib              = ['AWS_CPP_SDK_CORE_STATIC'],
         includes            = ['include' ],
         disable_pch         = True,
-        export_includes     = [ bld.Path('Code/Tools/AwsNativeSDKInit/include')],
+        export_includes     = [ bld.Path('Code/Tools/AWSNativeSDKInit/include')],
+        platform_roots      = [bld.PlatformRoot('source/Platform', export_includes=False)],
+
+        win_x64_clang_enable_rtti = True,
     )
+    bld.CryEngineStaticLibrary(**kw)

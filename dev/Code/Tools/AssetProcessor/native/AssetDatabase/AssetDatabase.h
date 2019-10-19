@@ -102,6 +102,8 @@ namespace AssetProcessor
         bool RemoveSources(AzToolsFramework::AssetDatabase::SourceDatabaseEntryContainer& container);
         bool RemoveSourcesByScanFolderID(AZ::s64 scanFolderID);
 
+        bool InvalidateSourceAnalysisFingerprints();
+
         //jobs
         
         // used to initialize the predictor for job Run Keys
@@ -125,6 +127,8 @@ namespace AssetProcessor
         //products
         bool GetProducts(AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container, AZ::Uuid builderGuid = AZ::Uuid::CreateNull(), QString jobKey = QString(), QString platform = QString(), AzToolsFramework::AssetSystem::JobStatus status = AzToolsFramework::AssetSystem::JobStatus::Any);
         bool GetProductsByJobID(AZ::s64 jobID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
+        // note that the pair of (JobID, SubID) uniquely identifies a single job, and thus the result is always only one entry:
+        bool GetProductByJobIDSubId(AZ::s64 jobID, AZ::u32 subID, AzToolsFramework::AssetDatabase::ProductDatabaseEntry& result);
         
         bool GetProductByProductID(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntry& entry);
         bool GetProductsByProductName(QString exactProductName, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container, AZ::Uuid builderGuid = AZ::Uuid::CreateNull(), QString jobKey = QString(), QString platform = QString(), AzToolsFramework::AssetSystem::JobStatus status = AzToolsFramework::AssetSystem::JobStatus::Any);
@@ -147,21 +151,34 @@ namespace AssetProcessor
         bool GetJobInfoByJobRunKey(AZ::u64 jobRunKey, AzToolsFramework::AssetSystem::JobInfoContainer& container);
         bool GetJobInfoBySourceName(QString exactSourceName, AzToolsFramework::AssetSystem::JobInfoContainer& container, AZ::Uuid builderGuid = AZ::Uuid::CreateNull(), QString jobKey = QString(), QString platform = QString(), AzToolsFramework::AssetSystem::JobStatus status = AzToolsFramework::AssetSystem::JobStatus::Any);
 
-        //SourceFileDependency
+        /* --------------------- Source Dependency Table -------------------
+        *    For example, this table records when a source file depends on another source file either directly (DEP_SourceToSource)
+        *    but also whether then source file depends on another source file indirectly because it depends on a job which processes
+        *    that source file
+        */
+        /// Set a row in the table.  It is invalid to overwrite existing rows without removing them first.
         bool SetSourceFileDependency(AzToolsFramework::AssetDatabase::SourceFileDependencyEntry& entry);
+        /// Set a batch of rows.  It is invalid to overwrite existing rows, so consider using RemoveSourceFileDependencies first.
         bool SetSourceFileDependencies(AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
-
-        //! Finds all records where other files depend on 'dependsOnSource'
-        bool GetSourceFileDependenciesByDependsOnSource(const QString& dependsOnSource, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
-        //! Finds all records where 'source' is dependent on another file
-        bool GetDependsOnSourceBySource(const QString& source, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
-
-        bool GetSourceFileDependenciesByBuilderGUIDAndSource(const AZ::Uuid& builderGuid, const char* source, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
-        bool GetSourceFileDependency(const AzToolsFramework::AssetDatabase::SourceFileDependencyEntry& inputEntry, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry& databaseEntry);
+        /// Remove a dependency, given a row ID
+        bool RemoveSourceFileDependency(AZ::s64 sourceFileDependencyId);
+        /// Batch remove a bunch of rows by container
+        bool RemoveSourceFileDependencies(const AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
+        /// Batch remove a bunch of rows by IDs
+        bool RemoveSourceFileDependencies(const AZStd::unordered_set<AZ::s64>& container);
+        /// Direct retrieval by ID (does not use any filtering)
         bool GetSourceFileDependencyBySourceDependencyId(AZ::s64 sourceDependencyId, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry& sourceDependencyEntry);
-        bool RemoveSourceFileDependencies(AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
-        bool RemoveSourceFileDependency(const AzToolsFramework::AssetDatabase::SourceFileDependencyEntry& entry);
 
+        // The following functions are all search functions (as opposed to the above functions which fetch or operate on specific rows)
+        // They tend to take a "Type of Dependency" filter - you can use DEP_Any to query all kinds of dependencies.
+        /// Given a source file, what does it DEPEND ON?
+        bool GetDependsOnSourceBySource(const char* source, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::TypeOfDependency typeOfDependency, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
+        /// Given a source file and a builder UUID, does it DEPEND ON?
+        bool GetSourceFileDependenciesByBuilderGUIDAndSource(const AZ::Uuid& builderGuid, const char* source, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::TypeOfDependency typeOfDependency, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
+        /// Given a source file, what depends ON IT? ('reverse dependency')
+        bool GetSourceFileDependenciesByDependsOnSource(const QString& dependsOnSource, AzToolsFramework::AssetDatabase::SourceFileDependencyEntry::TypeOfDependency typeOfDependency, AzToolsFramework::AssetDatabase::SourceFileDependencyEntryContainer& container);
+        
+        // --------------------- Legacy SUBID table -------------------
         bool CreateOrUpdateLegacySubID(AzToolsFramework::AssetDatabase::LegacySubIDsEntry& entry);  // create or overwrite operation.
         bool RemoveLegacySubID(AZ::s64 legacySubIDsEntryID);
         bool RemoveLegacySubIDsByProductID(AZ::s64 productID);
@@ -172,10 +189,33 @@ namespace AssetProcessor
         bool GetProductDependenciesByProductID(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
         bool GetDirectProductDependencies(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
         bool GetAllProductDependencies(AZ::s64 productID, AzToolsFramework::AssetDatabase::ProductDatabaseEntryContainer& container);
+        bool GetUnresolvedProductDependencies(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
         bool SetProductDependency(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntry& entry);
-        bool SetProductDependencies(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
+
+        // updates or inserts multiple dependencies in a single transaction.  Unlike SetProductDependencies, this does *not* delete existing dependencies
+        bool UpdateProductDependencies(AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
+
+        // bulk inserts are lighter weight and don't change the input data.  Note that this also deletes old dependencies for the products mentioned in the container.
+        bool SetProductDependencies(const AzToolsFramework::AssetDatabase::ProductDependencyDatabaseEntryContainer& container);
+
         bool RemoveProductDependencyByProductId(AZ::s64 productID);
+
+        // bulk replace builder info table with new builder info table.  Replaces the existing table of data.
+        // Note:  newEntries will have their m_builderInfoID member set to their inserted rowId if this call succeeds.
+        bool SetBuilderInfoTable(AzToolsFramework::AssetDatabase::BuilderInfoEntryContainer& newEntries);
  
+        //Files
+        bool GetFileByFileID(AZ::s64 fileID, AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool GetFileByFileNameAndScanFolderId(QString fileName, AZ::s64 scanFolderId, AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool GetFilesLikeFileName(QString likeFileName, LikeType likeType, AzToolsFramework::AssetDatabase::FileDatabaseEntryContainer& container);
+
+        bool InsertFiles(AzToolsFramework::AssetDatabase::FileDatabaseEntryContainer& entry);
+        bool InsertFile(AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+        bool UpdateFile(AzToolsFramework::AssetDatabase::FileDatabaseEntry& entry);
+
+        // updates the modtime for a file if it exists.  Only returns true if the row existed and was successfully updated
+        bool UpdateFileModTimeByFileNameAndScanFolderId(QString fileName, AZ::s64 scanFolderId, AZ::u64 modTime);
+        bool RemoveFile(AZ::s64 sourceID);
     protected:
         void SetDatabaseVersion(AzToolsFramework::AssetDatabase::DatabaseVersion ver);
         void ExecuteCreateStatements();

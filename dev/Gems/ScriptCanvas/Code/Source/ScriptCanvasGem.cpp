@@ -16,10 +16,6 @@
 
 #include <ScriptCanvasGem.h>
 
-#if !defined(AZ_MONOLITHIC_BUILD)
-#include <platform_impl.h> // must be included once per DLL so things from CryCommon will function
-#endif
-
 #include <AzCore/Component/Entity.h>
 #include <AzCore/Component/Component.h>
 #include <AzCore/Serialization/SerializeContext.h>
@@ -51,10 +47,6 @@ namespace ScriptCanvas
     //! The descriptors will be destroyed (and thus unregistered) at the appropriate time.
     ScriptCanvasModule::ScriptCanvasModule()
         : ScriptCanvasModuleCommon()
-    {
-    }
-
-    ScriptCanvasModule::~ScriptCanvasModule()
     {
     }
 

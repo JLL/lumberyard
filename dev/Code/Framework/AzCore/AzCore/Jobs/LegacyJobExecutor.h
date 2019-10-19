@@ -16,7 +16,7 @@
 
 #include <AzCore/Debug/Profiler.h>
 #include <AzCore/Jobs/JobFunction.h>
-#include <AzCore/std/parallel/conditional_variable.h>
+#include <AzCore/std/parallel/condition_variable.h>
 #include <AzCore/std/smart_ptr/unique_ptr.h>
 
 namespace AZ
@@ -116,13 +116,13 @@ namespace AZ
                 if (!postCount)
                 {
                     postJob = m_postJob.release();
+                    m_completionCondition.notify_all();
                 }
             }
 
             // outside the lock...
             if (!postCount)
             {
-                m_completionCondition.notify_all();
                 if (postJob)
                 {
                     postJob->StartOnExecutor();

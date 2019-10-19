@@ -109,10 +109,6 @@ CFrameProfileSystem::CFrameProfileSystem()
 
     m_pGraphProfiler = 0;
 
-#if defined (JOBMANAGER_SUPPORT_FRAMEPROFILER)
-    m_nWorkerGraphCurPos = 0;
-#endif
-
     m_timeGraphCurrentPos = 0;
     m_bCollectionPaused = false;
     m_bDrawGraph = false;
@@ -165,21 +161,11 @@ CFrameProfileSystem::CFrameProfileSystem()
     m_offset = 0.0f;
 
     m_bRenderAdditionalSubsystems = false;
-
-#if defined(JOBMANAGER_SUPPORT_FRAMEPROFILER)
-    m_ThreadFrameStats = new JobManager::CWorkerFrameStats(0);
-    m_BlockingFrameStats = new JobManager::CWorkerFrameStats(0);
-#endif
 };
 
 //////////////////////////////////////////////////////////////////////////
 CFrameProfileSystem::~CFrameProfileSystem()
 {
-#if defined(JOBMANAGER_SUPPORT_FRAMEPROFILER)
-    SAFE_DELETE(m_BlockingFrameStats);
-    SAFE_DELETE(m_ThreadFrameStats);
-#endif
-
     g_bProfilerEnabled = false;
     delete m_pSampler;
 
@@ -265,10 +251,11 @@ void CFrameProfileSystem::SetProfiling(bool on, bool display, char* prefix, ISys
             // while there is such file already
             for (int i = 0; (GetFileAttributes (outfilename) != INVALID_FILE_ATTRIBUTES) && i < 1000; ++i)
             {
-                sprintf (outfilename, "frameprofile%02d.dat", i);
+                azsprintf(outfilename, "frameprofile%02d.dat", i);
             }
 
-            FILE* f = fopen(outfilename, "wb");
+            FILE* f = nullptr;
+            azfopen(&f, outfilename, "wb");
             if (!f)
             {
                 CryFatalError("Could not write profiling data to file!");
@@ -473,8 +460,7 @@ void CFrameProfileSystem::Reset()
 void CFrameProfileSystem::AddFrameProfiler(CFrameProfiler* pProfiler)
 {
     CryAutoCriticalSection lock(m_profilersLock);
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
+    
     assert(pProfiler);
     if (!pProfiler)
     {
@@ -528,8 +514,6 @@ void CFrameProfileSystem::SProfilerThreads::Reset(ISystem* pSystem)
     m_aThreadStacks[0].pProfilerSection = 0;
     if (!m_pReservedProfilers)
     {
-        ScopedSwitchToGlobalHeap useGlobalHeap;
-
         // Allocate reserved profilers;
         for (int i = 0; i < nMAX_THREADED_PROFILERS; i++)
         {
@@ -728,9 +712,9 @@ void CFrameProfileSystem::EndMemoryProfilerSection(CFrameProfilerSection* pSecti
     }
 
     // Ignore allocation functions.
-    if (0 == _stricmp(pProfiler->m_name, "CryMalloc") ||
-        0 == _stricmp(pProfiler->m_name, "CryRealloc") ||
-        0 == _stricmp(pProfiler->m_name, "CryFree"))
+    if (0 == azstricmp(pProfiler->m_name, "CryMalloc") ||
+        0 == azstricmp(pProfiler->m_name, "CryRealloc") ||
+        0 == azstricmp(pProfiler->m_name, "CryFree"))
     {
         selfTime = 0;
         totalTime = 0;
@@ -901,11 +885,11 @@ const char* CFrameProfileSystem::GetFullName(CFrameProfiler* pProfiler)
         const char* sThreadName = CryThreadGetName(pProfiler->m_threadId);
         if (sThreadName)
         {
-            _snprintf(sFullName, sizeof(sFullName), "%s @%s", sNameBuffer, sThreadName);
+            azsnprintf(sFullName, sizeof(sFullName), "%s @%s", sNameBuffer, sThreadName);
         }
         else
         {
-            _snprintf(sFullName, sizeof(sFullName), "%s @%" PRI_THREADID "", sNameBuffer, pProfiler->m_threadId);
+            azsnprintf(sFullName, sizeof(sFullName), "%s @%" PRI_THREADID "", sNameBuffer, pProfiler->m_threadId);
         }
     }
     else
@@ -916,7 +900,7 @@ const char* CFrameProfileSystem::GetFullName(CFrameProfiler* pProfiler)
             pProfiler = pProfiler->m_pNextThread;
             nThreads++;
         }
-        _snprintf(sFullName, sizeof(sFullName), "%s @(%d threads)", sNameBuffer, nThreads);
+        azsnprintf(sFullName, sizeof(sFullName), "%s @(%d threads)", sNameBuffer, nThreads);
     }
 
     sFullName[sizeof(sFullName) - 1] = 0;
@@ -1544,7 +1528,7 @@ void CFrameProfileSystem::SetSubsystemFilter(const char* szFilterName)
         {
             continue;
         }
-        if (_stricmp(m_subsystems[i].name, szFilterName) == 0)
+        if (azstricmp(m_subsystems[i].name, szFilterName) == 0)
         {
             SetSubsystemFilter(true, (EProfiledSubsystem)i);
             bFound = true;
@@ -1569,8 +1553,6 @@ void CFrameProfileSystem::SetSubsystemFilter(const char* szFilterName)
 //////////////////////////////////////////////////////////////////////////
 void CFrameProfileSystem::AddPeaksListener(IFrameProfilePeakCallback* pPeakCallback)
 {
-    ScopedSwitchToGlobalHeap useGlobalHeap;
-
     // Only add one time.
     stl::push_back_unique(m_peakCallbacks, pPeakCallback);
 }
@@ -1671,8 +1653,6 @@ bool CFrameProfileSystem::OnInputChannelEventFiltered(const AzFramework::InputCh
 //////////////////////////////////////////////////////////////////////////
 void CFrameProfileSystem::UpdateInputSystemStatus()
 {
-    ScopedSwitchToGlobalHeap globalHeap;
-
     // Disconnect from receiving input events
     AzFramework::InputChannelEventListener::Disconnect();
 

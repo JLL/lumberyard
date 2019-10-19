@@ -26,7 +26,7 @@
 #define RC_EXECUTABLE "rc"
 
 //////////////////////////////////////////////////////////////////////////
-// Standart includes.
+// Standard includes.
 //////////////////////////////////////////////////////////////////////////
 #include <stdlib.h>
 #include <stdint.h>
@@ -42,7 +42,7 @@
 #include <errno.h>
 #include <malloc/malloc.h>
 #include <Availability.h>
-// Atomict operations , guaranteed to work across all apple platforms
+// Atomic operations , guaranteed to work across all apple platforms
 #include <libkern/OSAtomic.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -295,9 +295,13 @@ enum
 {
     IDOK        = 1,
     IDCANCEL    = 2,
+    IDABORT     = 3,
     IDRETRY     = 4,
+    IDIGNORE    = 5,
     IDYES       = 6,
-    IDNO        = 7
+    IDNO        = 7,
+    IDTRYAGAIN  = 10,
+    IDCONTINUE  = 11
 };
 
 #define ES_MULTILINE    0x0004L
@@ -311,10 +315,13 @@ enum
 #define LB_GETCOUNT     0x018B
 #define LB_SETTOPINDEX  0x0197
 
-#define MB_OK           0x00000000L
-#define MB_OKCANCEL     0x00000001L
-#define MB_YESNOCANCEL  0x00000003L
-#define MB_YESNO        0x00000004L
+#define MB_OK                0x00000000L
+#define MB_OKCANCEL          0x00000001L
+#define MB_ABORTRETRYIGNORE  0x00000002L
+#define MB_YESNOCANCEL       0x00000003L
+#define MB_YESNO             0x00000004L
+#define MB_RETRYCANCEL       0x00000005L
+#define MB_CANCELTRYCONTINUE 0x00000006L
 
 #define MB_ICONQUESTION     0x00000020L
 #define MB_ICONEXCLAMATION  0x00000030L
@@ -357,6 +364,7 @@ enum
 
 #define VK_OEM_COMMA    0xBC   // ',' any country
 #define VK_OEM_PERIOD   0xBE   // '.' any country
+#define VK_OEM_3        0xC0   // '`~' for US
 #define VK_OEM_4        0xDB  //  '[{' for US
 #define VK_OEM_6        0xDD  //  ']}' for US
 

@@ -32,6 +32,7 @@ BASIC_TYPE_INFO(CCryName)
 #define PARTICLE_PARAMS_DEFAULT_BLUR_STRENGTH 20.f
 #define PARTICLE_PARAMS_WIDTH_TO_HALF_WIDTH 0.5f
 #define PARTICLE_PARAMS_MAX_COUNT_CPU 20000 
+#define PARTICLE_PARAMS_MAX_MAINTAIN_DENSITY 10000 
 #define PARTICLE_PARAMS_MAX_COUNT_GPU 1048576 
 
 ///////////////////////////////////////////////////////////////////////
@@ -171,7 +172,8 @@ typedef TRangedType<float, 0, 4>          Unit4Float;
 typedef TRangedType<float, -180, 180> SAngle;
 typedef TRangedType<float, 0, 180>        UHalfAngle;
 typedef TRangedType<float, 0, 360>        UFullAngle;
-
+typedef TRangedType<float, 0, PARTICLE_PARAMS_MAX_MAINTAIN_DENSITY> UFloatMaintainDensity;
+   
 typedef TSmall<bool>                                TSmallBool;
 typedef TSmall<bool, uint8, 0, 1>          TSmallBoolTrue;
 typedef TSmall<uint, uint8, 1>                PosInt8;
@@ -357,6 +359,11 @@ public:
         T val;
         min_value(val);
         return val;
+    }
+    
+    bool operator == (const TThis& o) const
+    {
+        return super_type::operator==(o);
     }
 
     struct CCustomInfo;
@@ -679,6 +686,14 @@ struct TVarEPParam
     T operator ()(R r, E e, P p) const
     {
         return TSuper::operator()(r, e) * m_ParticleAge(p);
+    }
+
+    // Note this hides TVarEParam::IsConstant(). This should be fine because params are only accessed directly, 
+    // never through base pointers. We could make TVarEParam::IsConstant() virtual but there isn't a good reason
+    // to do that.
+    bool IsConstant() const
+    {
+        return  m_ParticleAge.IsIdentity() && TSuper::IsConstant();
     }
 
     // Additional helpers
@@ -1115,6 +1130,11 @@ struct TVarEPParamRandLerp
         return m_bRandomLerpAge;
     }
 
+    ILINE const S& GetSecondValue() const
+    {
+        return m_Color;
+    }
+
     AUTO_STRUCT_INFO
 protected:
     S m_Color;
@@ -1221,8 +1241,10 @@ struct ParticleParams
 
     TVarEParam<UFloat> fCount;                      // Number of particles alive at once
     TVarEParam<UFloat> fBeamCount;                  // Number of Beams alive at once
+
+    typedef TRangedType<float, 0, PARTICLE_PARAMS_MAX_MAINTAIN_DENSITY> UFloatMaintainDensity;
     struct SMaintainDensity
-        : UFloat
+        : UFloatMaintainDensity
     {
         UFloat fReduceLifeTime;                         //
         UFloat fReduceAlpha;                                // <SoftMax=1> Reduce alpha inversely to count increase.
@@ -1518,9 +1540,11 @@ struct ParticleParams
     TVarEPParam<UFloat> fAspect;                    // <SoftMax=8> X-to-Y scaling factor
     TVarEPParam<UFloat> fSizeX;                     // <SoftMax=800> X Size for sprites; size scale for geometry
     TVarEPParam<UFloat> fSizeY;                     // <SoftMax=800> Y size
+    TVarEPParam<UFloat> fSizeZ;                     // <SoftMax=800> Z size; only usful for geometry particle
     TSmallBool bMaintainAspectRatio;                // Maintain aspect ratio in Editor AND Game
     TVarEPParam<SFloat> fPivotX;                    // <SoftMin=-1> <SoftMax=1> Pivot offset in X direction
     TVarEPParam<SFloat> fPivotY;                    // <SoftMin=-1> <SoftMax=1> Pivot offset in Y direction
+    TVarEPParam<SFloat> fPivotZ;                    // <SoftMin=-1> <SoftMax=1> Pivot offset in Z directions; only usful for geometry particle
 
     struct SStretch
         : TVarEPParam<UFloat>
@@ -1596,7 +1620,6 @@ struct ParticleParams
     // <Group=Trail> - Chris Hekman, Confetti
     TSmallBool bLockAnchorPoints;
     CCryName sTrailFading;
-    TSmallBool bIsCameraNonFacingFadeParticle;
 
 
     // Connection
@@ -1723,6 +1746,7 @@ struct ParticleParams
     UFloat fCameraFadeFarStrength;                  // Strength of the camera distance fade at the far end
     SFloat fSortOffset;                                     // <SoftMin=-1> <SoftMax=1> Offset distance used for sorting
     SFloat fSortBoundsScale;                            // <SoftMin=-1> <SoftMax=1> Choose emitter point for sorting; 1 = bounds nearest, 0 = origin, -1 = bounds farthest
+    TSmallBool bDynamicCulling;                     // Force enable Dynamic Culling. This disables culling of particle simulation to get accurate bounds for render culling.
     TSmallBool bDrawNear;                                   // Render particle in near space (weapon)
     TSmallBool bDrawOnTop;                              // Render particle on top of everything (no depth test)
     ETrinary tVisibleIndoors;                           // Whether visible indoors / outdoors / both
@@ -1752,8 +1776,8 @@ struct ParticleParams
     TSmallBoolTrue bStreamable;                         // Texture/geometry allowed to be streamed
     TSmallBool bVolumeFog;                              // Use as a participating media of volumetric fog
     Unit4Float fVolumeThickness;                        // Thickness factor for particle size
-    TSmallBoolTrue DepthOfFieldBlur;                     //Particles won't be affected by depthOfField post effect if set to false
-
+    TSmallBoolTrue DepthOfFieldBlur;                    // Particles won't be affected by depthOfField post effect if set to false
+    TSmallBool FogVolumeShadingQualityHigh;             // Particle vertex shading quality: - 0: Standard - 1: fog volumes are handled more accurately
     uint8 nParticleSizeDiscard;
 
     // <Group=Configuration>
@@ -1811,6 +1835,7 @@ struct ParticleParams
         , fAspect(1.f)
         , fSizeX(1.f)
         , fSizeY(1.f)
+        , fSizeZ(1.f)
         , bMaintainAspectRatio(true)
         , cColor(1.f)
         , fAlpha(1.f)
@@ -1834,7 +1859,7 @@ struct ParticleParams
         , fVolumeThickness(1.0f)
         , fSoundFXParam(1.f)
         , fSortConvergancePerFrame(1.f)
-        , eConfigMax(eConfigMax.VeryHigh)
+        , eConfigMax(EConfigSpecBrief::VeryHigh)
         // the default vec3 constructor sets values to nan if _DEBUG is defined.  This occurs after the ZeroInit base class initialization.  Reset these to zero.
         , vLocalInitAngles(ZERO)
         , vLocalRandomAngles(ZERO)
@@ -1933,7 +1958,7 @@ struct ParticleParams
     }
     AABB GetEmitOffsetBounds() const
     {
-        const float percentageToScale = 0.01;
+        const float percentageToScale = 0.01f;
 
         const float fEmissionStrength = fEmitterLifeTime.GetMaxValue();
 

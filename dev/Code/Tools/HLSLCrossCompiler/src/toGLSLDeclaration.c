@@ -757,7 +757,25 @@ void AddBuiltinInput(HLSLCrossCompilerContext* psContext, const Declaration* psD
 int OutputNeedsDeclaring(HLSLCrossCompilerContext* psContext, const Operand* psOperand, const int count)
 {
     Shader* psShader = psContext->psShader;
+    
+    // Depth Output operands are a special case and won't have a ui32RegisterNumber,
+    // so first we have to check if the output operand is depth.
+    if (psShader->eShaderType == PIXEL_SHADER)
+    {
+        if (psOperand->eType == OPERAND_TYPE_OUTPUT_DEPTH_GREATER_EQUAL ||
+            psOperand->eType == OPERAND_TYPE_OUTPUT_DEPTH_LESS_EQUAL)
+        {
+            return 1;
+        }
+        else if (psOperand->eType == OPERAND_TYPE_OUTPUT_DEPTH)
+        {
+            return 0; // OpenGL doesn't need to declare depth output variable (gl_FragDepth)
+        }
+    }
+    
     const uint32_t declared = ((psContext->currentPhase + 1) << 3) | psShader->ui32CurrentVertexOutputStream;
+    ASSERT(psOperand->ui32RegisterNumber >= 0);
+    ASSERT(psOperand->ui32RegisterNumber < MAX_SHADER_VEC4_OUTPUT);
     if (psShader->aiOutputDeclared[psOperand->ui32RegisterNumber] != declared)
     {
         int offset;
@@ -767,15 +785,6 @@ int OutputNeedsDeclaring(HLSLCrossCompilerContext* psContext, const Operand* psO
             psShader->aiOutputDeclared[psOperand->ui32RegisterNumber + offset] = declared;
         }
         return 1;
-    }
-
-    if (psShader->eShaderType == PIXEL_SHADER)
-    {
-        if (psOperand->eType == OPERAND_TYPE_OUTPUT_DEPTH_GREATER_EQUAL ||
-            psOperand->eType == OPERAND_TYPE_OUTPUT_DEPTH_LESS_EQUAL)
-        {
-            return 1;
-        }
     }
 
     return 0;
@@ -2246,7 +2255,8 @@ void TranslateDeclaration(HLSLCrossCompilerContext* psContext, const Declaration
         // OpenGL versions lower than 4.1 don't support the
         // layout(early_fragment_tests) directive and will fail to compile
         // the shader
-        if (ui32Flags & GLOBAL_FLAG_FORCE_EARLY_DEPTH_STENCIL && EarlyDepthTestSupported(psShader->eTargetLanguage))
+        if (ui32Flags & GLOBAL_FLAG_FORCE_EARLY_DEPTH_STENCIL && EarlyDepthTestSupported(psShader->eTargetLanguage) && 
+            !(psShader->eGmemType & (FBF_ARM_DEPTH | FBF_ARM_STENCIL))) // Early fragment test is not allowed when fetching from the depth/stencil buffer. 
         {
             bcatcstr(glsl, "layout(early_fragment_tests) in;\n");
         }

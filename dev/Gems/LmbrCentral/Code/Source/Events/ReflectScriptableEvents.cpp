@@ -20,7 +20,8 @@
 #include <InputRequestBus.h>
 #include <AzCore/Math/Vector3.h>
 #include <LmbrCentral/Shape/ShapeComponentBus.h>
-#include <AzFramework/Math/MathUtils.h>
+#include <AzCore/Math/Transform.h>
+#include <AzCore/Math/Quaternion.h>
 
 
 namespace LmbrCentral
@@ -99,19 +100,16 @@ namespace LmbrCentral
         }
         else if (dc.GetNumArguments() == 1 && dc.IsString(0))
         {
-
-            const char* currentProfileName = nullptr;
-            EBUS_EVENT_RESULT(currentProfileName, AZ::PlayerProfileRequestBus, GetCurrentProfileForCurrentUser);
-            thisOutPtr->m_profileIdCrc = Input::ProfileId(currentProfileName);
+            thisOutPtr->m_localUserId = AzFramework::LocalUserIdAny;
             const char* actionName = nullptr;
             dc.ReadArg(0, actionName);
             thisOutPtr->m_actionNameCrc = Input::ProcessedEventName(actionName);
         }
         else if (dc.GetNumArguments() == 2 && dc.IsClass<AZ::Crc32>(0) && dc.IsString(1))
         {
-            Input::ProfileId profileId = 0;
-            dc.ReadArg(0, profileId);
-            thisOutPtr->m_profileIdCrc = profileId;
+            AzFramework::LocalUserId localUserId = 0;
+            dc.ReadArg(0, localUserId);
+            thisOutPtr->m_localUserId = localUserId;
             const char* actionName = nullptr;
             dc.ReadArg(1, actionName);
             thisOutPtr->m_actionNameCrc = Input::ProcessedEventName(actionName);
@@ -252,14 +250,17 @@ namespace LmbrCentral
 
             serializeContext->Class<AZ::InputEventNotificationId>()
                 ->Version(1)
-                ->Field("ProfileId", &AZ::InputEventNotificationId::m_profileIdCrc)
+                ->Field("LocalUserId", &AZ::InputEventNotificationId::m_localUserId)
                 ->Field("ActionName", &AZ::InputEventNotificationId::m_actionNameCrc)
             ;
         }
 
+        ShapeComponentConfig::Reflect(context);
+
         if (auto behaviorContext = azrtti_cast<AZ::BehaviorContext*>(context))
         {
             behaviorContext->Class<AZ::GameplayNotificationId>("GameplayNotificationId")
+                ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::Preview)
                 ->Constructor<AZ::EntityId, AZ::Crc32>()
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::Value)
@@ -279,7 +280,7 @@ namespace LmbrCentral
                     ->Attribute(AZ::Script::Attributes::Storage, AZ::Script::Attributes::StorageType::Value)
                     ->Attribute(AZ::Script::Attributes::ConstructorOverride, &InputEventNonIntrusiveConstructor)
                 ->Property("actionNameCrc", BehaviorValueProperty(&AZ::InputEventNotificationId::m_actionNameCrc))
-                ->Property("profileCrc", BehaviorValueProperty(&AZ::InputEventNotificationId::m_profileIdCrc))
+                ->Property("localUserId", BehaviorValueProperty(&AZ::InputEventNotificationId::m_localUserId))
                 ->Method("ToString", &AZ::InputEventNotificationId::ToString)
                     ->Attribute(AZ::Script::Attributes::Operator, AZ::Script::Attributes::OperatorType::ToString)
                 ->Method("Equal", &AZ::InputEventNotificationId::operator==)
@@ -291,6 +292,7 @@ namespace LmbrCentral
                 ;
 
             behaviorContext->EBus<AZ::GameplayNotificationBus>("GameplayNotificationBus")
+                ->Attribute(AZ::Script::Attributes::Deprecated, true)
                 ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::List)
                 ->Handler<BehaviorGameplayNotificationBusHandler>()
                 ->Event("OnEventBegin", &AZ::GameplayNotificationBus::Events::OnEventBegin)
@@ -298,27 +300,27 @@ namespace LmbrCentral
                 ->Event("OnEventEnd", &AZ::GameplayNotificationBus::Events::OnEventEnd);
 
             behaviorContext->Class<AxisWrapper>("AxisType")
-                ->Constant("XPositive", BehaviorConstant(AzFramework::Axis::XPositive))
-                ->Constant("XNegative", BehaviorConstant(AzFramework::Axis::XNegative))
-                ->Constant("YPositive", BehaviorConstant(AzFramework::Axis::YPositive))
-                ->Constant("YNegative", BehaviorConstant(AzFramework::Axis::YNegative))
-                ->Constant("ZPositive", BehaviorConstant(AzFramework::Axis::ZPositive))
-                ->Constant("ZNegative", BehaviorConstant(AzFramework::Axis::ZNegative));
+                ->Constant("XPositive", BehaviorConstant(AZ::Transform::Axis::XPositive))
+                ->Constant("XNegative", BehaviorConstant(AZ::Transform::Axis::XNegative))
+                ->Constant("YPositive", BehaviorConstant(AZ::Transform::Axis::YPositive))
+                ->Constant("YNegative", BehaviorConstant(AZ::Transform::Axis::YNegative))
+                ->Constant("ZPositive", BehaviorConstant(AZ::Transform::Axis::ZPositive))
+                ->Constant("ZNegative", BehaviorConstant(AZ::Transform::Axis::ZNegative));
 
             behaviorContext->Class<MathUtils>("MathUtils")
-                ->Method("ConvertTransformToEulerDegrees", &AzFramework::ConvertTransformToEulerDegrees)
-                ->Method("ConvertTransformToEulerRadians", &AzFramework::ConvertTransformToEulerRadians)
+                ->Method("ConvertTransformToEulerDegrees", &AZ::ConvertTransformToEulerDegrees)
+                ->Method("ConvertTransformToEulerRadians", &AZ::ConvertTransformToEulerRadians)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
-                ->Method("ConvertEulerDegreesToTransform", &AzFramework::ConvertEulerDegreesToTransform)
+                ->Method("ConvertEulerDegreesToTransform", &AZ::ConvertEulerDegreesToTransform)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
-                ->Method("ConvertEulerDegreesToTransformPrecise", &AzFramework::ConvertEulerDegreesToTransformPrecise)
-                ->Method("ConvertQuaternionToEulerDegrees", &AzFramework::ConvertQuaternionToEulerDegrees)
-                ->Method("ConvertQuaternionToEulerRadians", &AzFramework::ConvertQuaternionToEulerRadians)
+                ->Method("ConvertEulerDegreesToTransformPrecise", &AZ::ConvertEulerDegreesToTransformPrecise)
+                ->Method("ConvertQuaternionToEulerDegrees", &AZ::ConvertQuaternionToEulerDegrees)
+                ->Method("ConvertQuaternionToEulerRadians", &AZ::ConvertQuaternionToEulerRadians)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
-                ->Method("ConvertEulerRadiansToQuaternion", &AzFramework::ConvertEulerRadiansToQuaternion)
+                ->Method("ConvertEulerRadiansToQuaternion", &AZ::ConvertEulerRadiansToQuaternion)
                     ->Attribute(AZ::Script::Attributes::ExcludeFrom, AZ::Script::Attributes::ExcludeFlags::All)
-                ->Method("ConvertEulerDegreesToQuaternion", &AzFramework::ConvertEulerDegreesToQuaternion)
-                ->Method("CreateLookAt", &AzFramework::CreateLookAt);
+                ->Method("ConvertEulerDegreesToQuaternion", &AZ::ConvertEulerDegreesToQuaternion)
+                ->Method("CreateLookAt", &AZ::Transform::CreateLookAt);
 
             ShapeComponentGeneric::Reflect(behaviorContext);
 

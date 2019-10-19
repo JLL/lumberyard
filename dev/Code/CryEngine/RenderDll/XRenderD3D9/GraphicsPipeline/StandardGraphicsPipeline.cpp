@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -26,11 +26,22 @@
 #include "Common/Textures/TextureHelpers.h"
 #include "Common/Include_HLSL_CPP_Shared.h"
 #include "MultiLayerAlphaBlendPass.h"
+
 #if defined(FEATURE_SVO_GI)
-#include "D3D_SVO.h"
+    #include "D3D_SVO.h"
 #endif
 
 #include "DriverD3D.h" //for gcpRendD3D
+
+CStandardGraphicsPipeline::CStandardGraphicsPipeline()
+{
+    AZ::RenderNotificationsBus::Handler::BusConnect();
+}
+
+CStandardGraphicsPipeline::~CStandardGraphicsPipeline()
+{
+    AZ::RenderNotificationsBus::Handler::BusDisconnect();
+}
 
 void CStandardGraphicsPipeline::Init()
 {
@@ -63,6 +74,17 @@ void CStandardGraphicsPipeline::Init()
         m_pDefaultInstanceExtraResources->SetConstantBuffer(eConstantBufferShaderSlot_SkinQuatPrev, NULL, shaderStages);
         m_pDefaultInstanceExtraResources->SetBuffer(EReservedTextureSlot_SkinExtraWeights, WrappedDX11Buffer(), shaderStages);
         m_pDefaultInstanceExtraResources->SetBuffer(EReservedTextureSlot_AdjacencyInfo, WrappedDX11Buffer(), shaderStages); // shares shader slot with EReservedTextureSlot_PatchID
+    }
+}
+
+void CStandardGraphicsPipeline::OnRendererFreeResources(int flags)
+{
+    // If texture resources are about to be freed by the renderer
+    if (flags & FRR_TEXTURES)
+    {
+        // Release default resources before CTexture::Shutdown is called so they do not leak
+        m_pDefaultMaterialResources = nullptr;
+        m_pDefaultInstanceExtraResources = nullptr;
     }
 }
 
@@ -153,7 +175,8 @@ void CStandardGraphicsPipeline::UpdatePerFrameConstantBuffer(const PerFrameParam
 #endif
 
     const float time = CRenderer::GetRealTime();
-    cb->PerFrame_Time = Vec4(time, CRenderer::GetElapsedTime(), time - CRenderer::GetElapsedTime(), perFrameParams.m_MidDayIndicator);
+
+    cb->PerFrame_Time = Vec4(time, CRenderer::GetElapsedTime(), time - CRenderer::GetElapsedTime(), perFrameParams.m_MidDayIndicator );
 
     const SRenderLight* sunLight = FindSunLight(renderer->m_RP);
     if (sunLight)
@@ -260,9 +283,9 @@ void CStandardGraphicsPipeline::UpdatePerViewConstantBuffer(const ViewParameters
     }
 
     CD3D9Renderer* pRenderer = gcpRendD3D;
-    const PerFrameParameters& perFrameConstants = pRenderer->m_cEF.m_PF;
     SRenderPipeline& RESTRICT_REFERENCE rp = gRenDev->m_RP;
     SThreadInfo& threadInfo = rp.m_TI[rp.m_nProcessThreadID];
+    const PerFrameParameters& perFrameConstants = threadInfo.m_perFrameParameters;
 
     CTypedConstantBuffer<HLSL_PerViewConstantBuffer> cb(m_PerViewConstantBuffer);
 
@@ -321,12 +344,12 @@ void CStandardGraphicsPipeline::UpdatePerViewConstantBuffer(const ViewParameters
 
     // PerView_NearestScaled
     {
-        float zn = viewInfo.viewParameters.fNear;
-        float zf = viewInfo.viewParameters.fFar;
-        float nearZRange = pRenderer->CV_r_DrawNearZRange;
+        float zn = DRAW_NEAREST_MIN;
+        float zf = CRenderer::CV_r_DrawNearFarPlane;
+        float nearZRange = CRenderer::CV_r_DrawNearZRange;
         float camScale = pRenderer->CV_r_DrawNearFarPlane / gEnv->p3DEngine->GetMaxViewDistance();
         cb->PerView_NearestScaled.x = viewInfo.bReverseDepth ? 1.0f - zf / (zf - zn) * nearZRange : zf / (zf - zn) * nearZRange;
-        cb->PerView_NearestScaled.y = viewInfo.bReverseDepth ? zn / (zf - zn) * nearZRange * nearZRange : zn / (zn - zf) * nearZRange * nearZRange;
+        cb->PerView_NearestScaled.y = viewInfo.bReverseDepth ? zn / (zf - zn) * nearZRange * camScale : zn / (zn - zf) * nearZRange * camScale;
         cb->PerView_NearestScaled.z = viewInfo.bReverseDepth ? 1.0f - (nearZRange - 0.001f) : nearZRange - 0.001f;
         cb->PerView_NearestScaled.w = 1.0f;
 
@@ -394,7 +417,7 @@ void CStandardGraphicsPipeline::UpdatePerShadowConstantBuffer(const ShadowParame
         shadowFrustum.fNearDist,
         shadowFrustum.m_eFrustumType != ShadowMapFrustum::e_HeightMapAO ? shadowFrustum.fFarDist : 1.f,
         0.0f,
-        shadowFrustum.fDepthTestBias);
+        0.0f);
     cb->PerShadow_LightPos = Vec4(params.m_ShadowFrustum->vLightSrcRelPos + params.m_ShadowFrustum->vProjTranslation, 0);
     cb->PerShadow_ViewPos = Vec4(params.m_ViewerPos, 0);
 
@@ -427,7 +450,6 @@ void CStandardGraphicsPipeline::ResetRenderState()
     rd->GetDeviceContext().ResetCachedState();
 #endif
 
-    CTexture::ResetTMUs();
     CHWShader::s_pCurPS = nullptr;
     CHWShader::s_pCurVS = nullptr;
     CHWShader::s_pCurGS = nullptr;

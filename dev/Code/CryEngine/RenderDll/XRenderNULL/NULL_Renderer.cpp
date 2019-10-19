@@ -313,8 +313,8 @@ void CNULLRenderer::GetViewport(int* x, int* y, int* width, int* height) const
 {
     *x = 0;
     *y = 0;
-    *width = m_width;
-    *height = m_height;
+    *width = GetWidth();
+    *height = GetHeight();
 }
 
 void CNULLRenderer::SetViewport(int x, int y, int width, int height, int id)
@@ -467,12 +467,17 @@ bool CNULLRenderer::DestroyRenderTarget(int nHandle)
     return true;
 }
 
+bool CNULLRenderer::ResizeRenderTarget(int nHandle, int nWidth, int nHeight)
+{
+    return true;
+}
+
 bool CNULLRenderer::SetRenderTarget(int nHandle, SDepthTexture* pDepthSurf)
 {
     return true;
 }
 
-SDepthTexture* CNULLRenderer::CreateDepthSurface(int nWidth, int nHeight, bool bAA)
+SDepthTexture* CNULLRenderer::CreateDepthSurface(int nWidth, int nHeight, bool shaderResourceView)
 {
     return nullptr;
 }
@@ -500,6 +505,11 @@ IStereoRenderer* CNULLRenderer::GetIStereoRenderer()
     return m_pNULLStereoRenderer;
 }
 
+ITexture* CNULLRenderer::Create2DTexture(const char* name, int width, int height, int numMips, int flags, unsigned char* data, ETEX_Format format)
+{
+    return nullptr;
+}
+
 //=========================================================================================
 
 
@@ -507,6 +517,8 @@ ILog* iLog;
 IConsole* iConsole;
 ITimer* iTimer;
 ISystem* iSystem;
+
+StaticInstance<CNULLRenderer> g_nullRenderer;
 
 extern "C" DLL_EXPORT IRenderer * CreateCryRenderInterface(ISystem * pSystem)
 {
@@ -519,7 +531,7 @@ extern "C" DLL_EXPORT IRenderer * CreateCryRenderInterface(ISystem * pSystem)
     iTimer      = gEnv->pTimer;
     iSystem     = gEnv->pSystem;
 
-    CRenderer* rd = new CNULLRenderer();
+    CRenderer* rd = g_nullRenderer;
     if (rd)
     {
         rd->InitRenderer();
@@ -622,7 +634,7 @@ void CRenderer::BeginSpawningShadowGeneratingRendItemJobs(int nThreadID)
 {
 }
 
-void CRenderer::EndSpawningGeneratingRendItemJobs(int nThreadID)
+void CRenderer::EndSpawningGeneratingRendItemJobs()
 {
 }
 
@@ -640,7 +652,7 @@ ITexture* CNULLRenderer::EF_CreateCompositeTexture(int type, const char* szName,
     return CTextureManager::Instance()->GetNoTexture();
 }
 
-void CNULLRenderer::FX_ClearTarget(CTexture* pTex)
+void CNULLRenderer::FX_ClearTarget(ITexture* pTex)
 {
 }
 
@@ -676,7 +688,7 @@ bool CNULLRenderer::FX_PopRenderTarget(int nTarget)
     return true;
 }
 
-SDepthTexture* CNULLRenderer::FX_CreateDepthSurface(int nWidth, int nHeight, bool bAA)
+IDynTexture* CNULLRenderer::CreateDynTexture2(uint32 nWidth, uint32 nHeight, uint32 nTexFlags, const char* szSource, ETexPool eTexPool)
 {
     return nullptr;
 }

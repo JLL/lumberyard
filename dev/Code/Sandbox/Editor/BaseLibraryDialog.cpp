@@ -64,7 +64,11 @@ public:
 
     void drawDisplay(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect, const QString& text) const override
     {
+#if (QT_VERSION < QT_VERSION_CHECK(5, 11, 0))
         QStyleOptionViewItemV4 opt(option);
+#else
+        QStyleOptionViewItem opt(option);
+#endif
         opt.font.setBold(opt.state & QStyle::State_MouseOver);
         QItemDelegate::drawDisplay(painter, opt, rect, text);
     }
@@ -453,8 +457,8 @@ void CBaseLibraryDialog::InitLibraryToolbar()
 
     m_undoAction = m_pStdToolBar->getAction("actionStandardUndo");
     m_redoAction = m_pStdToolBar->getAction("actionStandardRedo");
-    connect(m_undoAction, &QAction::triggered, []() { GetIEditor()->GetUndoManager()->Undo(); });
-    connect(m_redoAction, &QAction::triggered, []() { GetIEditor()->GetUndoManager()->Redo(); });
+    connect(m_undoAction, &QAction::triggered, this, []() { GetIEditor()->GetUndoManager()->Undo(); });
+    connect(m_redoAction, &QAction::triggered, this, []() { GetIEditor()->GetUndoManager()->Redo(); });
     
     GetIEditor()->GetUndoManager()->AddListener(this);
 

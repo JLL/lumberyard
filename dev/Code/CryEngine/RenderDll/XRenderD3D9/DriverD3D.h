@@ -266,7 +266,11 @@ struct SStateDepth
     }
 } _ALIGN(16); \
 
+#if defined(AZ_PLATFORM_ANDROID)
+#define MAX_OCCL_QUERIES    256
+#else
 #define MAX_OCCL_QUERIES    4096
+#endif
 
 #define MAXFRAMECAPTURECALLBACK 1
 
@@ -296,6 +300,7 @@ AZStd::vector<D3D11_INPUT_ELEMENT_DESC> GetD3D11Declaration(const AZ::Vertex::Fo
 class CD3D9Renderer
     : public CRenderer
     , public IWindowMessageHandler
+    , AZ::RenderNotificationsBus::Handler
 {
     friend struct SPixFormat;
     friend class CD3DStereoRenderer;
@@ -476,7 +481,11 @@ protected:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_2
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -743,7 +752,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_3
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 
 
@@ -811,7 +824,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_4
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 
 private:
@@ -820,7 +837,11 @@ private:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_5
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
     #endif
 
     t_arrDeferredMeshIndBuff m_arrDeferredInds;
@@ -838,7 +859,11 @@ public:
 public:
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_6
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 
     /////////////////////////////////////////////////////////////////////////////
@@ -849,7 +874,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_7
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
     bool IsDeviceContextValid() { return m_DeviceContext != nullptr; }
 
@@ -860,7 +889,7 @@ public:
     DWORD GetBoundThreadID() const;
     void CheckContextThreadAccess() const;
 
-    void FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int nLightID, bool bClearPool = false);
+    bool FX_PrepareDepthMapsForLight(const SRenderLight& rLight, int nLightID, bool bClearPool = false);
     void EF_PrepareShadowGenRenderList();
     bool EF_PrepareShadowGenForLight(SRenderLight* pLight, int nLightID);
     bool PrepareShadowGenForFrustum(ShadowMapFrustum* pCurFrustum, SRenderLight* pLight, int nLightFrustumID = 0, int nLOD = 0);
@@ -888,6 +917,8 @@ public:
 
     void RT_ResetGlass();
 
+    void RT_PostLevelLoading() override;
+
     //=============================================================
     void SetCull(ECull eCull, bool bSkipMirrorCull = false) override { D3DSetCull(eCull, bSkipMirrorCull); }
 
@@ -903,6 +934,10 @@ public:
     bool IsFullscreen() { return m_bFullScreen; }
     bool IsSuperSamplingEnabled() { return m_numSSAASamples > 1; }
     bool IsNativeScalingEnabled() { return m_width != m_nativeWidth || m_height != m_nativeHeight; }
+    
+    int GetNativeWidth() const { return m_nativeWidth; }
+    int GetNativeHeight() const { return m_nativeHeight; }
+    D3DSurface* GetBackBuffer() { return m_pBackBuffer; }
 
 #if defined(SUPPORT_DEVICE_INFO)
     static HWND CreateWindowCallback();
@@ -971,6 +1006,7 @@ public:
     // Multithreading support
     virtual void RT_BeginFrame();
     virtual void RT_EndFrame();
+    virtual void RT_EndFrame(bool isLoading);
     virtual void RT_ForceSwapBuffers();
     virtual void RT_SwitchToNativeResolutionBackbuffer(bool resolveBackBuffer);
     virtual void RT_Init();
@@ -990,10 +1026,11 @@ public:
     virtual void RT_PrecacheDefaultShaders();
     virtual void RT_ReadFrameBuffer(unsigned char* pRGB, int nImageX, int nSizeX, int nSizeY, ERB_Type eRBType, bool bRGBA, int nScaledX, int nScaledY);
     // CRY DX12
-    virtual void RT_ClearTarget(CTexture* pTex, const ColorF& color);
+    virtual void RT_ClearTarget(ITexture* pTex, const ColorF& color);
     virtual void RT_ReleaseVBStream(void* pVB, int nStream);
     virtual void RT_ReleaseCB(void* pCB);
     virtual void RT_DrawDynVB(SVF_P3F_C4B_T2F* pBuf, uint16* pInds, uint32 nVerts, uint32 nInds, const PublicRenderPrimitiveType nPrimType);
+    virtual void RT_DrawDynVBUI(SVF_P2F_C4B_T2F_F4B* pBuf, uint16* pInds, uint32 nVerts, uint32 nInds, const PublicRenderPrimitiveType nPrimType);
     virtual void RT_DrawStringU(IFFont_RenderProxy* pFont, float x, float y, float z, const char* pStr, const bool asciiMultiLine, const STextDrawContext& ctx) const;
     virtual void RT_DrawLines(Vec3 v[], int nump, ColorF& col, int flags, float fGround);
     virtual void RT_Draw2dImage(float xpos, float ypos, float w, float h, CTexture* pTexture, float s0, float t0, float s1, float t1, float angle, DWORD col, float z);
@@ -1034,8 +1071,9 @@ public:
 
     virtual int  CreateRenderTarget(const char* name, int nWidth, int nHeight, const ColorF& clearColor, ETEX_Format eTF = eTF_R8G8B8A8);
     virtual bool DestroyRenderTarget(int nHandle);
+    virtual bool ResizeRenderTarget(int nHandle, int nWidth, int nHeight);
     virtual bool SetRenderTarget(int nHandle, SDepthTexture* pDepthSurf = nullptr);
-    virtual SDepthTexture* CreateDepthSurface(int nWidth, int nHeight, bool bAA);
+    virtual SDepthTexture* CreateDepthSurface(int nWidth, int nHeight, bool shaderResourceView = false);
     virtual void DestroyDepthSurface(SDepthTexture* pDepthSurf);
 
     virtual bool ChangeDisplay(unsigned int width, unsigned int height, unsigned int cbpp);
@@ -1116,6 +1154,7 @@ public:
     virtual void Graph(byte* g, int x, int y, int wdt, int hgt, int nC, int type, const char* text, ColorF& color, float fScale);
 
     virtual void DrawDynVB(SVF_P3F_C4B_T2F* pBuf, uint16* pInds, int nVerts, int nInds, const PublicRenderPrimitiveType nPrimType);
+    virtual void DrawDynUiPrimitiveList(DynUiPrimitiveList& primitives, int totalNumVertices, int totalNumIndices);
 
     virtual void PrintResourcesLeaks();
 
@@ -1253,9 +1292,10 @@ public:
     //misc
     virtual bool ScreenShot(const char* filename = NULL, int width = 0);
     virtual void UnloadOldTextures(){};
-    virtual void Set2DMode(uint32 orthoX, uint32 orthoY, TransformationMatrices& backupMatrices, float znear = -1e10f, float zfar = 1e10f);
 
+    virtual void Set2DMode(uint32 orthoX, uint32 orthoY, TransformationMatrices& backupMatrices, float znear = -1e10f, float zfar = 1e10f);
     virtual void Unset2DMode(const TransformationMatrices& restoringMatrices);
+    virtual void Set2DModeNonZeroTopLeft(float orthoLeft, float orthoTop, float orthoWidth, float orthoHeight, TransformationMatrices& backupMatrices, float znear = -1e10f, float zfar = 1e10f);
 
     virtual int ScreenToTexture(int nTexID);
 
@@ -1264,7 +1304,7 @@ public:
     //////////////////////////////////////////////////////////////////////
     // Replacement functions for the Font engine
     virtual   bool FontUploadTexture(class CFBitmap*, ETEX_Format eTF = eTF_R8G8B8A8);
-    virtual   int  FontCreateTexture(int Width, int Height, byte* pData, ETEX_Format eTF = eTF_R8G8B8A8, bool genMips = false);
+    virtual   int  FontCreateTexture(int Width, int Height, byte* pData, ETEX_Format eTF = eTF_R8G8B8A8, bool genMips = IRenderer::FontCreateTextureGenMipsDefaultValue, const char* textureName = nullptr);
     virtual   bool FontUpdateTexture(int nTexId, int X, int Y, int USize, int VSize, byte* pData);
     virtual   void FontReleaseTexture(class CFBitmap* pBmp);
     virtual void FontSetTexture(class CFBitmap*, int nFilterMode);
@@ -1293,14 +1333,18 @@ public:
     void FX_SetupForwardShadows(bool bUseShaderPermutations = false);
     void FX_SetupShadowsForTransp();
     void FX_SetupShadowsForFog();
-    bool FX_DrawToRenderTarget(CShader* pShader, CShaderResources* pRes, CRenderObject* pObj, SShaderTechnique* pTech, SHRenderTarget* pTarg, int nPreprType, CRendElementBase* pRE);
+    bool FX_DrawToRenderTarget(CShader* pShader, CShaderResources* pRes, CRenderObject* pObj, SShaderTechnique* pTech, SHRenderTarget* pTarg, int nPreprType, IRenderElement* pRE);
 
     void FX_DrawShader_Fur(CShader* ef, SShaderTechnique* pTech);
 
     // hdr src texture is optional, if not specified uses default hdr destination target
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_8
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -1311,7 +1355,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_9
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED
@@ -1340,9 +1388,11 @@ public:
     
     // Prepare the GPU-targets for next frame's CPU depth readback
     void FX_ZTargetReadBack();
+    void UpdateOcclusionDataForCPU();
 
     // Perform the CPU-side readback of the GPU target prepared in FX_ZTargetReadBack
     void FX_ZTargetReadBackOnCPU();
+    
 
     void FX_UpdateCharCBs();
     void* FX_AllocateCharInstCB(SSkinningData*, uint32);
@@ -1360,6 +1410,7 @@ public:
     bool FX_DeferredShadows(SRenderLight* pLight, int maskRTWidth, int maskRTHeight);
     void FX_DeferredShadowMaskGen(const TArray<uint32>& shadowPoolLights);
     void FX_MergeShadowMaps(ShadowMapFrustum* pDst, const ShadowMapFrustum* pSrc);
+    void FX_ClearShadowMaskTexture();
 
     void FX_DrawDebugPasses();
 
@@ -1381,22 +1432,32 @@ public:
     enum EGmemTransitions
     {
         eGT_PRE_Z,
+        eGT_POST_GBUFFER,
         eGT_POST_Z_PRE_DEFERRED,
         eGT_POST_DEFERRED_PRE_FORWARD,
-        eGT_PRE_WATER,
-        eGT_POST_WATER,
         eGT_POST_AW_TRANS_PRE_POSTFX
+    };
+
+    enum EGmemDepthStencilMode
+    {
+        eGDSM_RenderTarget,         // Values are written/read to/from a RT during the ZPass. Values are linearized when written to the RT.
+        eGDSM_DepthStencilBuffer,   // Values are written to the depth/stencil buffer and read using an extension. Values are linearized in the shader when fetching them. 
+        eGDSM_Texture,              // Values are resolved (and linearized) from the depth/stencil buffer to a texture with an extra pass.
+        eGDSM_Invalid
     };
 
     // Binds appropriate GMEM RTs depending on which section of the rendering pipeline we're in
     void FX_GmemTransition(const EGmemTransitions transition);
+
+    EGmemDepthStencilMode FX_GmemGetDepthStencilMode() const;
 
     // Values of this enum must match the intended values for cvar r_EnableGMEMPath
     enum EGmemPath
     {
         eGT_REGULAR_PATH = 0, // No GMEM path is enabled. Using regular render path.
         eGT_256bpp_PATH,
-        eGT_128bpp_PATH
+        eGT_128bpp_PATH,
+        eGT_PathCount // Must be last
     };
 
     enum EGmemPathState
@@ -1406,8 +1467,24 @@ public:
         eGT_FEATURES_UNSUPPORTED    // Some rendering features are no supported with the GMEM path defined in .cfg file (r_EnableGMEMPath)
     };
 
+    enum EGmemRendertargetType
+    {
+        eGT_Diffuse,
+        eGT_Specular,
+        eGT_Normals,
+        eGT_DepthStencil,
+        eGT_DiffuseLight,
+        eGT_SpecularLight,
+        eGT_VelocityBuffer,
+        eGT_RenderTargetCount // Must be last
+    };
+
+    static const int s_gmemRendertargetSlots[eGT_PathCount][eGT_RenderTargetCount];
+
     // Checks if GMEM path is enabled.
     EGmemPath FX_GetEnabledGmemPath(EGmemPathState* const gmemPathStateOut) const;
+
+    static const int s_gmemLargeRTCount = 5;
     /////////////////////////////////////////////////////////////////////
 
     bool FX_FogScene();
@@ -1533,7 +1610,7 @@ public:
     virtual long FX_SetVertexDeclaration(int StreamMask, const AZ::Vertex::Format& vertexFormat) override;
     inline bool FX_SetStreamFlags(SShaderPass* pPass)
     {
-        if (CV_r_usehwskinning && m_RP.m_pRE && (m_RP.m_pRE->m_Flags & FCEF_SKINNED))
+        if (CV_r_usehwskinning && m_RP.m_pRE && (m_RP.m_pRE->mfGetFlags() & FCEF_SKINNED))
         {
             m_RP.m_FlagsStreams_Decl |= VSM_HWSKIN;
             m_RP.m_FlagsStreams_Stream |= VSM_HWSKIN;
@@ -1545,7 +1622,11 @@ public:
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_10
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
     void FX_DrawBatches(CShader* pSh, SShaderPass* pPass);
     void FX_DrawBatchesSkinned(CShader* pSh, SShaderPass* pPass, SSkinningData* pSkinningData);
@@ -1570,9 +1651,9 @@ public:
      */
 
     void FX_ClearTarget(D3DSurface* pView, const ColorF& cClear, const uint numRects = 0, const RECT* pRects = nullptr);
-    void FX_ClearTarget(CTexture* pTex, const ColorF& cClear, const uint numRects, const RECT* pRects, const bool bOptional);
-    void FX_ClearTarget(CTexture* pTex, const ColorF& cClear);
-    void FX_ClearTarget(CTexture* pTex);
+    void FX_ClearTarget(ITexture* pTex, const ColorF& cClear, const uint numRects, const RECT* pRects, const bool bOptional);
+    void FX_ClearTarget(ITexture* pTex, const ColorF& cClear);
+    void FX_ClearTarget(ITexture* pTex);
 
     void FX_ClearTarget(D3DDepthSurface* pView, const int nFlags, const float cDepth, const uint8 cStencil, const uint numRects = 0, const RECT* pRects = nullptr);
     void FX_ClearTarget(SDepthTexture* pTex, const int nFlags, const float cDepth, const uint8 cStencil, const uint numRects, const RECT* pRects, const bool bOptional);
@@ -1636,14 +1717,13 @@ public:
     virtual bool FX_PushRenderTarget(int nTarget, CTexture* pTarget, SDepthTexture* pDepthTarget, int nCMSide = -1, bool bScreenVP = false, uint32 nTileCount = 1) override;
     virtual bool FX_RestoreRenderTarget(int nTarget) override;
     virtual bool FX_PopRenderTarget(int nTarget) override;
-    virtual SDepthTexture* FX_GetDepthSurface(int nWidth, int nHeight, bool bAA) override;
-    virtual SDepthTexture* FX_CreateDepthSurface(int nWidth, int nHeight, bool bAA) override;
-
+    virtual SDepthTexture* FX_GetDepthSurface(int nWidth, int nHeight, bool bAA, bool shaderResourceView = false) override;
     virtual SDepthTexture* GetDepthBufferOrig() override { return &m_DepthBufferOrig; }
     virtual uint32 GetBackBufferWidth() override { return m_backbufferWidth; }
     virtual uint32 GetBackBufferHeight() override { return m_backbufferHeight; }
 
     CTexture* FX_GetCurrentRenderTarget(int target);
+    D3DSurface* FX_GetCurrentRenderTargetSurface(int target) const;
 
     // CONFETTI BEGIN: David Srour
     // Following is used to assign load/store actions for the nTarget render target.
@@ -1671,6 +1751,7 @@ public:
     void FX_ZState(uint32& nState);
     void FX_HairState(uint32& nState, const SShaderPass* pPass);
     bool FX_SetFPMode();
+    bool FX_SetUIMode();
 
     ILINE uint32 PackBlendModeAndPassGroup()
     {
@@ -1912,17 +1993,16 @@ public:
 
     void EF_OnDemandVertexDeclaration(SOnDemandD3DVertexDeclaration& out, const int nStreamMask, const AZ::Vertex::Format& vertexformat, const bool bMorph, const bool bInstanced);
 
-    void AddVertexFormatToRenderPipeline(const AZ::Vertex::Format& vertexFormat);
     void EF_InitD3DVertexDeclarations();
     void EF_SetCameraInfo();
     void FX_SetObjectTransform(CRenderObject* obj, CShader* pSH, int nTransFlags);
-    bool FX_ObjectChange(CShader* Shader, CShaderResources* pRes, CRenderObject* pObject, CRendElementBase* pRE);
+    bool FX_ObjectChange(CShader* Shader, CShaderResources* pRes, CRenderObject* pObject, IRenderElement* pRE);
 
 private:
     bool ScreenShotInternal(const char* filename, int width);       //Helper method for Screenshot to reduce stack usage
     void UpdateNearestChange(int flags);                            //Helper method for FX_ObjectChange to avoid I-cache misses
     void HandleDefaultObject();                                     //Helper method for FX_ObjectChange to avoid I-cache misses
-    bool IsVelocityPassEnabled();                                   //Helper method to detect ifw we should enable the velocity pass. Its needed to MB and TAA
+    bool IsVelocityPassEnabled() const;                             //Helper method to detect if we should enable the velocity pass. Its needed to MB and TAA
     
     // Get pointers to current D3D11 shaders, set tessellation related RT flags and return true if tessellation is enabled for current object
     inline bool FX_SetTessellationShaders(CHWShader_D3D*& pCurHS, CHWShader_D3D*& pCurDS, const SShaderPass* pPass);
@@ -1979,7 +2059,10 @@ public:
     void FX_StartBatching();
     void FX_ProcessBatchesList(int nums, int nume, uint32 nBatchFilter, uint32 nBatchExcludeFilter = 0);
 
+    // Only do expensive DX12 resource set building for PC DX12
+#if defined(CRY_USE_DX12)
     void PerFrameValidateResourceSets();
+#endif
 
     void FX_ProcessZPassRenderLists();
     void FX_ProcessZPassRender_List(ERenderListID list, uint32 filter);
@@ -2046,6 +2129,11 @@ public:
         return m_pStereoRenderer;
     }
 
+    virtual ITexture* Create2DTexture(const char* name, int width, int height, int numMips, int flags, unsigned char* data, ETEX_Format format)
+    {
+        return CTexture::Create2DTexture(name, width, height, numMips, flags, data, format, format);
+    }
+
     CTiledShading& GetTiledShading()
     {
         return *m_pTiledShading;
@@ -2088,11 +2176,11 @@ public:
     {
         if (bEnabled)
         {
-            CSimpleGPUTimer::EnableTiming();
+            CD3DProfilingGPUTimer::EnableTiming();
         }
         else
         {
-            CSimpleGPUTimer::DisableTiming();
+            CD3DProfilingGPUTimer::DisableTiming();
         }
     }
 
@@ -2100,11 +2188,11 @@ public:
     {
         if (bAllow)
         {
-            CSimpleGPUTimer::AllowTiming();
+            CD3DProfilingGPUTimer::AllowTiming();
         }
         else
         {
-            CSimpleGPUTimer::DisallowTiming();
+            CD3DProfilingGPUTimer::DisallowTiming();
         }
     }
 
@@ -2120,13 +2208,15 @@ public:
 #endif
     }
 
-    virtual void LogShaderImportMiss(const CShader* pShader);
-
 #ifdef SUPPORT_HW_MOUSE_CURSOR
     virtual IHWMouseCursor* GetIHWMouseCursor();
 #endif
 
+    virtual void StartLoadtimePlayback(ILoadtimeCallback* pCallback);
+    virtual void StopLoadtimePlayback();
+
 private:
+    void OnRendererFreeResources(int flags) override;
     void HandleDisplayPropertyChanges();
 
     void FX_SetAlphaTestState(float alphaRef);
@@ -2184,6 +2274,8 @@ private:
     // For matching calls between EF_Init and FX_PipelineShutdown
     bool m_shaderPipelineInitialized = false;
 
+    bool m_clearShadowMaskTexture = false;
+
 #if defined(WIN32)
 public:
     // Called to inspect window messages sent to this renderer's windows
@@ -2193,6 +2285,10 @@ private:
     uint m_nConnectedMonitors; // The number of monitors currently connected to the system
     bool m_bDisplayChanged; // Dirty-flag set when the number of monitors in the system changes
 #endif
+
+    // Gmem variables
+private:
+    mutable EGmemDepthStencilMode m_gmemDepthStencilMode;
 };
 
 enum
@@ -2257,14 +2353,18 @@ inline D3DDeviceContext& CD3D9Renderer::GetDeviceContext()
 
 #if defined(AZ_RESTRICTED_PLATFORM)
 #define AZ_RESTRICTED_SECTION DRIVERD3D_H_SECTION_11
-#include AZ_RESTRICTED_FILE(DriverD3D_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/DriverD3D_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/DriverD3D_h_provo.inl"
+    #endif
 #endif
 
 #if defined(SUPPORT_DEVICE_INFO_USER_DISPLAY_OVERRIDES)
 void UserOverrideDisplayProperties(DXGI_MODE_DESC& desc);
 #endif
 
-extern CD3D9Renderer gcpRendD3D;
+extern StaticInstance<CD3D9Renderer> gcpRendD3D;
 
 //=========================================================================================
 

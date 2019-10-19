@@ -15,7 +15,9 @@
 
 #include <QButtonGroup>
 #include <QRadioButton>
+AZ_PUSH_DISABLE_WARNING(4251, "-Wunknown-warning-option") // 4251: 'QLayoutItem::align': class 'QFlags<Qt::AlignmentFlag>' needs to have dll-interface to be used by clients of class 'QLayoutItem'
 #include <QtWidgets/QHBoxLayout>
+AZ_POP_DISABLE_WARNING
 
 namespace AzToolsFramework
 {
@@ -113,6 +115,7 @@ namespace AzToolsFramework
         connect(newCtrl, &PropertyBoolRadioButtonsCtrl::valueChanged, this, [newCtrl]()
             {
                 PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::RequestWrite, newCtrl);
+                PropertyEditorGUIMessages::Bus::Broadcast(&PropertyEditorGUIMessages::Bus::Handler::OnEditingFinished, newCtrl);
             });
         return newCtrl;
     }

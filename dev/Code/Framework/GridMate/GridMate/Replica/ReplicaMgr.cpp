@@ -9,7 +9,6 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
-#ifndef AZ_UNITY_BUILD
 
 #include <GridMate/Carrier/Carrier.h>
 
@@ -27,6 +26,7 @@
 #include <GridMate/Serialize/CompressionMarshal.h>
 
 #include <AzCore/Debug/Profiler.h>
+#include <AzCore/Math/MathUtils.h>
 
 namespace GridMate
 {
@@ -122,14 +122,12 @@ namespace GridMate
         m_rm->OnPeerAccepted(this);
     }
     //-----------------------------------------------------------------------------
-    void ReplicaPeer::SendBuffer(Carrier* carrier, unsigned char commChannel)
+    void ReplicaPeer::SendBuffer(Carrier* carrier, unsigned char commChannel, const AZ::u32 replicaManagerTimer)
     {
         AZ_Assert(carrier, "No available net layer!");
 
         bool hasReliableData = m_reliableOutBuffer.Size() > m_reliableTimestamp.GetOffsetAfterMarker();
         bool hasUnreliableData = m_unreliableOutBuffer.Size() > m_unreliableTimestamp.GetOffsetAfterMarker();
-
-        unsigned int ts = carrier->GetTime();
 
         if (ReplicaDebug::g_SendDbgHeartbeat)
         {
@@ -146,7 +144,7 @@ namespace GridMate
 
         if (hasReliableData)
         {
-            m_reliableTimestamp = ts;
+            m_reliableTimestamp = replicaManagerTimer;
 #ifdef REPLICA_MSG_CRC_CHECK
             m_reliableMsgCrc = AZ::Crc32(m_reliableOutBuffer.Get() + m_reliableMsgCrc.GetOffsetAfterMarker(), m_reliableOutBuffer.Size() - m_reliableMsgCrc.GetOffsetAfterMarker());
 #endif
@@ -159,13 +157,13 @@ namespace GridMate
 
         if (hasUnreliableData)
         {
-            m_unreliableTimestamp = ts;
+            m_unreliableTimestamp = replicaManagerTimer;
 #ifdef REPLICA_MSG_CRC_CHECK
             m_unreliableMsgCrc = AZ::Crc32(m_unreliableOutBuffer.Get() + m_unreliableMsgCrc.GetOffsetAfterMarker(), m_unreliableOutBuffer.Size() - m_unreliableMsgCrc.GetOffsetAfterMarker());
 #endif
             if (m_unreliableOutBuffer.Size() > carrier->GetMessageMTU())
             {
-                AZ_TracePrintf("GridMate", "SendBuffer [%s]: Unreliable replica update exceeds MTU (size=%u, MTU=%u), this will cause fragmentation!\n", carrier->ConnectionToAddress(GetConnectionId()).c_str(), static_cast<unsigned int>(m_unreliableOutBuffer.Size()), carrier->GetMessageMTU());
+                AZ_TracePrintf("GridMate", "SendBuffer [0x%p]: Unreliable replica update exceeds MTU (size=%u, MTU=%u), forcing reliable for this send.\n", GetConnectionId(), static_cast<unsigned int>(m_unreliableOutBuffer.Size()), carrier->GetMessageMTU());
             }
 
             auto callback = AZStd::make_unique<PeerAckCallbacks>((m_unreliableCallbacks));
@@ -257,6 +255,7 @@ namespace GridMate
         , m_marshalingTasks(&m_tasksAllocator)
         , m_updateTasks(&m_tasksAllocator)
         , m_peerUpdateTasks(&m_tasksAllocator)
+        , m_latchedCarrierTime(0)
         , m_autoBroadcast(true)
     { }
     //-----------------------------------------------------------------------------
@@ -277,13 +276,18 @@ namespace GridMate
         m_nextSendTime = m_lastCheckTime + AZStd::chrono::milliseconds(m_cfg.m_targetSendTimeMS);
         m_receiveBuffer.resize(m_cfg.m_carrier->GetMessageMTU());
 
-        m_currentFrameTime.m_localTime = m_currentFrameTime.m_realTime = m_cfg.m_carrier->GetTime();
+        m_currentFrameTime.m_localTime = m_currentFrameTime.m_realTime = m_latchedCarrierTime = m_cfg.m_carrier->GetTime();
 
         AZ_Assert(m_cfg.m_myPeerId, "myPeerId has to be a non-zero globally unique id, it is used to identify this peer on the network.");
         m_self.m_peerId = m_cfg.m_myPeerId;
 
         m_sessionInfo = CreateReplicaChunk<ReplicaInternal::SessionInfo>(this);
         m_flags = Rm_Initialized;
+
+        if (IsUsingFixedTimeStep())
+        {
+            m_fixedTimeStep.SetTargetUpdateRate(m_cfg.m_targetFixedTimeStepsPerSecond);
+        }
 
         {
             AZ::PoolAllocator::Descriptor allocDesc;
@@ -696,6 +700,17 @@ namespace GridMate
         // Return the time context cached at the beginning of the frame (during Unmarshal)
         return m_currentFrameTime;
     }
+    AZ::u32 ReplicaManager::GetTimeForNetworkTimestamp() const
+    {
+        if (IsUsingFixedTimeStep())
+        {
+            return static_cast<AZ::u32>(m_fixedTimeStep.GetCurrentTime());
+        }
+        else
+        {
+            return m_latchedCarrierTime;
+        }
+    }
     //-----------------------------------------------------------------------------
     void ReplicaManager::SetSendTimeInterval(unsigned int sendTimeMs)
     {
@@ -735,8 +750,14 @@ namespace GridMate
     //-----------------------------------------------------------------------------
     void ReplicaManager::SetLocalLagAmt(unsigned int ms)
     {
-        AZ_Assert(IsSyncHost(), "SetLocalLagAmt() can only be called on the replication host!");
-        m_sessionInfo->m_localLagAmt.Set(ms);
+        if (!IsSyncHost())
+        {
+            AZ_Error("ReplicaManager", false, "SetLocalLagAmt() can only be called on the replication host!");
+        }
+        else
+        {
+            m_sessionInfo->m_localLagAmt.Set(ms);
+        }
     }
     //-----------------------------------------------------------------------------
     void ReplicaManager::UnregisterReplica(const ReplicaPtr& pObj, const ReplicaContext& rc)
@@ -857,7 +878,12 @@ namespace GridMate
             return;
         }
         m_flags |= Rm_Processing;
+        m_latchedCarrierTime = m_cfg.m_carrier->GetTime();
 
+        if (IsUsingFixedTimeStep())
+        {
+            m_fixedTimeStep.UpdateFixedTimeStep();
+        }
         m_updateTasks.Run(this);
         m_peerUpdateTasks.Run(this);
 
@@ -956,7 +982,7 @@ namespace GridMate
                 ReplicaPeer* pRemote = *iPeer;
                 if (!pRemote->IsOrphan())
                 {
-                    pRemote->SendBuffer(m_cfg.m_carrier, m_cfg.m_commChannel);
+                    pRemote->SendBuffer(m_cfg.m_carrier, m_cfg.m_commChannel, GetTimeForNetworkTimestamp());
                 }
                 pRemote->SetNew(false);
             }
@@ -1254,7 +1280,7 @@ namespace GridMate
                 }
                 else
                 {
-                    //AZ_TracePrintf("GridMate", "Skipping unmarshal for 0x%x because we can't identify the correct peer.\n", pObj->GetRepId());
+                    //AZ_TracePrintf("GridMate", "Skipping unmarshal for 0x%x because we can't identify the correct peer.\n", pObj->GetRepId());      
                 }
 
                 break;     // TODO: should we process incoming data for orphaned replicas?
@@ -1401,7 +1427,7 @@ namespace GridMate
         {
             peer->GetReliableOutBuffer().Write(ReserveIdBlock(peer->m_peerId));
         }
-        peer->SendBuffer(m_cfg.m_carrier, m_cfg.m_commChannel);
+        peer->SendBuffer(m_cfg.m_carrier, m_cfg.m_commChannel, GetTimeForNetworkTimestamp());
     }
     //-----------------------------------------------------------------------------
     IGridMate* ReplicaManager::GetGridMate() const
@@ -1707,5 +1733,3 @@ namespace GridMate
     }
     //-----------------------------------------------------------------------------
 } // namespace GridMate
-
-#endif // #ifndef AZ_UNITY_BUILD

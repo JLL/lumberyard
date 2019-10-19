@@ -55,18 +55,20 @@ namespace RenderCapabilities
     
     bool SupportsDepthClipping()
     {
-#if defined(AZ_PLATFORM_APPLE_OSX)
-        return NCryMetal::s_isOsxMinVersion10_11;
+        //https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1516267-setdepthclipmode?language=objc
+#if defined(AZ_PLATFORM_MAC)
+        //There is a bug with the drivers where setDepthClipMode: MTLDepthClipModeClamp does not work. 
+        //Until that is fixed we are simulating this behavior in the vertex shader
+        //return NCryMetal::s_isOsxMinVersion10_11;
+        return false;
 #else
+        //There is a bug with the drivers where setDepthClipMode: MTLDepthClipModeClamp does not work. 
+        //Until that is fixed we are simulating this behavior in the vertex shader
+        //return NCryMetal::s_isIosMinVersion11_0;
         return false;
 #endif
     }
     
-    void CacheMinOSVersionInfo()
-    {
-        NCryMetal::CacheMinOSVersionInfo();
-    }
-
     bool SupportsDualSourceBlending()
     {
         // Metal supports dual source blending for devices running OXS >= 10.12 or iOS >= 11.0
@@ -79,7 +81,7 @@ namespace RenderCapabilities
     
     bool SupportsRenderTargets(int numRTs)
     {
-#if defined(AZ_PLATFORM_APPLE_OSX)
+#if defined(AZ_PLATFORM_MAC)
         return true;
 #else
         if (numRTs <= 4)
@@ -98,6 +100,11 @@ namespace RenderCapabilities
     }
 	
 	bool SupportsStructuredBuffer(EShaderStage stage)
+    {
+        return true;
+    }
+
+    bool SupportsIndependentBlending()
     {
         return true;
     }

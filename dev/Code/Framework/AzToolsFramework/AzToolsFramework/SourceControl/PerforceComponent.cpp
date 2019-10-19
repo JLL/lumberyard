@@ -10,7 +10,7 @@
 *
 */
 
-#include "stdafx.h"
+#include "StdAfx.h"
 
 #include <AzToolsFramework/SourceControl/PerforceComponent.h>
 
@@ -109,8 +109,7 @@ namespace AzToolsFramework
         if (AZ::SerializeContext* serializeContext = azrtti_cast<AZ::SerializeContext*>(context))
         {
             serializeContext->Class<PerforceComponent, AZ::Component>()
-                ->SerializerForEmptyClass()
-            ;
+                ;
 
             if (AZ::EditContext* editContext = serializeContext->GetEditContext())
             {
@@ -290,7 +289,7 @@ namespace AzToolsFramework
 
         if (s_perforceConn->m_command.IsOpenByCurrentUser())
         {
-            newInfo.m_flags |= SCF_OpenByUser;
+            newInfo.m_flags |= SCF_Tracked | SCF_OpenByUser;
             if (s_perforceConn->m_command.CurrentActionIsAdd())
             {
                 newInfo.m_flags |= SCF_PendingAdd;
@@ -623,6 +622,12 @@ namespace AzToolsFramework
             return true;
         }
 
+        if (AZ::IO::SystemFile::IsWritable(filePath) && !s_perforceConn->m_command.IsOpenByCurrentUser())
+        {
+            AZ_TracePrintf(SCC_WINDOW, "Perforce - Unable to get latest on file '%s' (File is not checked out but has changes locally.  Please reconcile offline work!)\n", filePath);
+            return false;
+        }
+
         if (s_perforceConn->m_command.GetHeadRevision() == s_perforceConn->m_command.GetHaveRevision())
         {
             return true;
@@ -822,7 +827,7 @@ namespace AzToolsFramework
         return true;
     }
 
-    void PerforceComponent::TestConnectionTrust(bool attemptResolve)
+    void PerforceComponent::VerifyP4PortIsSet()
     {
         AZ_Assert(m_ProcessThreadID != AZStd::thread::id(), "The perforce worker thread has not started.");
         AZ_Assert(AZStd::this_thread::get_id() == m_ProcessThreadID, "You may only call this function from the perforce worker thread.");
@@ -831,6 +836,30 @@ namespace AzToolsFramework
         {
             s_perforceConn = aznew PerforceConnection();
         }
+
+        if (m_testConnection)
+        {
+            bool p4PortSet = false;
+            if (ExecuteAndParseSet(nullptr, nullptr))
+            {
+                p4PortSet = !s_perforceConn->m_command.GetOutputValue("P4PORT").empty();
+            }
+
+            if (!p4PortSet)
+            {
+                // Disable any further connection status testing
+                AZ_WarningOnce(SCC_WINDOW, false, "Perforce - P4PORT (server address) is not set, Perforce not available!\n");
+                m_testTrust = false;
+                m_testConnection = false;
+                m_validConnection = false;
+            }
+        }
+    }
+
+    void PerforceComponent::TestConnectionTrust(bool attemptResolve)
+    {
+        AZ_Assert(m_ProcessThreadID != AZStd::thread::id(), "The perforce worker thread has not started.");
+        AZ_Assert(AZStd::this_thread::get_id() == m_ProcessThreadID, "You may only call this function from the perforce worker thread.");
 
         m_trustedKey = IsTrustKeyValid();
         if (!m_trustedKey && attemptResolve)
@@ -853,7 +882,7 @@ namespace AzToolsFramework
                     if (AZ::TickBus::IsFunctionQueuing())
                     {
                         // Push to the main thread for convenience.
-                        AZStd::function<void()> trustNotify = [this, fingerprint]()
+                        AZStd::function<void()> trustNotify = [fingerprint]()
                         {
                             SourceControlNotificationBus::Broadcast(&SourceControlNotificationBus::Events::RequestTrust, fingerprint.c_str());
                         };
@@ -992,16 +1021,16 @@ namespace AzToolsFramework
                 AZ_TracePrintf(SCC_WINDOW, "Perforce connected");
                 break;
             }
-        }
 
-        if (AZ::TickBus::IsFunctionQueuing())
-        {
-            // Push to the main thread for convenience.
-            AZStd::function<void()> connectivityNotify = [currentState]()
+            if (AZ::TickBus::IsFunctionQueuing())
             {
-                SourceControlNotificationBus::Broadcast(&SourceControlNotificationBus::Events::ConnectivityStateChanged, currentState);
-            };
-            AZ::TickBus::QueueFunction(connectivityNotify);
+                // Push to the main thread for convenience.
+                AZStd::function<void()> connectivityNotify = [currentState]()
+                {
+                    SourceControlNotificationBus::Broadcast(&SourceControlNotificationBus::Events::ConnectivityStateChanged, currentState);
+                };
+                AZ::TickBus::QueueFunction(connectivityNotify);
+            }
         }
 
         return true;
@@ -1114,6 +1143,9 @@ namespace AzToolsFramework
             {
                 break; // abandon ship!
             }
+
+            // Verify P4PORT is set before running any commands
+            VerifyP4PortIsSet();
 
             // wait for trust issues to be resolved
             if (!UpdateTrust())

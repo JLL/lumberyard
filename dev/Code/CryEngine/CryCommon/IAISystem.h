@@ -15,7 +15,7 @@
 
 #include "SerializeFwd.h"
 #include <IAIRecorder.h> // <> required for Interfuscator
-#include <IJobManager.h> // <> required for Interfuscator
+#include <ITimer.h>
 #include <IPhysics.h>
 #include <CryFixedArray.h>
 #include <IEntity.h>
@@ -1040,6 +1040,26 @@ struct IAISystem
     // </interfuscator:shuffle>
 };
 
+class CryLegacyAISystemRequests
+    : public AZ::EBusTraits
+{
+public:
+    //////////////////////////////////////////////////////////////////////////
+    // EBusTraits overrides
+    static const AZ::EBusHandlerPolicy HandlerPolicy = AZ::EBusHandlerPolicy::Single;
+    static const AZ::EBusAddressPolicy AddressPolicy = AZ::EBusAddressPolicy::Single;
+    //////////////////////////////////////////////////////////////////////////
+
+    //////////////////////////////////////////////////////////////////////////
+    // Creates and initializes a legacy IAISystem instance
+    virtual IAISystem* InitAISystem() = 0;
+
+    //////////////////////////////////////////////////////////////////////////
+    // Shuts down and destroys a legacy IAISystem instance
+    virtual void ShutdownAISystem(IAISystem* aiSystem) = 0;
+};
+using CryLegacyAISystemRequestBus = AZ::EBus<CryLegacyAISystemRequests>;
+
 #if defined(ENABLE_LW_PROFILERS)
 class CAILightProfileSection
 {
@@ -1051,7 +1071,11 @@ public:
 
     // need to force as no_inline, else on some implementations (if cstr and dstr are inlined), we get totaly wrong numbers
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(IAISystem_h, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/IAISystem_h_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/IAISystem_h_provo.inl"
+    #endif
 	#endif
     NO_INLINE ~CAILightProfileSection()
     {

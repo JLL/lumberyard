@@ -47,7 +47,7 @@ void CRenderPipelineProfiler::BeginFrame()
 
     if (m_recordData)
     {
-        CSimpleGPUTimer::EnableTiming();
+        CD3DProfilingGPUTimer::EnableTiming();
     }
 
     uint32 nextSectionsFrameIdx = (m_sectionsFrameIdx + 1) % NumSectionsFrames;
@@ -180,7 +180,7 @@ void CRenderPipelineProfiler::BeginSection(const char* name, uint32 eProfileLabe
 
     section.recLevel = m_stack.size() + 1;
     section.numDIPs = gcpRendD3D->GetCurrentNumberOfDrawCalls();
-    section.numPolys = gcpRendD3D->RT_GetPolyCount();
+    section.numPolys = gcpRendD3D->GetPolyCount();
     section.startTimeCPU = gEnv->pTimer->GetAsyncTime();
     section.gpuTimer.Start(name);
 
@@ -209,7 +209,7 @@ void CRenderPipelineProfiler::EndSection(const char* name)
         RPProfilerSection& section = sectionsFrame.m_sections[m_stack.back()];
 
         section.numDIPs = gcpRendD3D->GetCurrentNumberOfDrawCalls() - section.numDIPs;
-        section.numPolys = gcpRendD3D->RT_GetPolyCount() - section.numPolys;
+        section.numPolys = gcpRendD3D->GetPolyCount() - section.numPolys;
         section.endTimeCPU = gEnv->pTimer->GetAsyncTime();
         section.gpuTimer.Stop();
         if (strncmp(section.name, name, 30) != 0)
@@ -632,7 +632,7 @@ namespace DebugUI
     void DrawText(float x, float y, float size, ColorF color, const char* format, va_list args)
     {
         char buffer[512];
-        if (vsnprintf(buffer, sizeof(buffer), format, args) == -1)
+        if (azvsnprintf(buffer, sizeof(buffer), format, args) == -1)
         {
             buffer[sizeof(buffer) - 1] = 0;
         }
@@ -729,7 +729,11 @@ void CRenderPipelineProfiler::DisplayBasicStats()
         float mainThreadTime = max(m_threadTimings.frameTime - m_threadTimings.waitForRender, 0.0f);
         float renderThreadTime = max(m_threadTimings.renderTime - m_threadTimings.waitForGPU, 0.0f);
 #if defined(AZ_RESTRICTED_PLATFORM)
-#include AZ_RESTRICTED_FILE(PipelineProfiler_cpp, AZ_RESTRICTED_PLATFORM)
+    #if defined(AZ_PLATFORM_XENIA)
+        #include "Xenia/PipelineProfiler_cpp_xenia.inl"
+    #elif defined(AZ_PLATFORM_PROVO)
+        #include "Provo/PipelineProfiler_cpp_provo.inl"
+    #endif
 #endif
 #if defined(AZ_RESTRICTED_SECTION_IMPLEMENTED)
 #undef AZ_RESTRICTED_SECTION_IMPLEMENTED

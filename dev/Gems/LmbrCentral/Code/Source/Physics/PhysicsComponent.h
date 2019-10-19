@@ -105,6 +105,9 @@ namespace LmbrCentral
         float GetWaterResistance() override;
         void SetWaterResistance(float waterResistance) override;
         AZ::Aabb GetAabb() override;
+        bool IsAwake() const override;
+        void ForceAwake() override;
+        void ForceAsleep() override;
         ////////////////////////////////////////////////////////////////////////
 
         ////////////////////////////////////////////////////////////////////////

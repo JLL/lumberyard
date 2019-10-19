@@ -14,6 +14,9 @@
 #include <AzQtComponents/AzQtComponentsAPI.h>
 #include <QStyle>
 #include <QSlider>
+#include <QColor>
+#include <QRect>
+#include <QPoint>
 
 /**
 * AUTOMOC
@@ -21,6 +24,7 @@
 
 
 class QSettings;
+class QStyleOptionSlider;
 
 namespace AzQtComponents
 {
@@ -37,11 +41,58 @@ namespace AzQtComponents
         : public QWidget
     {
         Q_OBJECT
+        Q_PROPERTY(Qt::Orientation orientation READ orientation WRITE setOrientation)
+        Q_PROPERTY(int toolTipOffsetX READ toolTipOffsetX WRITE setToolTipOffsetX)
+        Q_PROPERTY(int toolTipOffsetY READ toolTipOffsetY WRITE setToolTipOffsetY)
 
     public:
 
+        struct Border
+        {
+            int thickness;
+            QColor color;
+            qreal radius;
+        };
+
+        struct GradientSliderConfig
+        {
+            int thickness;
+            int length;
+            Border grooveBorder;
+            Border handleBorder;
+        };
+
+        struct SliderConfig
+        {
+            struct HandleConfig
+            {
+                QColor color;
+                QColor colorDisabled;
+
+                int size;
+                int disabledMargin;
+            };
+
+            struct GrooveConfig
+            {
+                QColor color;
+                QColor colorHovered;
+
+                int width;
+                int midMarkerHeight;
+            };
+
+            HandleConfig handle;
+            GrooveConfig grove;
+        };
+
         struct Config
         {
+            GradientSliderConfig gradientSlider;
+            SliderConfig slider;
+
+            QPoint horizontalToolTipOffset;
+            QPoint verticalToolTipOffset;
         };
 
         Slider(QWidget* parent = nullptr);
@@ -52,6 +103,18 @@ namespace AzQtComponents
 
         void setTracking(bool enable);
         bool hasTracking() const;
+
+        void setOrientation(Qt::Orientation orientation);
+        Qt::Orientation orientation() const;
+
+        QPoint toolTipOffset() const { return m_toolTipOffset; }
+        void setToolTipOffset(const QPoint& toolTipOffset) { m_toolTipOffset = toolTipOffset; }
+
+        int toolTipOffsetX() const { return m_toolTipOffset.x(); }
+        void setToolTipOffsetX(int toolTipOffsetX) { m_toolTipOffset.setX(toolTipOffsetX); }
+
+        int toolTipOffsetY() const { return m_toolTipOffset.y(); }
+        void setToolTipOffsetY(int toolTipOffsetY) { m_toolTipOffset.setY(toolTipOffsetY); }
 
         /*!
          * Apply custom formatting to the hover tooltip.
@@ -64,10 +127,15 @@ namespace AzQtComponents
          */
         void setToolTipFormatting(QString prefix, QString postFix);
 
-        // TODO:
-        // custom painting
-        // tooltip indicating value
-        // mid-point version
+        /*!
+         * Shows a hover tooltip with the right positioning on top of a slider
+         */
+        static void showHoverToolTip(QString toolTipText, const QPoint& globalPosition, QSlider* slider, QWidget* toolTipParentWidget, int width, int height, const QPoint& toolTipOffset);
+
+        /*!
+         * Returns the value along the slider (between min and max) corresponding to the input pos
+         */
+        static int valueFromPosition(QSlider* slider, const QPoint& pos, int width, int height, int bottom);
 
         /*!
          * Applies the Mid Point styling to a Slider.
@@ -92,7 +160,7 @@ namespace AzQtComponents
         void actionTriggered(int action);
 
     protected:
-        virtual QString hoverValueText() const = 0;
+        virtual QString hoverValueText(int sliderValue) const = 0;
 
         bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -103,9 +171,28 @@ namespace AzQtComponents
     private:
         friend class Style;
 
+        static int sliderThickness(const Style* style, const QStyleOption* option, const QWidget* widget, const Config& config);
+        static int sliderLength(const Style* style, const QStyleOption* option, const QWidget* widget, const Config& config);
+
+        static QRect sliderHandleRect(const Style* style, const QStyleOptionSlider* option, const QWidget* widget, const Config& config);
+        static QRect sliderGrooveRect(const Style* style, const QStyleOptionSlider* option, const QWidget* widget, const Config& config);
+
         // methods used by Style
         static bool polish(Style* style, QWidget* widget, const Config& config);
         static bool drawSlider(const Style* style, const QStyleOption* option, QPainter* painter, const QWidget* widget, const Config& config);
+
+        static void drawMidPointMarker(QPainter* painter, const Config& config, Qt::Orientation orientation, const QRect& grooveRect, const QColor& midMarkerColor);
+        static void drawMidPointGrooveHighlights(QPainter* painter, const Config& config, const QRect& grooveRect, const QRect& handleRect, const QColor& handleColor, bool isHovered, const QPoint& mousePos, Qt::Orientation orientation);
+        static void drawGrooveHighlights(QPainter* painter, const Slider::Config& config, const QRect& grooveRect, const QRect& handleRect, const QColor& handleColor, bool isHovered, const QPoint& mousePos, Qt::Orientation orientation);
+        static void drawHandle(const QStyleOption* option, QPainter* painter, const Config& config, const QRect& handleRect, const QColor& handleColor);
+
+        static int styleHintAbsoluteSetButtons();
+
+        int valueFromPos(const QPoint &pos) const;
+
+        QPoint m_mousePos;
+
+        QPoint m_toolTipOffset;
     };
 
 
@@ -141,7 +228,7 @@ namespace AzQtComponents
         void rangeChanged(int min, int max);
 
     protected:
-        QString hoverValueText() const override;
+        QString hoverValueText(int sliderValue) const override;
     };
 
 
@@ -156,6 +243,7 @@ namespace AzQtComponents
         Q_PROPERTY(double maximum READ maximum WRITE setMaximum)
         Q_PROPERTY(int numSteps READ numSteps WRITE setNumSteps)
         Q_PROPERTY(double value READ value WRITE setValue NOTIFY valueChanged USER true)
+        Q_PROPERTY(int decimals READ decimals WRITE setDecimals);
 
     public:
         SliderDouble(QWidget* parent = nullptr);
@@ -175,18 +263,22 @@ namespace AzQtComponents
 
         void setRange(double min, double max, int numSteps = 100);
 
+        int decimals() const { return m_decimals; }
+        void setDecimals(int decimals) { m_decimals = decimals; }
+
     Q_SIGNALS:
         void valueChanged(double value);
 
         void rangeChanged(double min, double max, int numSteps);
 
     protected:
-        QString hoverValueText() const override;
+        QString hoverValueText(int sliderValue) const override;
 
     private:
         double m_minimum = 0.0;
         double m_maximum = 1.0;
         int m_numSteps = 100;
+        int m_decimals;
     };
 
 } // namespace AzQtComponents

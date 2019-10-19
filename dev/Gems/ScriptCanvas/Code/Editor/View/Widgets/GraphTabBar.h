@@ -17,6 +17,7 @@
 
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/Asset/AssetCommon.h>
+
 #include <ScriptCanvas/Bus/DocumentContextBus.h>
 
 class QGraphicsView;
@@ -50,6 +51,8 @@ namespace ScriptCanvasEditor
             bool SelectTab(const AZ::Data::AssetId& assetId);
 
             int FindTab(const AZ::Data::AssetId& assetId) const;
+            AZ::Data::AssetId FindAssetId(int tabIndex);
+
             //! Removes all tabs from the bar
             void RemoveAllBars();
 
@@ -61,6 +64,10 @@ namespace ScriptCanvasEditor
             // Closes a tab and cleans up Metadata
             void CloseTab(int index);
 
+            void OnContextMenu(const QPoint& point);
+
+            void mouseReleaseEvent(QMouseEvent* event) override;
+
         Q_SIGNALS:
             void TabInserted(int index);
             void TabRemoved(int index);
@@ -68,6 +75,11 @@ namespace ScriptCanvasEditor
             // This allows handling of the close tab button being pressed different than the actual closing of the tab.
             // Pressing the close tab button will prompt the user to save file in tab if it is modified
             void TabCloseNoButton(int index); 
+
+            void SaveTab(int index);
+            void CloseAllTabs();
+            void CloseAllTabsBut(int index);
+            void CopyPathToClipboard(int index);
 
         protected:
             void tabInserted(int index) override;

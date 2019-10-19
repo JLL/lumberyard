@@ -11,12 +11,15 @@
 */
 #pragma once
 
+#include <QRect>
+
 #include <AzCore/EBus/EBus.h>
 #include <AzCore/Component/EntityId.h>
 #include <AzCore/Math/Vector2.h>
 
 #include <GraphCanvas/Editor/EditorTypes.h>
 
+class QImage;
 class QResizeEvent;
 class QWheelEvent;
 
@@ -31,8 +34,6 @@ namespace GraphCanvas
         float m_anchorPointX = 0.0f;
         float m_anchorPointY = 0.0f;
     };
-
-    typedef AZ::EntityId ViewId;
 
     class GraphCanvasGraphicsView;
 
@@ -59,14 +60,17 @@ namespace GraphCanvas
 
         virtual AZ::Vector2 GetViewSceneCenter() const = 0;
 
+        //! Map a scene coordinate to the global coordinate space
+        virtual AZ::Vector2 MapToGlobal(const AZ::Vector2& scenePoint) = 0;
+
         //! Map a view coordinate to the scene coordinate space.
-        virtual AZ::Vector2 MapToScene(const AZ::Vector2& /*viewPoint*/) = 0;
+        virtual AZ::Vector2 MapToScene(const AZ::Vector2& viewPoint) = 0;
 
         //! Map a scene coordinate to the view coordinate space.
-        virtual AZ::Vector2 MapFromScene(const AZ::Vector2& /*scenePoint*/) = 0;
+        virtual AZ::Vector2 MapFromScene(const AZ::Vector2& scenePoint) = 0;
 
         //! Sets the View params of the view
-        virtual void SetViewParams(const ViewParams& /*viewParams*/) = 0;
+        virtual void SetViewParams(const ViewParams& viewParams) = 0;
 
         //! Changes the scene to display only the view area.
         virtual void DisplayArea(const QRectF& viewArea) = 0;
@@ -77,6 +81,17 @@ namespace GraphCanvas
 
         //! Move the view center to posInSceneCoordinates
         virtual void CenterOn(const QPointF& posInSceneCoordinates) = 0;
+
+        //! Move the view center to the start of the currently selected chain of nodes.
+        //! Will do nothing if there are multiple chains selected.
+        virtual void CenterOnStartOfChain() = 0;
+
+        //! Move the view center to the end of the currently select chain of nodes.
+        //! Will do nothing if there are multiple chains selects.
+        virtual void CenterOnEndOfChain() = 0;
+
+        //! Will adjust the view params so that the currently selected nodes are entirely in view
+        virtual void CenterOnSelection() = 0;
 
         //! Get, in scene coordinates, the QRectF of the area covered by the entire content of the scene
         virtual QRectF GetCompleteArea() = 0;
@@ -89,6 +104,47 @@ namespace GraphCanvas
 
         //! Get the view as a CanvasGraphicsView.
         virtual GraphCanvasGraphicsView* AsGraphicsView() = 0;
+
+        //! Renders out the entire graph into a newly created QPixmap.
+        virtual QImage* CreateImageOfGraph() = 0;
+
+        //! Renders out the specified area of the graph into a newly created QPixmap.
+        virtual QImage* CreateImageOfGraphArea(QRectF area) = 0;
+
+        //! Returns the 'zoom' aka scale of the GraphCanvasGraphicsView object
+        virtual qreal GetZoomLevel() const = 0;
+
+        //! Takes a screenshot of the current selection inside of the graph.
+        //  or the entire graph is there is no selection.
+        virtual void ScreenshotSelection() = 0;
+
+        //! Enables the current selection inside of the graph.
+        virtual void EnableSelection() = 0;
+
+        //! Disable the current selection inside of the graph.
+        virtual void DisableSelection() = 0;
+
+        //! Zooms the graph in order to display all of the nodes currently on the graph.
+        virtual void ShowEntireGraph() = 0;
+
+        //! Zooms in the current graph by a single step
+        virtual void ZoomIn() = 0;
+
+        //! Zooms out the current graph by a single step
+        virtual void ZoomOut() = 0;
+
+        //! Pans the displayed scene by the specific amount in the specified time.
+        virtual void PanSceneBy(QPointF repositioning, AZStd::chrono::milliseconds duration) = 0;
+
+        //! Pans the display scene to the specificed point in the specified time.
+        virtual void PanSceneTo(QPointF scenePoint, AZStd::chrono::milliseconds duration) = 0;
+
+        //! Toast Notifications
+        virtual void HideToastNotification(const ToastId& toastId) = 0;
+
+        virtual ToastId ShowToastNotification(const ToastConfiguration& toastConfiguration) = 0;
+        virtual ToastId ShowToastAtCursor(const ToastConfiguration& toastConfiguration) = 0;
+        virtual ToastId ShowToastAtPoint(const QPoint& screenPosition, const QPointF& anchorPoint, const ToastConfiguration&) = 0;
     };
 
     using ViewRequestBus = AZ::EBus<ViewRequests>;
@@ -111,6 +167,9 @@ namespace GraphCanvas
 
         //! The view was centered on an area using CenterOnArea()
         virtual void OnViewCenteredOnArea() {}
+
+        //! The view was zoomed
+        virtual void OnZoomChanged(qreal zoomLevel) {};
     };
 
     using ViewNotificationBus = AZ::EBus<ViewNotifications>;

@@ -46,7 +46,7 @@ namespace LmbrCentral
                     "Sphere Shape", "The Sphere Shape component creates a sphere around the associated entity")
                     ->ClassElement(AZ::Edit::ClassElements::EditorData, "")
                         ->Attribute(AZ::Edit::Attributes::Category, "Shape")
-                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Sphere_Shape.png")
+                        ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/Sphere_Shape.svg")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Sphere_Shape.png")
                         ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -58,6 +58,13 @@ namespace LmbrCentral
                         ;
             }
         }
+    }
+
+    void EditorSphereShapeComponent::Init()
+    {
+        EditorBaseShapeComponent::Init();
+
+        SetShapeComponentConfig(&m_sphereShape.ModifyShapeComponent());
     }
 
     void EditorSphereShapeComponent::Activate()
@@ -74,15 +81,17 @@ namespace LmbrCentral
         EditorBaseShapeComponent::Deactivate();
     }
 
-    void EditorSphereShapeComponent::DisplayEntity(bool& handled)
+    void EditorSphereShapeComponent::DisplayEntityViewport(
+        const AzFramework::ViewportInfo& viewportInfo,
+        AzFramework::DebugDisplayRequests& debugDisplay)
     {
-        DisplayShape(handled,
-            [this]() { return CanDraw(); },
-            [this](AzFramework::EntityDebugDisplayRequests* displayContext)
+        DisplayShape(
+            debugDisplay, [this]() { return CanDraw(); },
+            [this](AzFramework::DebugDisplayRequests& debugDisplay)
             {
                 DrawSphereShape(
                     { m_shapeColor, m_shapeWireColor, m_displayFilled },
-                    m_sphereShape.GetSphereConfiguration(), *displayContext);
+                    m_sphereShape.GetSphereConfiguration(), debugDisplay);
             },
             m_sphereShape.GetCurrentTransform());
     }

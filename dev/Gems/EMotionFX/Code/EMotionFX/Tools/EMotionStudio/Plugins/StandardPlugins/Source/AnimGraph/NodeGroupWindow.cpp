@@ -10,7 +10,8 @@
 *
 */
 
-// include required headers
+#include <AzCore/Math/Color.h>
+#include <AzQtComponents/Components/FilteredSearchWidget.h>
 #include "NodeGroupWindow.h"
 #include "AnimGraphPlugin.h"
 #include "GraphNode.h"
@@ -21,6 +22,7 @@
 #include <QVBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QHeaderView>
 #include <QCheckBox>
 #include <QMessageBox>
@@ -40,6 +42,8 @@
 #include <EMotionFX/Source/AnimGraphInstance.h>
 #include <EMotionFX/CommandSystem/Source/AnimGraphParameterCommands.h>
 #include <EMotionFX/CommandSystem/Source/AnimGraphNodeGroupCommands.h>
+
+#include <AzQtComponents/Utilities/Conversions.h>
 
 
 namespace EMStudio
@@ -65,7 +69,7 @@ namespace EMStudio
 
         // add the line edit
         mLineEdit = new QLineEdit();
-        connect(mLineEdit, SIGNAL(textEdited(const QString&)), this, SLOT(TextEdited(const QString&)));
+        connect(mLineEdit, &QLineEdit::textEdited, this, &NodeGroupRenameWindow::TextEdited);
         layout->addWidget(mLineEdit);
 
         // set the current name and select all
@@ -86,8 +90,8 @@ namespace EMStudio
         buttonLayout->addWidget(cancelButton);
 
         // connect the buttons
-        connect(mOKButton, SIGNAL(clicked()), this, SLOT(Accepted()));
-        connect(cancelButton, SIGNAL(clicked()), this, SLOT(reject()));
+        connect(mOKButton, &QPushButton::clicked, this, &NodeGroupRenameWindow::Accepted);
+        connect(cancelButton, &QPushButton::clicked, this, &NodeGroupRenameWindow::reject);
 
         // set the new layout
         layout->addLayout(buttonLayout);
@@ -170,17 +174,17 @@ namespace EMStudio
         // add the add button
         mAddButton = new QPushButton();
         EMStudioManager::MakeTransparentButton(mAddButton, "/Images/Icons/Plus.png", "Add new node group");
-        connect(mAddButton, SIGNAL(clicked()), this, SLOT(OnAddNodeGroup()));
+        connect(mAddButton, &QPushButton::clicked, this, &NodeGroupWindow::OnAddNodeGroup);
 
         // add the remove button
         mRemoveButton = new QPushButton();
         EMStudioManager::MakeTransparentButton(mRemoveButton, "/Images/Icons/Minus.png", "Remove selected node group");
-        connect(mRemoveButton, SIGNAL(clicked()), this, SLOT(OnRemoveSelectedGroups()));
+        connect(mRemoveButton, &QPushButton::clicked, this, &NodeGroupWindow::OnRemoveSelectedGroups);
 
         // add the clear button
         mClearButton = new QPushButton();
         EMStudioManager::MakeTransparentButton(mClearButton, "/Images/Icons/Clear.png", "Remove all node groups");
-        connect(mClearButton, SIGNAL(clicked()), this, SLOT(OnClearNodeGroups()));
+        connect(mClearButton, &QPushButton::clicked, this, &NodeGroupWindow::OnClearNodeGroups);
 
         // add the buttons to add, remove and clear the motions
         QHBoxLayout* buttonsLayout = new QHBoxLayout();
@@ -194,15 +198,9 @@ namespace EMStudio
         spacerWidget->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
         buttonsLayout->addWidget(spacerWidget);
 
-        mFindWidget = new MysticQt::SearchButton(this, MysticQt::GetMysticQt()->FindIcon("Images/Icons/SearchClearButton.png"));
-        connect(mFindWidget->GetSearchEdit(), SIGNAL(textChanged(const QString&)), this, SLOT(SearchStringChanged(const QString&)));
-
-        QHBoxLayout* searchLayout = new QHBoxLayout();
-        searchLayout->addWidget(new QLabel("Find:"), 0, Qt::AlignRight);
-        searchLayout->addWidget(mFindWidget);
-        searchLayout->setSpacing(6);
-
-        buttonsLayout->addLayout(searchLayout);
+        m_searchWidget = new AzQtComponents::FilteredSearchWidget(this);
+        connect(m_searchWidget, &AzQtComponents::FilteredSearchWidget::TextFilterChanged, this, &NodeGroupWindow::OnTextFilterChanged);
+        buttonsLayout->addWidget(m_searchWidget);
 
         // create the table widget
         mTableWidget = new QTableWidget();
@@ -212,7 +210,7 @@ namespace EMStudio
         mTableWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
         mTableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
         mTableWidget->setContextMenuPolicy(Qt::DefaultContextMenu);
-        connect(mTableWidget, SIGNAL(itemSelectionChanged()), this, SLOT(UpdateInterface()));
+        connect(mTableWidget, &QTableWidget::itemSelectionChanged, this, &NodeGroupWindow::UpdateInterface);
         //connect( mTableWidget, SIGNAL(cellChanged(int, int)), this, SLOT(OnCellChanged(int, int)) );
         //connect( mTableWidget, SIGNAL(itemChanged(QTableWidgetItem*)), this, SLOT(OnNameEdited(QTableWidgetItem*)) );
 
@@ -344,11 +342,12 @@ namespace EMStudio
             EMotionFX::AnimGraphNodeGroup* nodeGroup = animGraph->GetNodeGroup(i);
 
             // check if the node group is selected
-            const bool itemSelected = selectedNodeGroups.Find(nodeGroup->GetNameString()) != MCORE_INVALIDINDEX32;
+            const bool itemSelected = selectedNodeGroups.Find(nodeGroup->GetNameString().c_str()) != MCORE_INVALIDINDEX32;
 
             // get the color and convert to Qt color
-            const MCore::RGBAColor& color = nodeGroup->GetColor();
-            const QColor backgroundColor(color.r * 100, color.g * 100, color.b * 100, 50);
+            AZ::Color color;
+            color.FromU32(nodeGroup->GetColor());
+            const QColor backgroundColor(static_cast<float>(color.GetR()) * 100, static_cast<float>(color.GetG()) * 100, static_cast<float>(color.GetB()) * 100, 50);
 
             // create the visibility checkbox item
             QTableWidgetItem* visibilityCheckboxItem = new QTableWidgetItem();
@@ -362,7 +361,7 @@ namespace EMStudio
             visibilityCheckbox->setStyleSheet("background: transparent; padding-left: 5px; max-width: 13px;");
             visibilityCheckbox->setChecked(nodeGroup->GetIsVisible());
             mWidgetTable.Add(WidgetLookup(visibilityCheckbox, i));
-            connect(visibilityCheckbox, SIGNAL(stateChanged(int)), this, SLOT(OnIsVisible(int)));
+            connect(visibilityCheckbox, &QCheckBox::stateChanged, this, &NodeGroupWindow::OnIsVisible);
 
             // add the visibility checkbox in the table
             mTableWidget->setCellWidget(i, 0, visibilityCheckbox);
@@ -375,7 +374,7 @@ namespace EMStudio
             mTableWidget->setItem(i, 1, colorItem);
 
             // create the color widget
-            MysticQt::ColorLabel* colorWidget = new MysticQt::ColorLabel(nodeGroup->GetColor(), nodeGroup);
+            MysticQt::ColorLabel* colorWidget = new MysticQt::ColorLabel(MCore::RGBAColor(static_cast<float>(color.GetR()), static_cast<float>(color.GetG()), static_cast<float>(color.GetB()), static_cast<float>(color.GetA())), nodeGroup);
 
             QWidget* colorLayoutWidget = new QWidget();
             colorLayoutWidget->setObjectName("colorlayoutWidget");
@@ -388,7 +387,7 @@ namespace EMStudio
             colorLayoutWidget->setLayout(colorLayout);
 
             mWidgetTable.Add(WidgetLookup(colorWidget, i));
-            connect(colorWidget, SIGNAL(ColorChangeEvent(const QColor&)), this, SLOT(OnColorChanged(const QColor&)));
+            connect(colorWidget, static_cast<void (MysticQt::ColorLabel::*)(const QColor&)>(&MysticQt::ColorLabel::ColorChangeEvent), this, &NodeGroupWindow::OnColorChanged);
 
             // add the color label in the table
             mTableWidget->setCellWidget(i, 1, colorLayoutWidget);
@@ -407,7 +406,7 @@ namespace EMStudio
             mTableWidget->setRowHeight(i, 21);
 
             // check if the current item contains the find text
-            if (QString(nodeGroup->GetName()).contains(mFindWidget->GetSearchEdit()->text(), Qt::CaseInsensitive))
+            if (QString(nodeGroup->GetName()).contains(m_searchWidgetText.c_str(), Qt::CaseInsensitive))
             {
                 mTableWidget->showRow(i);
             }
@@ -426,103 +425,6 @@ namespace EMStudio
         // update the interface
         UpdateInterface();
     }
-
-
-    /*void NodeGroupWindow::OnCellChanged(int row, int column)
-    {
-        // only do the name ones
-        if (column != 2)
-            return;
-
-        QTableWidgetItem* item = mTableWidget->item(row, column);
-        const QString newName = item->text();
-
-        // get the anim graph
-        EMotionFX::AnimGraph* animGraph = mPlugin->GetActiveAnimGraph();
-        if (animGraph == nullptr)
-            return;
-
-        // get a pointer to the node group
-        const uint32 groupIndex = row;
-        AnimGraphNodeGroup* nodeGroup = animGraph->GetNodeGroup( groupIndex );
-
-        AZStd::string mcoreName;
-        FromQtString(newName, &mcoreName);
-
-        // if the name didn't change do nothing
-        if (nodeGroup->GetNameString().CheckIfIsEqual( mcoreName.c_str() ))
-            return;
-
-        // validate the name
-        if (ValidateName( nodeGroup, mcoreName.c_str() ) == false)
-        {
-            MCore::LogWarning("The name '%s' is either invalid or already in use by another node group, please type in another name.", mcoreName.c_str());
-            item->setText( nodeGroup->GetName() );
-        }
-        else    // trigger the rename
-        {
-            // build the command string
-            AZStd::string commandString;
-            commandString = AZStd::string::format("AnimGraphAdjustNodeGroup -animGraphID %i -name \"%s\" -newName \"%s\"", animGraph->GetID(), nodeGroup->GetName(), mcoreName.c_str());
-
-            // execute the command
-            AZStd::string commandResult;
-            if (GetCommandManager()->ExecuteCommand(commandString.c_str(), commandResult) == false)
-            {
-                if (commandResult.GetIsEmpty() == false)
-                    MCore::LogError( commandResult.c_str() );
-            }
-        }
-    }*/
-
-
-    // validate a given node group name
-    /*bool NodeGroupWindow::ValidateName(AnimGraphNodeGroup* nodeGroup, const char* newName) const
-    {
-        // get the anim graph
-        EMotionFX::AnimGraph* animGraph = mPlugin->GetActiveAnimGraph();
-        if (animGraph == nullptr)
-            return false;
-
-        AnimGraphNodeGroup* newNodeGroup = animGraph->FindNodeGroupByName(newName);
-
-        // check if the node already exists in the active anim graph
-        if (newNodeGroup && nodeGroup != newNodeGroup)   // it already exists
-            return false;
-
-        // empty node name is not allowed!
-        if (strcmp(newName, "") == 0)
-            return false;
-
-        return true;
-    }*/
-
-
-    /*void NodeGroupWindow::OnNameEdited(QTableWidgetItem* item)
-    {
-        MCORE_UNUSED(item);
-        return;
-
-        assert( sender()->inherits("QLineEdit") );
-        QLineEdit* widget = qobject_cast<QLineEdit*>( sender() );
-
-        // get the anim graph
-        EMotionFX::AnimGraph* animGraph = mPlugin->GetActiveAnimGraph();
-        if (animGraph == nullptr)
-            return;
-
-        // get the node group index by checking the widget lookup table
-        const uint32 groupIndex = FindGroupIndexByWidget( sender() );
-        assert( groupIndex != MCORE_INVALIDINDEX32 );
-
-        // get a pointer to the node group
-        AnimGraphNodeGroup* nodeGroup = animGraph->GetNodeGroup( groupIndex );
-
-        if (ValidateName( nodeGroup, text.toAscii().data() ) == false)
-            GetManager()->SetWidgetAsInvalidInput( widget );
-        else
-            widget->setStyleSheet("");
-    }*/
 
 
     // add a new node group
@@ -789,9 +691,9 @@ namespace EMStudio
     }
 
 
-    void NodeGroupWindow::SearchStringChanged(const QString& text)
+    void NodeGroupWindow::OnTextFilterChanged(const QString& text)
     {
-        MCORE_UNUSED(text);
+        FromQtString(text, &m_searchWidgetText);
         Init();
     }
 
@@ -857,14 +759,14 @@ namespace EMStudio
         {
             QAction* removeAction = menu.addAction("Remove Selected Node Groups");
             removeAction->setIcon(MysticQt::GetMysticQt()->FindIcon("/Images/Icons/Minus.png"));
-            connect(removeAction, SIGNAL(triggered()), this, SLOT(OnRemoveSelectedGroups()));
+            connect(removeAction, &QAction::triggered, this, &NodeGroupWindow::OnRemoveSelectedGroups);
         }
 
         // add rename if only one selected
         if (rowIndices.GetLength() == 1)
         {
             QAction* renameAction = menu.addAction("Rename Selected Node Group");
-            connect(renameAction, SIGNAL(triggered()), this, SLOT(OnRenameSelectedNodeGroup()));
+            connect(renameAction, &QAction::triggered, this, &NodeGroupWindow::OnRenameSelectedNodeGroup);
         }
 
         // show the menu at the given position

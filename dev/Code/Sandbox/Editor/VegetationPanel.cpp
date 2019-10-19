@@ -44,6 +44,8 @@
 #include <AzToolsFramework/AssetBrowser/AssetBrowserEntry.h>
 #include <AzToolsFramework/AssetBrowser/Search/Filter.h>
 
+#include <LmbrCentral/Rendering/MeshAsset.h>
+
 #include <ui_VegetationPanel.h>
 
 #include "QtUtil.h"
@@ -757,7 +759,11 @@ void CVegetationPanel::UpdateUI()
     if (bPainting)
     {
         m_ui->paintObjectsButton->setChecked(true);
+#if AZ_TRAIT_OS_PLATFORM_APPLE
+        GetIEditor()->SetStatusText(tr("Hold ⌘ to Remove Vegetation"));
+#else
         GetIEditor()->SetStatusText(tr("Hold Ctrl to Remove Vegetation"));
+#endif
     }
     else
     {
@@ -1186,7 +1192,7 @@ void CVegetationPanel::OnAdd()
     ////////////////////////////////////////////////////////////////////////
     // Add another static object to the list
     ////////////////////////////////////////////////////////////////////////
-    AssetSelectionModel selection = AssetSelectionModel::AssetGroupSelection("Geometry", true);
+    AssetSelectionModel selection = AssetSelectionModel::AssetTypeSelection(azrtti_typeid<LmbrCentral::MeshAsset>(), true);
     AzToolsFramework::EditorRequests::Bus::Broadcast(&AzToolsFramework::EditorRequests::BrowseForAssets, selection);
     if (!selection.IsValid())
     {
@@ -1209,7 +1215,6 @@ void CVegetationPanel::OnAdd()
         selectionResults->GetChildrenRecursively<ProductAssetBrowserEntry>(products);
         for (const ProductAssetBrowserEntry*  product : products)
         {
-           
             // Create a new static object settings class
             CVegetationObject* obj = m_vegetationMap->CreateObject();
             if (!obj)

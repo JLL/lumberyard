@@ -3,9 +3,9 @@
 * its licensors.
 *
 * For complete copyright and license terms please see the LICENSE at the root of this
-* distribution(the "License").All use of this software is governed by the License,
-* or, if provided, by the license below or the license accompanying this file.Do not
-* remove or modify any license notices.This file is distributed on an "AS IS" BASIS,
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 *
 */
@@ -39,5 +39,10 @@ private:
     CGaussianBlurPass  m_passBlur1;
     CGaussianBlurPass  m_passBlur2;
 
+#if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
+    // render to texture supports multiple cameras
+    AZStd::unordered_map<AZ::EntityId, Matrix44> m_prevViewProj[MAX_GPU_NUM];
+#else
     Matrix44           m_prevViewProj[MAX_GPU_NUM];
+#endif // if AZ_RENDER_TO_TEXTURE_GEM_ENABLED
 };
